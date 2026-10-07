@@ -1,0 +1,174 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default-deny global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.uid != null;
+    }
+
+    function isRegisteredProvider() {
+      return isSignedIn() && exists(/databases/$(database)/documents/providers/$(request.auth.uid));
+    }
+
+    function getProviderData() {
+      return get(/databases/$(database)/documents/providers/$(request.auth.uid)).data;
+    }
+
+    // =================== Users Collection ===================
+    // Private user accounts: anonymous or authenticated users can read, create, and update only their own record
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false; // Blanket user list queries prohibited to protect user privacy
+      allow create: if isSignedIn()
+                    && isValidId(userId)
+                    && request.auth.uid == userId
+                    && incoming().id == userId
+                    && incoming().createdAt is string;
+      allow update: if isSignedIn()
+                    && isValidId(userId)
+                    && request.auth.uid == userId
+                    && incoming().id == userId;
+      allow delete: if false;
+    }
+
+    // =================== Providers Collection ===================
+    // Provider Profiles:
+    // - Each provider document ID is strictly bound to the user's Auth UID (/providers/{request.auth.uid})
+    // - Providers can only create and manage their own profile
+    // - Listing is scoped to user's own profile or targeted directory queries (preventing blanket scraping)
+    match /providers/{providerId} {
+      allow get: if isSignedIn() && isValidId(providerId);
+      allow list: if false;
+      allow create: if isSignedIn()
+                    && isValidId(providerId)
+                    && providerId == request.auth.uid
+                    && incoming().id == request.auth.uid
+                    && incoming().userId == request.auth.uid
+                    && incoming().city is string && incoming().city.size() <= 50
+                    && incoming().category is string && incoming().category.size() <= 100
+                    && incoming().name is string && incoming().name.size() > 0 && incoming().name.size() <= 100;
+      allow update: if isSignedIn()
+                    && isValidId(providerId)
+                    && providerId == request.auth.uid
+                    && existing().userId == request.auth.uid
+                    && incoming().userId == request.auth.uid
+                    && incoming().id == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // =================== Requests Collection ===================
+    // Customer Requests:
+    // - Customer can only read and list their own requests (customerId == request.auth.uid)
+    // - Provider can only read and list requests matching their registered provider profile cityId + categoryId
+    // - Blanket or unconstrained requests queries are strictly forbidden
+    match /requests/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn()
+                    && isValidId(requestId)
+                    && incoming().id == requestId
+                    && incoming().customerId == request.auth.uid
+                    && incoming().city is string && incoming().city.size() <= 50
+                    && incoming().category is string && incoming().category.size() <= 100
+                    && ('service' in incoming()) && incoming()['service'] is string && incoming()['service'].size() <= 150
+                    && incoming().status in ['OPEN', 'PROVIDER_SELECTED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'NEW', 'MATCHING', 'OFFERS_RECEIVED', 'ACCEPTED', 'REJECTED'];
+      allow update: if isSignedIn() && isValidId(requestId) && (
+        // Customer updating their own request
+        (existing().customerId == request.auth.uid && incoming().customerId == existing().customerId && incoming().id == existing().id) ||
+        // Registered provider submitting offer or updating job status (in-progress, completed)
+        (isRegisteredProvider() &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+         incoming().status in ['OFFERS_RECEIVED', 'OPEN', 'IN_PROGRESS', 'COMPLETED'] &&
+         (existing().status in ['OPEN', 'MATCHING', 'NEW', 'OFFERS_RECEIVED', 'PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS']))
+      );
+      allow delete: if false;
+    }
+
+    // =================== Offers Collection ===================
+    // Provider Offers:
+    // - Providers can create, update, and list only their own offers (providerUserId == request.auth.uid)
+    // - Customers can only read and list offers belonging to requests they own (requests.customerId == request.auth.uid)
+    // - Blanket or unconstrained offers queries are strictly forbidden
+    match /offers/{offerId} {
+      allow get: if isSignedIn() && isValidId(offerId) && (
+        resource.data.providerUserId == request.auth.uid ||
+        (resource.data.requestId is string &&
+         get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.customerId == request.auth.uid)
+      );
+      allow list: if isSignedIn() && (
+        // Provider querying their own offers (where('providerUserId', '==', request.auth.uid))
+        resource.data.providerUserId == request.auth.uid ||
+        // Customer querying offers for their own request (where('requestId', '==', filter.requestId))
+        (resource.data.requestId is string &&
+         get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.customerId == request.auth.uid)
+      );
+      allow create: if isSignedIn()
+                    && isValidId(offerId)
+                    && incoming().id == offerId
+                    && incoming().requestId is string && incoming().requestId.size() <= 64
+                    && incoming().providerUserId == request.auth.uid
+                    && incoming().price is string && incoming().price.size() <= 50
+                    && incoming().status in ['PENDING', 'ACCEPTED', 'REJECTED'];
+      allow update: if isSignedIn() && isValidId(offerId) && (
+        // Provider updating their own offer
+        (existing().providerUserId == request.auth.uid &&
+         incoming().providerUserId == existing().providerUserId &&
+         incoming().requestId == existing().requestId &&
+         incoming().id == existing().id) ||
+        // Customer accepting or rejecting an offer on their request
+        (get(/databases/$(database)/documents/requests/$(existing().requestId)).data.customerId == request.auth.uid &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+         incoming().status in ['ACCEPTED', 'REJECTED'])
+      );
+      allow delete: if false;
+    }
+
+    // =================== Reviews Collection ===================
+    // Customer Reviews & Ratings for Completed Jobs:
+    // - Document ID is strictly bound to requestId (/reviews/{requestId}) to prevent duplicate reviews
+    // - Server-side verified against actual completed request & accepted offer
+    // - Reviewer must be the customer who created the completed request
+    // - Reviewed provider must be the one whose offer was accepted
+    // - Provider cannot review themselves
+    // - Rating must be an integer from 1 to 5
+    // - Updates and deletes are strictly prohibited
+    match /reviews/{reviewId} {
+      allow get, list: if isSignedIn();
+      allow create: if isSignedIn()
+                    && isValidId(reviewId)
+                    && reviewId == incoming().requestId
+                    && incoming().id == reviewId
+                    && incoming().customerId == request.auth.uid
+                    && incoming().providerId is string
+                    && incoming().providerId != request.auth.uid
+                    && incoming().rating is int && incoming().rating >= 1 && incoming().rating <= 5
+                    && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status == 'COMPLETED'
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == request.auth.uid
+                    && (get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId is string)
+                    && exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId))
+                    && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.status == 'ACCEPTED'
+                    && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerId == incoming().providerId;
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

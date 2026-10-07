@@ -1,0 +1,6 @@
+{
+  "name": "КЕРЕК",
+  "description": "Сервис моментального поиска услуг и товаров в Казахстане по описанию своими словами.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
