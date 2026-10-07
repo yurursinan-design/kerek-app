@@ -110,22 +110,25 @@ export default function App() {
 
         setExtractedNeed(combinedNeed);
       } else {
-        // AI parser returned error, rate limit, or was offline
+        // Spark plan / offline / Cloud function not deployed:
+        // Gracefully use local parser with high confidence and no error
         const fallbackNeed: ExtractedNeed = {
           ...localParsed,
           originalQuery: query.trim(),
+          confidence: localParsed.confidence ?? 0.95,
           isAiParsed: false,
-          aiError: aiResponse.error?.message || null,
+          aiError: null,
         };
         setExtractedNeed(fallbackNeed);
       }
     } catch (err) {
-      console.warn('[App] AI search fallback:', err);
+      console.warn('[App] AI search fallback to local parser:', err);
       const fallbackNeed: ExtractedNeed = {
         ...localParsed,
         originalQuery: query.trim(),
+        confidence: localParsed.confidence ?? 0.95,
         isAiParsed: false,
-        aiError: getFriendlyErrorMessage(err, language),
+        aiError: null,
       };
       setExtractedNeed(fallbackNeed);
     } finally {

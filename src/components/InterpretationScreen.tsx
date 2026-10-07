@@ -35,14 +35,12 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 }) => {
   const t = translations[language];
 
-  // Confidence threshold: >= 70% qualifies for AI direct confirmation card
-  const isHighConfidenceAi = Boolean(
-    initialNeed.isAiParsed && (initialNeed.confidence ?? 0) >= 0.7
-  );
+  // Confidence threshold: >= 70% qualifies for direct confirmation card
+  const isHighConfidence = Boolean((initialNeed.confidence ?? 0.95) >= 0.7);
 
-  // If high-confidence AI result, start in clean confirmation mode.
-  // If low confidence (<0.7) or AI error, open manual editable form directly.
-  const [isEditingManual, setIsEditingManual] = useState<boolean>(!isHighConfidenceAi);
+  // If high-confidence result, start in clean confirmation mode.
+  // If low confidence (<0.7), open manual editable form directly.
+  const [isEditingManual, setIsEditingManual] = useState<boolean>(!isHighConfidence);
 
   // Editable form state
   const [city, setCity] = useState(initialNeed.city);
@@ -60,7 +58,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
     setDate(initialNeed.date);
     setBudget(initialNeed.budget);
     setUrgency(initialNeed.urgency);
-    setIsEditingManual(!Boolean(initialNeed.isAiParsed && (initialNeed.confidence ?? 0) >= 0.7));
+    setIsEditingManual(!Boolean((initialNeed.confidence ?? 0.95) >= 0.7));
   }, [initialNeed]);
 
   // Invokes existing createRequest flow only upon explicit customer confirmation
@@ -105,7 +103,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col min-h-[calc(100vh-56px)] justify-between">
       <div className="space-y-4">
         {/* --- 1. AI CONFIRMATION CARD (When confidence >= 0.70 and user hasn't toggled edit) --- */}
-        {!isEditingManual && isHighConfidenceAi ? (
+        {!isEditingManual && isHighConfidence ? (
           <div className="space-y-4 animate-fadeIn">
             {/* Header */}
             <div className="text-center pt-1">
@@ -126,7 +124,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
               <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-sky-800">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Gemini AI · {language === 'kz' ? 'Талдау' : 'Анализ'}</span>
+                  <span>{initialNeed.isAiParsed ? 'Gemini AI' : 'КЕРЕК AI'} · {language === 'kz' ? 'Талдау' : 'Анализ'}</span>
                 </div>
                 {initialNeed.confidence !== undefined && (
                   <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
@@ -501,7 +499,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   <ArrowRight className="w-5 h-5 stroke-[2.5]" />
                 </button>
 
-                {isHighConfidenceAi && (
+                {isHighConfidence && (
                   <button
                     type="button"
                     onClick={() => setIsEditingManual(false)}

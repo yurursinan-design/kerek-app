@@ -208,10 +208,14 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
     detectedCategory =
       lang === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники';
     if (/кір жуғыш|стирал|çamaşır|camasir/i.test(normalized)) {
+      const isSamsung = /samsung/i.test(normalized);
+      const isLg = /lg/i.test(normalized);
+      const isBosch = /bosch/i.test(normalized);
+      const brand = isSamsung ? 'Samsung ' : isLg ? 'LG ' : isBosch ? 'Bosch ' : '';
       detectedService =
         lang === 'kz'
-          ? 'Кір жуғыш машина жөндеу'
-          : 'Ремонт стиральных машин';
+          ? (brand ? `${brand}кір жуғыш машинасын жөндеу` : 'Кір жуғыш машина жөндеу')
+          : (brand ? `Ремонт стиральной машины ${brand}`.trim() : 'Ремонт стиральных машин');
     } else if (/тоңазытқыш|холодильник|buzdolabı/i.test(normalized)) {
       detectedService =
         lang === 'kz' ? 'Тоңазытқыш жөндеу' : 'Ремонт холодильника';
@@ -277,6 +281,8 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
       query.length > 40 ? query.slice(0, 37) + '...' : query;
   }
 
+  const confidence = foundCity && detectedCategory ? 0.95 : detectedCategory ? 0.85 : 0.65;
+
   return {
     city: detectedCity,
     cityId: normalizeCityId(detectedCity),
@@ -287,5 +293,7 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
     budget: detectedBudget,
     urgency: detectedUrgency,
     originalQuery: query,
+    confidence,
+    isAiParsed: false,
   };
 }
