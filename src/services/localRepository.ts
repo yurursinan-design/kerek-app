@@ -1,11 +1,25 @@
 import {
+  Appointment,
+  AppNotification,
+  ChatAttachment,
+  ChatMessage,
+  Conversation,
+  getAppointmentId,
+  getConversationId,
+  isValidWorkStatusTransition,
   normalizeRequestStatus,
   Provider,
   ProviderOffer,
+  RequestAttachment,
+  RequestLocation,
   RequestStatus,
   Review,
+  sanitizeFileName,
   ServiceRequest,
   User,
+  validateChatAttachment,
+  validateRequestAttachment,
+  WorkStatus,
 } from '../types';
 import {
   OfferFilter,
@@ -33,6 +47,10 @@ const STORAGE_KEY_CURRENT_PROVIDER = 'kerek_provider_profile_v1';
 const STORAGE_KEY_REQUESTS = 'kerek_requests_v1';
 const STORAGE_KEY_OFFERS = 'kerek_offers_v1';
 const STORAGE_KEY_REVIEWS = 'kerek_reviews_v1';
+const STORAGE_KEY_CONVERSATIONS = 'kerek_conversations_v1';
+const STORAGE_KEY_MESSAGES_PREFIX = 'kerek_messages_v1_';
+const STORAGE_KEY_NOTIFICATIONS = 'kerek_notifications_v1';
+const STORAGE_KEY_APPOINTMENTS = 'kerek_appointments_v1';
 const STORAGE_KEY_COUNTER = 'kerek_req_counter_v1';
 
 const memoryStore = new Map<string, string>();
@@ -76,17 +94,32 @@ export function generateUUID(): string {
   return 'usr-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 9);
 }
 
-// Get or initialize persistent local user ID (synchronizes with Firebase Auth UID when available)
+// Get or initialize persistent local user ID (synchronizes strictly with Firebase Auth UID as canonical identity)
 export function getCurrentUserId(): string {
   try {
     if (auth?.currentUser?.uid) {
+      const canonicalUid = auth.currentUser.uid;
       try {
-        safeStorage.setItem(STORAGE_KEY_USER_ID, auth.currentUser.uid);
+        safeStorage.setItem(STORAGE_KEY_USER_ID, canonicalUid);
       } catch {}
-      return auth.currentUser.uid;
+      return canonicalUid;
     }
 
     let uid = safeStorage.getItem(STORAGE_KEY_USER_ID);
+    // If a non-legacy UID exists in storage, return it
+    if (uid && !uid.startsWith('usr-') && !uid.startsWith('temp-')) {
+      return uid;
+    }
+
+    // Re-check auth currentUser if safeStorage contains legacy usr-* or is empty
+    if (auth?.currentUser?.uid) {
+      const canonicalUid = auth.currentUser.uid;
+      try {
+        safeStorage.setItem(STORAGE_KEY_USER_ID, canonicalUid);
+      } catch {}
+      return canonicalUid;
+    }
+
     if (!uid) {
       uid = generateUUID();
       safeStorage.setItem(STORAGE_KEY_USER_ID, uid);
@@ -131,7 +164,7 @@ export class LocalRepository implements Repository {
       } else {
         users.push(newUser);
       }
-      localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(users));
+      safeStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(users));
       return newUser;
     } catch (e) {
       logTechnicalError('LocalRepository.createUser', e);
@@ -151,7 +184,7 @@ export class LocalRepository implements Repository {
 
   private async getAllUsers(): Promise<User[]> {
     try {
-      const data = localStorage.getItem(STORAGE_KEY_USERS);
+      const data = safeStorage.getItem(STORAGE_KEY_USERS);
       return data ? JSON.parse(data) : [];
     } catch {
       return [];
@@ -197,7 +230,7 @@ export class LocalRepository implements Repository {
         isDemo: false,
       };
 
-      localStorage.setItem(STORAGE_KEY_CURRENT_PROVIDER, JSON.stringify(newProvider));
+      safeStorage.setItem(STORAGE_KEY_CURRENT_PROVIDER, JSON.stringify(newProvider));
 
       const list = await this.getCustomProviders();
       const idx = list.findIndex((p) => p.id === id);
@@ -206,7 +239,7 @@ export class LocalRepository implements Repository {
       } else {
         list.push(newProvider);
       }
-      localStorage.setItem(STORAGE_KEY_PROVIDERS, JSON.stringify(list));
+      safeStorage.setItem(STORAGE_KEY_PROVIDERS, JSON.stringify(list));
       return newProvider;
     } catch (e) {
       logTechnicalError('LocalRepository.createProvider', e);
@@ -262,7 +295,7 @@ export class LocalRepository implements Repository {
 
   private getCurrentProviderProfile(): Provider | null {
     try {
-      const data = localStorage.getItem(STORAGE_KEY_CURRENT_PROVIDER);
+      const data = safeStorage.getItem(STORAGE_KEY_CURRENT_PROVIDER);
       return data ? JSON.parse(data) : null;
     } catch {
       return null;
@@ -271,7 +304,7 @@ export class LocalRepository implements Repository {
 
   private async getCustomProviders(): Promise<Provider[]> {
     try {
-      const data = localStorage.getItem(STORAGE_KEY_PROVIDERS);
+      const data = safeStorage.getItem(STORAGE_KEY_PROVIDERS);
       return data ? JSON.parse(data) : [];
     } catch {
       return [];
@@ -337,6 +370,9 @@ export class LocalRepository implements Repository {
         urgency: requestData.urgency || 'normal',
         status: requestData.status || 'OPEN',
         createdAt: new Date().toISOString(),
+        ...(requestData.attachments && requestData.attachments.length > 0 ? { attachments: requestData.attachments } : {}),
+        ...(requestData.location ? { location: requestData.location } : {}),
+        ...(requestData.understanding ? { understanding: requestData.understanding } : {}),
       };
 
       const filteredExisting = existing.filter((r) => r.id !== id);
@@ -351,6 +387,61 @@ export class LocalRepository implements Repository {
       logTechnicalError('LocalRepository.createRequest', e);
       throw e;
     }
+  }
+
+  async uploadRequestAttachment(
+    requestId: string,
+    file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string },
+    customerId?: string
+  ): Promise<RequestAttachment> {
+    const cleanId = (requestId || '').trim();
+    if (!cleanId) {
+      throw new Error('Validation Error: requestId is required');
+    }
+
+    // Authorization check: if request exists, caller must be owner
+    const existingReq = await this.getRequest(cleanId);
+    if (existingReq) {
+      const currentUid = customerId || getCurrentUserId();
+      if (existingReq.customerId !== currentUid) {
+        throw new Error(`Unauthorized: Only the creator of request ${cleanId} can upload attachments`);
+      }
+    }
+
+    const validation = validateRequestAttachment(file);
+    if (!validation.isValid) {
+      throw new Error(`Attachment validation failed: ${validation.errorKey}`);
+    }
+
+    const sanitizedName = sanitizeFileName(file.name);
+    const attachmentId = `att_req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const storagePath = `requests/${cleanId}/${attachmentId}_${sanitizedName}`;
+
+    let downloadUrl = '';
+    if (file.data instanceof Blob) {
+      try {
+        downloadUrl = URL.createObjectURL(file.data);
+      } catch {
+        downloadUrl = `local-blob://${storagePath}`;
+      }
+    } else if (typeof file.data === 'string' && file.data.startsWith('data:')) {
+      downloadUrl = file.data;
+    } else {
+      downloadUrl = `local-storage://${storagePath}`;
+    }
+
+    const attachment: RequestAttachment = {
+      id: attachmentId,
+      type: validation.type,
+      storagePath,
+      downloadUrl,
+      fileName: sanitizedName,
+      mimeType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mp3'),
+      sizeBytes: file.size,
+      createdAt: new Date().toISOString(),
+    };
+
+    return attachment;
   }
 
   async getRequest(requestId: string): Promise<ServiceRequest | null> {
@@ -415,13 +506,34 @@ export class LocalRepository implements Repository {
       const idx = list.findIndex((r) => r.id === requestId);
       if (idx === -1) return null;
 
+      const existingReq = list[idx];
+      const normStatus = normalizeRequestStatus(existingReq.status);
+      if (normStatus === 'CANCELLED' && updates.status && updates.status !== 'CANCELLED') {
+        throw new Error('Validation Error: Cannot change status of CANCELLED request');
+      }
+      if (
+        normStatus === 'PROVIDER_SELECTED' ||
+        normStatus === 'COMPLETED' ||
+        normStatus === 'CANCELLED'
+      ) {
+        const nonStatusKeys = Object.keys(updates).filter(
+          (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId'
+        );
+        if (nonStatusKeys.length > 0) {
+          throw new Error(
+            `Validation Error: Cannot edit request details in status: ${existingReq.status}`
+          );
+        }
+      }
+
       list[idx] = { ...list[idx], ...updates };
       safeStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify(list));
       return {
         ...list[idx],
         status: normalizeRequestStatus(list[idx].status),
       };
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.message?.startsWith('Validation Error:')) throw e;
       logTechnicalError('LocalRepository.updateRequest', e);
       return null;
     }
@@ -469,6 +581,10 @@ export class LocalRepository implements Repository {
         id: offerData.id || `OFFER-${offerData.requestId || 'REQ'}-${Date.now().toString().slice(-4)}`,
         requestId: offerData.requestId || '',
         providerId: offerData.providerId || '',
+        providerUserId:
+          offerData.providerUserId ||
+          (offerData.providerId ? offerData.providerId : undefined) ||
+          getCurrentUserId(),
         providerName: offerData.providerName || '',
         providerPhone: offerData.providerPhone || '',
         providerWhatsapp: offerData.providerWhatsapp || '',
@@ -483,7 +599,7 @@ export class LocalRepository implements Repository {
 
       const allOffers = await this.getAllOffersRaw();
       const updated = [newOffer, ...allOffers];
-      localStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify(updated));
+      safeStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify(updated));
 
       // Upgrade request status to OFFERS_RECEIVED if it was NEW or MATCHING
       if (newOffer.requestId) {
@@ -511,11 +627,20 @@ export class LocalRepository implements Repository {
         if (filter.requestId && o.requestId !== filter.requestId) {
           return false;
         }
-        if (filter.providerUserId && o.providerUserId !== filter.providerUserId) {
-          return false;
-        }
-        if (filter.providerId && o.providerId !== filter.providerId) {
-          return false;
+        if (filter.providerId && filter.providerUserId) {
+          const matchProv = o.providerId === filter.providerId || o.providerUserId === filter.providerId;
+          const matchUser = o.providerUserId === filter.providerUserId || o.providerId === filter.providerUserId;
+          if (!matchProv && !matchUser) {
+            return false;
+          }
+        } else if (filter.providerUserId) {
+          if (o.providerUserId !== filter.providerUserId && o.providerId !== filter.providerUserId) {
+            return false;
+          }
+        } else if (filter.providerId) {
+          if (o.providerId !== filter.providerId && o.providerUserId !== filter.providerId) {
+            return false;
+          }
         }
         return true;
       });
@@ -535,6 +660,26 @@ export class LocalRepository implements Repository {
       if (idx === -1) return null;
 
       const targetOffer = all[idx];
+      if (targetOffer.status === 'ACCEPTED' || targetOffer.status === 'REJECTED') {
+        throw new Error(`Validation Error: Cannot update offer in status ${targetOffer.status}`);
+      }
+
+      if (targetOffer.requestId) {
+        const parentReq = await this.getRequest(targetOffer.requestId);
+        if (parentReq) {
+          const normStatus = normalizeRequestStatus(parentReq.status);
+          if (
+            normStatus === 'PROVIDER_SELECTED' ||
+            normStatus === 'COMPLETED' ||
+            normStatus === 'CANCELLED'
+          ) {
+            throw new Error(
+              `Validation Error: Cannot update offer because request is in status ${parentReq.status}`
+            );
+          }
+        }
+      }
+
       all[idx] = { ...targetOffer, ...updates };
 
       // If an offer is ACCEPTED:
@@ -552,9 +697,10 @@ export class LocalRepository implements Repository {
         });
       }
 
-      localStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify(all));
+      safeStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify(all));
       return all[idx];
-    } catch (e) {
+    } catch (e: any) {
+      if (e?.message?.startsWith('Validation Error:')) throw e;
       logTechnicalError('LocalRepository.updateOffer', e);
       return null;
     }
@@ -586,7 +732,7 @@ export class LocalRepository implements Repository {
           allOffers[i] = { ...allOffers[i], status: 'REJECTED' };
         }
       }
-      localStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify(allOffers));
+      safeStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify(allOffers));
 
       // 2. Update request: status = 'PROVIDER_SELECTED', selectedOfferId = cleanOfferId
       const updatedReq = await this.updateRequest(cleanReqId, {
@@ -603,7 +749,7 @@ export class LocalRepository implements Repository {
 
   private async getAllOffersRaw(): Promise<ProviderOffer[]> {
     try {
-      const data = localStorage.getItem(STORAGE_KEY_OFFERS);
+      const data = safeStorage.getItem(STORAGE_KEY_OFFERS);
       return data ? JSON.parse(data) : [];
     } catch {
       return [];
@@ -613,11 +759,16 @@ export class LocalRepository implements Repository {
   // =================== Matching Engine ===================
   async matchProviders(request: ServiceRequest): Promise<Provider[]> {
     try {
-      const all = await this.getProviders();
-      return matchProviders(request, all);
+      const reqCityId = request.cityId || (request.city ? normalizeCityId(request.city) : undefined);
+      if (request.city && request.city.trim() !== '' && !reqCityId) {
+        return [];
+      }
+      const reqCatId = request.categoryId || (request.category ? normalizeCategoryId(request.category) : undefined);
+      const candidates = await this.getProviders(reqCityId ? { cityId: reqCityId, categoryId: reqCatId } : undefined);
+      return matchProviders(request, candidates);
     } catch (e) {
       logTechnicalError('LocalRepository.matchProviders', e);
-      return INITIAL_DEMO_PROVIDERS.slice(0, 3);
+      return [];
     }
   }
 
@@ -665,7 +816,7 @@ export class LocalRepository implements Repository {
 
       const existingOffers = await this.getAllOffersRaw();
       const updatedOffers = [...generatedOffers, ...existingOffers];
-      localStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify(updatedOffers));
+      safeStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify(updatedOffers));
 
       if (generatedOffers.length > 0) {
         await this.updateRequest(request.id, { status: 'OFFERS_RECEIVED' });
@@ -739,7 +890,7 @@ export class LocalRepository implements Repository {
     };
 
     const updated = [newReview, ...allReviews];
-    localStorage.setItem(STORAGE_KEY_REVIEWS, JSON.stringify(updated));
+    safeStorage.setItem(STORAGE_KEY_REVIEWS, JSON.stringify(updated));
     return newReview;
   }
 
@@ -769,11 +920,885 @@ export class LocalRepository implements Repository {
 
   private async getAllReviewsRaw(): Promise<Review[]> {
     try {
-      const data = localStorage.getItem(STORAGE_KEY_REVIEWS);
+      const data = safeStorage.getItem(STORAGE_KEY_REVIEWS);
       return data ? JSON.parse(data) : [];
     } catch {
       return [];
     }
+  }
+
+  // =================== Conversations & In-App Chat ===================
+  async getConversation(conversationId: string): Promise<Conversation | null> {
+    try {
+      const convs = await this.getAllConversationsRaw();
+      return convs.find((c) => c.id === conversationId) || null;
+    } catch (e) {
+      logTechnicalError('LocalRepository.getConversation', e);
+      return null;
+    }
+  }
+
+  async getOrCreateConversation(requestId: string): Promise<Conversation> {
+    const cleanReqId = (requestId || '').trim();
+    if (!cleanReqId) {
+      throw new Error('Validation Error: requestId is required to get or create conversation');
+    }
+    const convId = getConversationId(cleanReqId);
+    const existing = await this.getConversation(convId);
+    if (existing) {
+      return existing;
+    }
+
+    // Must fetch corresponding request
+    const req = await this.getRequest(cleanReqId);
+    if (!req) {
+      throw new Error(`Request not found: ${cleanReqId}`);
+    }
+
+    const normStatus = normalizeRequestStatus(req.status);
+    if (normStatus === 'OPEN') {
+      throw new Error('Chat cannot be opened for OPEN requests. A provider offer must be accepted first.');
+    }
+
+    if (!req.selectedOfferId) {
+      throw new Error('Chat cannot be opened: No provider offer has been selected for this request.');
+    }
+
+    // Fetch the accepted offer
+    const offers = await this.getOffers({ requestId: cleanReqId });
+    const selectedOffer = offers.find((o) => o.id === req.selectedOfferId);
+    if (!selectedOffer) {
+      throw new Error(`Selected offer not found for request ${cleanReqId}`);
+    }
+
+    const now = new Date().toISOString();
+    const newConv: Conversation = {
+      id: convId,
+      requestId: cleanReqId,
+      customerId: req.customerId,
+      customerName: req.customerName || 'Клиент',
+      providerId: selectedOffer.providerId,
+      providerUserId: selectedOffer.providerUserId || selectedOffer.providerId,
+      providerName: selectedOffer.providerName || 'Мастер',
+      status: 'ACTIVE',
+      lastMessageText: '',
+      lastMessageSenderId: '',
+      lastMessageAt: now,
+      unreadCountCustomer: 0,
+      unreadCountProvider: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const allConvs = await this.getAllConversationsRaw();
+    const idx = allConvs.findIndex((c) => c.id === convId);
+    if (idx >= 0) {
+      allConvs[idx] = newConv;
+    } else {
+      allConvs.push(newConv);
+    }
+    safeStorage.setItem(STORAGE_KEY_CONVERSATIONS, JSON.stringify(allConvs));
+    return newConv;
+  }
+
+  async getMessages(conversationId: string, limitCount = 30): Promise<ChatMessage[]> {
+    try {
+      const all = await this.getMessagesRaw(conversationId);
+      // Newest messages with limit, returned in chronological order
+      const newest = all.slice(-limitCount);
+      return newest;
+    } catch (e) {
+      logTechnicalError('LocalRepository.getMessages', e);
+      return [];
+    }
+  }
+
+  async sendMessage(conversationId: string, messageData: Partial<ChatMessage>): Promise<ChatMessage> {
+    const text = (messageData.text || '').trim();
+    if (!text) {
+      throw new Error('Validation Error: Message text cannot be empty');
+    }
+    if (text.length > 2000) {
+      throw new Error('Validation Error: Message text exceeds 2000 characters limit');
+    }
+
+    const conv = await this.getConversation(conversationId);
+    if (!conv) {
+      throw new Error(`Conversation not found: ${conversationId}`);
+    }
+
+    // Verify parent request status
+    const req = await this.getRequest(conv.requestId);
+    if (req && normalizeRequestStatus(req.status) === 'CANCELLED') {
+      throw new Error('Cannot send message: Request is cancelled');
+    }
+
+    // Participant identity resolution
+    // Note: Do NOT equate Firebase Auth UID with old Local UUID
+    const localUid = getCurrentUserId();
+    const authUid = auth?.currentUser?.uid;
+    const providedSenderId = (messageData.senderId || '').trim();
+    const providedRole = messageData.senderRole;
+
+    const isCustomer =
+      (Boolean(providedSenderId) && providedSenderId === conv.customerId) ||
+      (!providedSenderId && (
+        localUid === conv.customerId ||
+        (Boolean(authUid) && authUid === conv.customerId)
+      ));
+
+    const isProvider =
+      (Boolean(providedSenderId) && (providedSenderId === conv.providerUserId || providedSenderId === conv.providerId)) ||
+      (!providedSenderId && (
+        localUid === conv.providerUserId ||
+        localUid === conv.providerId ||
+        (Boolean(authUid) && (authUid === conv.providerUserId || authUid === conv.providerId))
+      ));
+
+    if (!isCustomer && !isProvider) {
+      throw new Error('Unauthorized: You are not a participant in this conversation');
+    }
+
+    const senderRole: 'customer' | 'provider' =
+      providedRole === 'provider' ? 'provider' :
+      providedRole === 'customer' ? 'customer' :
+      (isCustomer ? 'customer' : 'provider');
+
+    const resolvedSenderId = senderRole === 'customer'
+      ? conv.customerId
+      : (conv.providerUserId || conv.providerId);
+    const now = new Date().toISOString();
+    const resolvedType = messageData.type || (messageData.attachments && messageData.attachments.length > 0
+      ? messageData.attachments[0].type
+      : 'text');
+
+    const newMsg: ChatMessage = {
+      id: messageData.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      conversationId,
+      requestId: conv.requestId,
+      senderId: resolvedSenderId,
+      senderRole,
+      type: resolvedType,
+      text,
+      attachments: messageData.attachments,
+      isRead: false,
+      readAt: null,
+      createdAt: now,
+    };
+
+    // Store message
+    const allMsgs = await this.getMessagesRaw(conversationId);
+    allMsgs.push(newMsg);
+    safeStorage.setItem(STORAGE_KEY_MESSAGES_PREFIX + conversationId, JSON.stringify(allMsgs));
+
+    // Update conversation
+    const allConvs = await this.getAllConversationsRaw();
+    const convIdx = allConvs.findIndex((c) => c.id === conversationId);
+    if (convIdx >= 0) {
+      const summaryText = text || (newMsg.attachments?.[0]?.type === 'image' ? '📷 Фото' : '📎 Файл');
+      const updatedConv = {
+        ...allConvs[convIdx],
+        lastMessageText: summaryText,
+        lastMessageSenderId: resolvedSenderId,
+        lastMessageAt: now,
+        updatedAt: now,
+        unreadCountCustomer: isProvider ? (allConvs[convIdx].unreadCountCustomer || 0) + 1 : allConvs[convIdx].unreadCountCustomer,
+        unreadCountProvider: isCustomer ? (allConvs[convIdx].unreadCountProvider || 0) + 1 : allConvs[convIdx].unreadCountProvider,
+      };
+      allConvs[convIdx] = updatedConv;
+      safeStorage.setItem(STORAGE_KEY_CONVERSATIONS, JSON.stringify(allConvs));
+    }
+
+    this.notifyChatListeners(conversationId);
+
+    return newMsg;
+  }
+
+  async uploadChatAttachment(
+    conversationId: string,
+    file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string }
+  ): Promise<ChatAttachment> {
+    const cleanId = (conversationId || '').trim();
+    const conv = await this.getConversation(cleanId);
+    if (!conv) {
+      throw new Error(`Conversation not found: ${cleanId}`);
+    }
+
+    const validation = validateChatAttachment(file);
+    if (!validation.isValid) {
+      throw new Error(`Attachment validation failed: ${validation.errorKey}`);
+    }
+
+    const sanitizedName = sanitizeFileName(file.name);
+    const attachmentId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const storagePath = `chat/${cleanId}/pending/${attachmentId}_${sanitizedName}`;
+
+    // For local fallback: create an object URL or data URL if available, or simulate offline storage URL
+    let downloadUrl = '';
+    if (file.data instanceof Blob) {
+      try {
+        downloadUrl = URL.createObjectURL(file.data);
+      } catch {
+        downloadUrl = `local-blob://${storagePath}`;
+      }
+    } else if (typeof file.data === 'string' && file.data.startsWith('data:')) {
+      downloadUrl = file.data;
+    } else {
+      downloadUrl = `local-storage://${storagePath}`;
+    }
+
+    const attachment: ChatAttachment = {
+      id: attachmentId,
+      type: validation.type,
+      storagePath,
+      downloadUrl,
+      fileName: sanitizedName,
+      mimeType: file.type || (validation.type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+      sizeBytes: file.size,
+      createdAt: new Date().toISOString(),
+    };
+
+    return attachment;
+  }
+
+  async sendChatMessageWithAttachment(
+    conversationId: string,
+    messageData: {
+      text?: string;
+      senderId?: string;
+      senderRole?: 'customer' | 'provider';
+      file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string };
+    }
+  ): Promise<ChatMessage> {
+    const attachment = await this.uploadChatAttachment(conversationId, messageData.file);
+    return await this.sendMessage(conversationId, {
+      text: (messageData.text || '').trim(),
+      senderId: messageData.senderId,
+      senderRole: messageData.senderRole,
+      type: attachment.type,
+      attachments: [attachment],
+    });
+  }
+
+  private chatListeners = new Map<string, Set<(messages: ChatMessage[]) => void>>();
+  private chatBroadcastChannel: BroadcastChannel | null = null;
+  private notifListeners = new Map<string, Set<(notifications: AppNotification[]) => void>>();
+  private notifBroadcastChannel: BroadcastChannel | null = null;
+  private apptListeners = new Map<string, Set<(appointment: Appointment | null) => void>>();
+  private apptBroadcastChannel: BroadcastChannel | null = null;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      try {
+        if ('BroadcastChannel' in window) {
+          this.chatBroadcastChannel = new BroadcastChannel('kerek_chat_sync');
+          this.chatBroadcastChannel.onmessage = (event) => {
+            if (event.data?.conversationId) {
+              this.notifyChatListeners(event.data.conversationId, false);
+            }
+          };
+
+          this.notifBroadcastChannel = new BroadcastChannel('kerek_notif_sync');
+          this.notifBroadcastChannel.onmessage = (event) => {
+            if (event.data?.userId) {
+              this.notifyNotifListeners(event.data.userId, false);
+            }
+          };
+
+          this.apptBroadcastChannel = new BroadcastChannel('kerek_appt_sync');
+          this.apptBroadcastChannel.onmessage = (event) => {
+            if (event.data?.requestId) {
+              this.notifyApptListeners(event.data.requestId, false);
+            }
+          };
+        }
+      } catch {}
+
+      window.addEventListener('storage', (event) => {
+        if (event.key && event.key.startsWith(STORAGE_KEY_MESSAGES_PREFIX)) {
+          const convId = event.key.replace(STORAGE_KEY_MESSAGES_PREFIX, '');
+          this.notifyChatListeners(convId, false);
+        } else if (event.key === STORAGE_KEY_NOTIFICATIONS) {
+          // Notify all active user notification subscribers
+          for (const userId of this.notifListeners.keys()) {
+            this.notifyNotifListeners(userId, false);
+          }
+        } else if (event.key === STORAGE_KEY_APPOINTMENTS) {
+          // Notify all active appointment subscribers
+          for (const reqId of this.apptListeners.keys()) {
+            this.notifyApptListeners(reqId, false);
+          }
+        }
+      });
+    }
+  }
+
+  private notifyNotifListeners(userId: string, broadcast = true) {
+    if (broadcast && this.notifBroadcastChannel) {
+      try {
+        this.notifBroadcastChannel.postMessage({ userId });
+      } catch {}
+    }
+    const listeners = this.notifListeners.get(userId);
+    if (listeners && listeners.size > 0) {
+      this.getNotifications(userId).then((list) => {
+        listeners.forEach((fn) => {
+          try {
+            fn(list);
+          } catch {}
+        });
+      });
+    }
+  }
+
+  private notifyChatListeners(conversationId: string, broadcast = true) {
+    if (broadcast && this.chatBroadcastChannel) {
+      try {
+        this.chatBroadcastChannel.postMessage({ conversationId });
+      } catch {}
+    }
+    const listeners = this.chatListeners.get(conversationId);
+    if (listeners && listeners.size > 0) {
+      this.getMessages(conversationId).then((all) => {
+        listeners.forEach((fn) => {
+          try {
+            fn(all);
+          } catch {}
+        });
+      });
+    }
+  }
+
+  async markMessagesAsRead(conversationId: string): Promise<void> {
+    try {
+      const currentUid = auth?.currentUser?.uid || getCurrentUserId();
+      const allConvs = await this.getAllConversationsRaw();
+      const convIdx = allConvs.findIndex((c) => c.id === conversationId);
+      if (convIdx >= 0) {
+        const c = allConvs[convIdx];
+        if (currentUid === c.customerId) {
+          c.unreadCountCustomer = 0;
+        } else if (currentUid === c.providerUserId || currentUid === c.providerId) {
+          c.unreadCountProvider = 0;
+        }
+        allConvs[convIdx] = c;
+        safeStorage.setItem(STORAGE_KEY_CONVERSATIONS, JSON.stringify(allConvs));
+      }
+    } catch (e) {
+      logTechnicalError('LocalRepository.markMessagesAsRead', e);
+    }
+  }
+
+  subscribeToMessages(
+    conversationId: string,
+    onUpdate: (messages: ChatMessage[]) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    const cleanId = (conversationId || '').trim();
+    if (!this.chatListeners.has(cleanId)) {
+      this.chatListeners.set(cleanId, new Set());
+    }
+    this.chatListeners.get(cleanId)!.add(onUpdate);
+
+    // Deliver initial messages asynchronously
+    this.getMessages(cleanId).then((msgs) => {
+      onUpdate(msgs);
+    });
+
+    return () => {
+      const set = this.chatListeners.get(cleanId);
+      if (set) {
+        set.delete(onUpdate);
+        if (set.size === 0) {
+          this.chatListeners.delete(cleanId);
+        }
+      }
+    };
+  }
+
+  // =================== In-App Notifications ===================
+
+  async createNotification(notificationData: AppNotification): Promise<AppNotification> {
+    try {
+      if (!notificationData.id || !notificationData.recipientUserId || !notificationData.type) {
+        throw new Error('Validation Error: notification id, recipientUserId and type are required');
+      }
+
+      const notif: AppNotification = {
+        ...notificationData,
+        isRead: false,
+        readAt: null,
+        createdAt: notificationData.createdAt || new Date().toISOString(),
+      };
+
+      const all = await this.getAllNotificationsRaw();
+      const existingIdx = all.findIndex((n) => n.id === notif.id);
+      if (existingIdx >= 0) {
+        // Idempotency: update existing without duplicating
+        all[existingIdx] = { ...all[existingIdx], ...notif };
+      } else {
+        all.unshift(notif);
+      }
+
+      safeStorage.setItem(STORAGE_KEY_NOTIFICATIONS, JSON.stringify(all));
+      this.notifyNotifListeners(notif.recipientUserId);
+      return notif;
+    } catch (e) {
+      logTechnicalError('LocalRepository.createNotification', e);
+      throw e;
+    }
+  }
+
+  async getNotifications(userId: string, limitCount = 50): Promise<AppNotification[]> {
+    try {
+      const cleanUid = (userId || '').trim();
+      if (!cleanUid) return [];
+
+      const all = await this.getAllNotificationsRaw();
+      return all
+        .filter((n) => n.recipientUserId === cleanUid)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .slice(0, limitCount);
+    } catch (e) {
+      logTechnicalError('LocalRepository.getNotifications', e);
+      return [];
+    }
+  }
+
+  async markNotificationAsRead(notificationId: string): Promise<void> {
+    try {
+      const cleanId = (notificationId || '').trim();
+      if (!cleanId) return;
+
+      const all = await this.getAllNotificationsRaw();
+      const idx = all.findIndex((n) => n.id === cleanId);
+      if (idx >= 0 && !all[idx].isRead) {
+        all[idx].isRead = true;
+        all[idx].readAt = new Date().toISOString();
+        safeStorage.setItem(STORAGE_KEY_NOTIFICATIONS, JSON.stringify(all));
+        this.notifyNotifListeners(all[idx].recipientUserId);
+      }
+    } catch (e) {
+      logTechnicalError('LocalRepository.markNotificationAsRead', e);
+    }
+  }
+
+  async markAllNotificationsAsRead(userId: string): Promise<void> {
+    try {
+      const cleanUid = (userId || '').trim();
+      if (!cleanUid) return;
+
+      const all = await this.getAllNotificationsRaw();
+      let changed = false;
+      const now = new Date().toISOString();
+
+      all.forEach((n) => {
+        if (n.recipientUserId === cleanUid && !n.isRead) {
+          n.isRead = true;
+          n.readAt = now;
+          changed = true;
+        }
+      });
+
+      if (changed) {
+        safeStorage.setItem(STORAGE_KEY_NOTIFICATIONS, JSON.stringify(all));
+        this.notifyNotifListeners(cleanUid);
+      }
+    } catch (e) {
+      logTechnicalError('LocalRepository.markAllNotificationsAsRead', e);
+    }
+  }
+
+  subscribeToNotifications(
+    userId: string,
+    onUpdate: (notifications: AppNotification[]) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    const cleanUid = (userId || '').trim();
+    if (!cleanUid) {
+      return () => {};
+    }
+
+    if (!this.notifListeners.has(cleanUid)) {
+      this.notifListeners.set(cleanUid, new Set());
+    }
+    this.notifListeners.get(cleanUid)!.add(onUpdate);
+
+    // Deliver current notifications immediately
+    this.getNotifications(cleanUid).then((list) => {
+      onUpdate(list);
+    });
+
+    return () => {
+      const set = this.notifListeners.get(cleanUid);
+      if (set) {
+        set.delete(onUpdate);
+        if (set.size === 0) {
+          this.notifListeners.delete(cleanUid);
+        }
+      }
+    };
+  }
+
+  private async getAllNotificationsRaw(): Promise<AppNotification[]> {
+    try {
+      const data = safeStorage.getItem(STORAGE_KEY_NOTIFICATIONS);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async getAllConversationsRaw(): Promise<Conversation[]> {
+    try {
+      const data = safeStorage.getItem(STORAGE_KEY_CONVERSATIONS);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async getMessagesRaw(conversationId: string): Promise<ChatMessage[]> {
+    try {
+      const data = safeStorage.getItem(STORAGE_KEY_MESSAGES_PREFIX + conversationId);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  // =================== Appointments ===================
+  private notifyApptListeners(requestId: string, broadcast = true) {
+    if (broadcast && this.apptBroadcastChannel) {
+      try {
+        this.apptBroadcastChannel.postMessage({ requestId });
+      } catch {}
+    }
+    const listeners = this.apptListeners.get(requestId);
+    if (listeners && listeners.size > 0) {
+      this.getAppointment(requestId).then((appt) => {
+        listeners.forEach((fn) => {
+          try {
+            fn(appt);
+          } catch {}
+        });
+      });
+    }
+  }
+
+  private async getAllAppointmentsRaw(): Promise<Appointment[]> {
+    try {
+      const data = safeStorage.getItem(STORAGE_KEY_APPOINTMENTS);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  private async saveAppointmentsRaw(appts: Appointment[]): Promise<void> {
+    safeStorage.setItem(STORAGE_KEY_APPOINTMENTS, JSON.stringify(appts));
+  }
+
+  async getAppointment(requestId: string): Promise<Appointment | null> {
+    const cleanReqId = (requestId || '').trim();
+    if (!cleanReqId) return null;
+    const targetDocId = getAppointmentId(cleanReqId);
+    const list = await this.getAllAppointmentsRaw();
+    const found = list.find(
+      (a) =>
+        a.requestId === cleanReqId ||
+        a.id === cleanReqId ||
+        a.id === targetDocId ||
+        a.id === `appointment_${cleanReqId}` ||
+        a.id === `appt_${cleanReqId}`
+    );
+    return found || null;
+  }
+
+  async createAppointment(
+    appointmentData: Omit<Appointment, 'id' | 'createdAt' | 'updatedAt'>
+  ): Promise<Appointment> {
+    if (!appointmentData.requestId) {
+      throw new Error('requestId is required for appointment');
+    }
+    // 1. Verify request exists and is in accepted / selected state
+    const req = await this.getRequest(appointmentData.requestId);
+    if (!req) {
+      throw new Error(`Request not found: ${appointmentData.requestId}`);
+    }
+    if (req.status === 'CANCELLED') {
+      throw new Error('Cannot create appointment for CANCELLED request');
+    }
+    const allowedStatuses: RequestStatus[] = ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED'];
+    if (!allowedStatuses.includes(req.status)) {
+      throw new Error(`Cannot create appointment for request in status: ${req.status}`);
+    }
+
+    // 2. Prevent duplicate active appointments for this request
+    const existing = await this.getAppointment(appointmentData.requestId);
+    if (existing && existing.status !== 'CANCELLED' && existing.status !== 'COMPLETED') {
+      throw new Error('An active appointment already exists for this request');
+    }
+
+    // 3. Validate fields
+    if (!appointmentData.scheduledAt || typeof appointmentData.scheduledAt !== 'string') {
+      throw new Error('scheduledAt must be a valid date/time string');
+    }
+    if (appointmentData.durationMinutes !== undefined) {
+      if (typeof appointmentData.durationMinutes !== 'number' || appointmentData.durationMinutes <= 0 || appointmentData.durationMinutes > 1440) {
+        throw new Error('durationMinutes must be a positive number up to 1440');
+      }
+    }
+    if (appointmentData.note !== undefined && appointmentData.note.length > 1000) {
+      throw new Error('note cannot exceed 1000 characters');
+    }
+
+    const apptId = getAppointmentId(appointmentData.requestId);
+    const now = new Date().toISOString();
+    const newAppt: Appointment = {
+      ...appointmentData,
+      id: apptId,
+      status: appointmentData.status || 'PROPOSED',
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const all = await this.getAllAppointmentsRaw();
+    const filtered = all.filter((a) => a.id !== apptId && a.requestId !== newAppt.requestId);
+    filtered.push(newAppt);
+    await this.saveAppointmentsRaw(filtered);
+
+    this.notifyApptListeners(newAppt.requestId);
+    return newAppt;
+  }
+
+  async updateAppointment(appointmentId: string, updates: Partial<Appointment>): Promise<Appointment> {
+    const all = await this.getAllAppointmentsRaw();
+    const idx = all.findIndex(
+      (a) => a.id === appointmentId || a.requestId === appointmentId || a.id === `appointment_${appointmentId}`
+    );
+    if (idx === -1) {
+      throw new Error(`Appointment not found: ${appointmentId}`);
+    }
+
+    const current = all[idx];
+
+    // Cannot update cancelled or completed terminal states
+    if (current.status === 'CANCELLED' || current.status === 'COMPLETED') {
+      throw new Error(`Cannot update appointment in terminal status: ${current.status}`);
+    }
+
+    // Validate status transitions
+    if (updates.status && updates.status !== current.status) {
+      const from = current.status;
+      const to = updates.status;
+      let valid = false;
+      if (from === 'PROPOSED' && ['CONFIRMED', 'RESCHEDULED', 'CANCELLED'].includes(to)) valid = true;
+      if (from === 'CONFIRMED' && ['RESCHEDULED', 'CANCELLED', 'COMPLETED'].includes(to)) valid = true;
+      if (from === 'RESCHEDULED' && ['CONFIRMED', 'RESCHEDULED', 'CANCELLED'].includes(to)) valid = true;
+      if (!valid) {
+        throw new Error(`Invalid appointment status transition from ${from} to ${to}`);
+      }
+    }
+
+    if (updates.durationMinutes !== undefined) {
+      if (typeof updates.durationMinutes !== 'number' || updates.durationMinutes <= 0 || updates.durationMinutes > 1440) {
+        throw new Error('durationMinutes must be a positive number up to 1440');
+      }
+    }
+    if (updates.note !== undefined && updates.note.length > 1000) {
+      throw new Error('note cannot exceed 1000 characters');
+    }
+
+    const updatedAppt: Appointment = {
+      ...current,
+      ...updates,
+      // Protect immutable identity keys
+      id: current.id,
+      requestId: current.requestId,
+      customerId: current.customerId,
+      providerId: current.providerId,
+      providerUserId: current.providerUserId,
+      createdAt: current.createdAt,
+      updatedAt: new Date().toISOString(),
+    };
+
+    all[idx] = updatedAppt;
+    await this.saveAppointmentsRaw(all);
+
+    this.notifyApptListeners(updatedAppt.requestId);
+    return updatedAppt;
+  }
+
+  async cancelAppointment(
+    appointmentId: string,
+    cancelledByRole: 'customer' | 'provider',
+    reason?: string
+  ): Promise<Appointment> {
+    const existing = await this.getAppointment(appointmentId);
+    if (!existing) {
+      throw new Error(`Appointment not found: ${appointmentId}`);
+    }
+    const note = reason ? (existing.note ? `${existing.note} | ${reason}` : reason) : existing.note;
+    return await this.updateAppointment(appointmentId, {
+      status: 'CANCELLED',
+      ...(note !== undefined ? { note } : {}),
+    });
+  }
+
+  async confirmAppointment(
+    appointmentId: string,
+    confirmedByRole: 'customer' | 'provider'
+  ): Promise<Appointment> {
+    const existing = await this.getAppointment(appointmentId);
+    if (!existing) {
+      throw new Error(`Appointment not found: ${appointmentId}`);
+    }
+    if (existing.status !== 'PROPOSED' && existing.status !== 'RESCHEDULED') {
+      throw new Error(`Cannot confirm appointment in status: ${existing.status}`);
+    }
+    return await this.updateAppointment(appointmentId, {
+      status: 'CONFIRMED',
+    });
+  }
+
+  async rescheduleAppointment(
+    appointmentId: string,
+    scheduledAt: string,
+    proposedBy: 'customer' | 'provider',
+    note?: string
+  ): Promise<Appointment> {
+    const existing = await this.getAppointment(appointmentId);
+    if (!existing) {
+      throw new Error(`Appointment not found: ${appointmentId}`);
+    }
+    if (existing.status !== 'PROPOSED' && existing.status !== 'CONFIRMED' && existing.status !== 'RESCHEDULED') {
+      throw new Error(`Cannot reschedule appointment in status: ${existing.status}`);
+    }
+    return await this.updateAppointment(appointmentId, {
+      status: 'RESCHEDULED',
+      scheduledAt,
+      proposedBy,
+      ...(note !== undefined ? { note } : {}),
+    });
+  }
+
+  async completeAppointment(appointmentId: string): Promise<Appointment> {
+    const existing = await this.getAppointment(appointmentId);
+    if (!existing) {
+      throw new Error(`Appointment not found: ${appointmentId}`);
+    }
+    if (existing.status !== 'CONFIRMED' && existing.status !== 'COMPLETED') {
+      throw new Error(`Cannot complete appointment that is not CONFIRMED (status: ${existing.status})`);
+    }
+    const updatedAppt = await this.updateAppointment(appointmentId, {
+      status: 'COMPLETED',
+      workStatus: 'WORK_COMPLETED',
+      workStatusUpdatedAt: new Date().toISOString(),
+    });
+
+    try {
+      const req = await this.getRequest(existing.requestId);
+      if (req && req.status !== 'COMPLETED') {
+        await this.updateRequestStatus(existing.requestId, 'COMPLETED');
+      }
+    } catch {}
+
+    return updatedAppt;
+  }
+
+  async updateWorkStatus(
+    appointmentId: string,
+    workStatus: WorkStatus,
+    providerUserId: string
+  ): Promise<Appointment> {
+    const existing = await this.getAppointment(appointmentId);
+    if (!existing) {
+      throw new Error(`Appointment not found: ${appointmentId}`);
+    }
+    if (existing.status === 'CANCELLED') {
+      throw new Error('Validation Error: Cannot update work status on a CANCELLED appointment');
+    }
+
+    // Authorization check: Only assigned provider can update work status
+    const cleanProviderUid = (providerUserId || '').trim();
+    const assignedProviderUserId = (existing.providerUserId || '').trim();
+    const assignedProviderId = (existing.providerId || '').trim();
+    if (
+      cleanProviderUid !== assignedProviderUserId &&
+      cleanProviderUid !== assignedProviderId
+    ) {
+      throw new Error(
+        `Unauthorized: Only the assigned provider (${assignedProviderUserId || assignedProviderId}) can update work status, got ${cleanProviderUid}`
+      );
+    }
+
+    // Transition validation
+    if (!isValidWorkStatusTransition(existing.workStatus, workStatus)) {
+      throw new Error(
+        `Invalid work status transition from ${existing.workStatus || 'NOT_STARTED'} to ${workStatus}`
+      );
+    }
+
+    const now = new Date().toISOString();
+    const updates: Partial<Appointment> = {
+      workStatus,
+      workStatusUpdatedAt: now,
+    };
+
+    // If work status reaches WORK_COMPLETED, also mark appointment completed
+    if (workStatus === 'WORK_COMPLETED' && (existing.status === 'CONFIRMED' || existing.status === 'PROPOSED' || existing.status === 'RESCHEDULED')) {
+      updates.status = 'COMPLETED';
+    }
+
+    const updatedAppt = await this.updateAppointment(appointmentId, updates);
+
+    try {
+      const req = await this.getRequest(existing.requestId);
+      if (req) {
+        if (workStatus === 'WORK_COMPLETED' && req.status !== 'COMPLETED') {
+          await this.updateRequestStatus(existing.requestId, 'COMPLETED');
+        } else if (
+          ['WORK_STARTED', 'PROVIDER_ARRIVED', 'PROVIDER_ON_THE_WAY'].includes(workStatus) &&
+          ['PROVIDER_SELECTED', 'ACCEPTED'].includes(req.status)
+        ) {
+          await this.updateRequestStatus(existing.requestId, 'IN_PROGRESS');
+        }
+      }
+    } catch {}
+
+    return updatedAppt;
+  }
+
+  subscribeToAppointment(
+    requestId: string,
+    onUpdate: (appointment: Appointment | null) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    const cleanReqId = (requestId || '').trim();
+    if (!cleanReqId) {
+      return () => {};
+    }
+
+    if (!this.apptListeners.has(cleanReqId)) {
+      this.apptListeners.set(cleanReqId, new Set());
+    }
+    this.apptListeners.get(cleanReqId)!.add(onUpdate);
+
+    // Deliver current state immediately
+    this.getAppointment(cleanReqId).then((appt) => {
+      onUpdate(appt);
+    });
+
+    return () => {
+      const set = this.apptListeners.get(cleanReqId);
+      if (set) {
+        set.delete(onUpdate);
+        if (set.size === 0) {
+          this.apptListeners.delete(cleanReqId);
+        }
+      }
+    };
   }
 }
 

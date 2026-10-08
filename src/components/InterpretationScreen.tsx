@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { ExtractedNeed, Language, Urgency } from '../types';
+import { ExtractedNeed, Language, Urgency, PendingAttachment, RequestLocation } from '../types';
 import { translations } from '../i18n/translations';
 import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
 import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
+import { RequestMediaView } from './RequestMediaView';
 import {
   CheckCircle2,
   ArrowRight,
@@ -16,8 +17,13 @@ import {
   Sparkles,
   Edit3,
   AlertCircle,
+  AlertTriangle,
   Info,
   Wrench,
+  Smartphone,
+  HelpCircle,
+  Send,
+  Check,
 } from 'lucide-react';
 
 interface InterpretationScreenProps {
@@ -49,6 +55,17 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
   const [date, setDate] = useState(initialNeed.date);
   const [budget, setBudget] = useState(initialNeed.budget);
   const [urgency, setUrgency] = useState<Urgency>(initialNeed.urgency);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>(
+    initialNeed.pendingAttachments || []
+  );
+  const [location, setLocation] = useState<RequestLocation | undefined>(
+    initialNeed.location
+  );
+
+  // Smart Clarification Question state (non-blocking)
+  const [clarificationInput, setClarificationInput] = useState<string>('');
+  const [addedClarifications, setAddedClarifications] = useState<string[]>([]);
+  const [clarificationToast, setClarificationToast] = useState<boolean>(false);
 
   // Synchronize state when initialNeed prop changes
   useEffect(() => {
@@ -58,8 +75,20 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
     setDate(initialNeed.date);
     setBudget(initialNeed.budget);
     setUrgency(initialNeed.urgency);
+    setPendingAttachments(initialNeed.pendingAttachments || []);
+    setLocation(initialNeed.location);
     setIsEditingManual(!Boolean((initialNeed.confidence ?? 0.95) >= 0.7));
   }, [initialNeed]);
+
+  const handleAddClarification = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = clarificationInput.trim();
+    if (!clean) return;
+    setAddedClarifications((prev) => [...prev, clean]);
+    setClarificationInput('');
+    setClarificationToast(true);
+    setTimeout(() => setClarificationToast(false), 3000);
+  };
 
   // Invokes existing createRequest flow only upon explicit customer confirmation
   const handleProceed = () => {
@@ -68,11 +97,17 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
       language === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники';
     const finalCity = (city || '').trim() || initialNeed.city || defaultCity;
     const finalCategory = (category || '').trim() || initialNeed.category || defaultCategory;
-    const finalService =
+    
+    // Merge any user answered clarifications into finalService / description
+    let finalService =
       (service || '').trim() ||
       initialNeed.service ||
       initialNeed.originalQuery ||
       finalCategory;
+
+    if (addedClarifications.length > 0) {
+      finalService = `${finalService} [${addedClarifications.join('; ')}]`;
+    }
 
     onContinue({
       ...initialNeed,
@@ -85,6 +120,9 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
       budget:
         (budget || '').trim() || initialNeed.budget || (language === 'kz' ? 'Келісімді' : 'Договорная'),
       urgency,
+      pendingAttachments,
+      location,
+      understanding: initialNeed.understanding,
     });
   };
 
@@ -181,26 +219,85 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   </div>
                 </div>
 
+                {/* Brand / Model if detected */}
+                {Boolean(initialNeed.understanding?.detectedBrand || initialNeed.understanding?.detectedModel) && (
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 mt-0.5">
+                      <Smartphone className="w-4 h-4 stroke-[2.5]" />
+                    </div>
+                    <div>
+                      <span className="text-[11px] font-semibold text-slate-400 block uppercase tracking-wider">
+                        {t.detectedBrandLabel}
+                      </span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {[initialNeed.understanding?.detectedBrand, initialNeed.understanding?.detectedModel].filter(Boolean).join(' ')}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Detected Problem if present */}
+                {Boolean(initialNeed.understanding?.detectedProblem) && (
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 mt-0.5">
+                      <AlertTriangle className="w-4 h-4 stroke-[2.5]" />
+                    </div>
+                    <div>
+                      <span className="text-[11px] font-semibold text-slate-400 block uppercase tracking-wider">
+                        {t.detectedProblemLabel}
+                      </span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {initialNeed.understanding?.detectedProblem}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Date & Preferred Time */}
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 mt-0.5">
+                    <Calendar className="w-4 h-4 stroke-[2.5]" />
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-semibold text-slate-400 block uppercase tracking-wider">
+                      {t.fieldDate}
+                    </span>
+                    <span className="text-sm font-bold text-slate-900">
+                      {date} {initialNeed.understanding?.preferredTime ? `· ${initialNeed.understanding.preferredTime}` : ''}
+                    </span>
+                  </div>
+                </div>
+
                 {/* Urgency */}
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 mt-0.5">
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${
+                    initialNeed.understanding?.urgency === 'emergency'
+                      ? 'bg-red-100 text-red-600 animate-pulse'
+                      : 'bg-rose-50 text-rose-600'
+                  }`}>
                     <Flame className="w-4 h-4 stroke-[2.5]" />
                   </div>
                   <div>
                     <span className="text-[11px] font-semibold text-slate-400 block uppercase tracking-wider">
                       {t.fieldUrgency}
                     </span>
-                    <span
-                      className={`inline-block text-xs font-bold px-2 py-0.5 rounded-md mt-0.5 ${
-                        urgency === 'high'
-                          ? 'bg-rose-100 text-rose-800'
-                          : urgency === 'low'
-                          ? 'bg-slate-100 text-slate-700'
-                          : 'bg-sky-100 text-sky-800'
-                      }`}
-                    >
-                      {formatUrgencyLabel(urgency)}
-                    </span>
+                    {initialNeed.understanding?.urgency === 'emergency' ? (
+                      <span className="inline-block text-xs font-bold px-2.5 py-0.5 rounded-md mt-0.5 bg-red-600 text-white shadow-xs animate-pulse">
+                        ⚠️ {t.urgencyEmergency}
+                      </span>
+                    ) : (
+                      <span
+                        className={`inline-block text-xs font-bold px-2 py-0.5 rounded-md mt-0.5 ${
+                          urgency === 'high'
+                            ? 'bg-rose-100 text-rose-800'
+                            : urgency === 'low'
+                            ? 'bg-slate-100 text-slate-700'
+                            : 'bg-sky-100 text-sky-800'
+                        }`}
+                      >
+                        {formatUrgencyLabel(urgency)}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -214,6 +311,123 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   «{initialNeed.originalQuery}»
                 </p>
               </div>
+
+              {/* Smart Clarification Questions (Non-blocking assistant) */}
+              {Boolean(initialNeed.understanding?.suggestedQuestions && initialNeed.understanding.suggestedQuestions.length > 0) && (
+                <div className="p-3.5 bg-sky-50/70 border border-sky-200 rounded-2xl space-y-2.5">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-sky-900">
+                    <HelpCircle className="w-4 h-4 text-sky-600" />
+                    <span>{t.smartQuestionsTitle}</span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {initialNeed.understanding?.suggestedQuestions?.map((q, idx) => (
+                      <div key={idx} className="text-xs text-slate-700 font-medium flex items-start gap-1.5">
+                        <span className="text-sky-600 font-bold shrink-0">•</span>
+                        <span>{q}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {addedClarifications.length > 0 && (
+                    <div className="space-y-1 pt-1 border-t border-sky-100">
+                      {addedClarifications.map((ans, idx) => (
+                        <div key={idx} className="text-xs bg-white text-emerald-800 px-2 py-1 rounded-lg border border-emerald-200 flex items-center gap-1.5 font-medium">
+                          <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                          <span>{ans}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <form onSubmit={handleAddClarification} className="flex items-center gap-1.5 pt-1">
+                    <input
+                      type="text"
+                      value={clarificationInput}
+                      onChange={(e) => setClarificationInput(e.target.value)}
+                      placeholder={t.addClarificationPlaceholder}
+                      className="flex-1 h-9 px-3 text-xs bg-white border border-sky-200 rounded-xl focus:outline-none focus:border-sky-500 text-slate-800 placeholder:text-slate-400"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!clarificationInput.trim()}
+                      className="h-9 px-3 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 text-white disabled:text-slate-400 font-semibold text-xs rounded-xl flex items-center gap-1 transition-all"
+                    >
+                      <span>{t.btnSubmitClarification}</span>
+                      <Send className="w-3 h-3" />
+                    </button>
+                  </form>
+
+                  {clarificationToast && (
+                    <div className="text-[11px] text-emerald-700 font-bold flex items-center gap-1">
+                      <Check className="w-3 h-3" />
+                      <span>{t.clarificationAddedNotice}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Request 2.0 Media & Location Preview */}
+              {(pendingAttachments.length > 0 ||
+                location ||
+                initialNeed.understanding?.hasLocation ||
+                (initialNeed.understanding?.attachmentsPresent &&
+                  (initialNeed.understanding.attachmentsPresent.images > 0 ||
+                    initialNeed.understanding.attachmentsPresent.videos > 0 ||
+                    initialNeed.understanding.attachmentsPresent.audios > 0))) && (
+                <div className="p-3 bg-slate-50/90 rounded-xl border border-slate-100 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">
+                      {t.reqAttachmentsSectionTitle}
+                    </span>
+                    {/* Attachment awareness count badges */}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {((initialNeed.understanding?.attachmentsPresent?.images ?? 0) > 0 ||
+                        pendingAttachments.filter((a) => a.mediaType === 'image').length > 0) && (
+                        <span className="text-[10px] font-semibold bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          📷 {Math.max(
+                            initialNeed.understanding?.attachmentsPresent?.images ?? 0,
+                            pendingAttachments.filter((a) => a.mediaType === 'image').length
+                          )} {language === 'kz' ? 'фото' : 'фото'}
+                        </span>
+                      )}
+                      {((initialNeed.understanding?.attachmentsPresent?.videos ?? 0) > 0 ||
+                        pendingAttachments.filter((a) => a.mediaType === 'video').length > 0) && (
+                        <span className="text-[10px] font-semibold bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          🎥 {Math.max(
+                            initialNeed.understanding?.attachmentsPresent?.videos ?? 0,
+                            pendingAttachments.filter((a) => a.mediaType === 'video').length
+                          )} {language === 'kz' ? 'видео' : 'видео'}
+                        </span>
+                      )}
+                      {((initialNeed.understanding?.attachmentsPresent?.audios ?? 0) > 0 ||
+                        pendingAttachments.filter((a) => a.mediaType === 'audio').length > 0) && (
+                        <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          🎤 {Math.max(
+                            initialNeed.understanding?.attachmentsPresent?.audios ?? 0,
+                            pendingAttachments.filter((a) => a.mediaType === 'audio').length
+                          )} {language === 'kz' ? 'аудио' : 'аудио'}
+                        </span>
+                      )}
+                      {(Boolean(location) || Boolean(initialNeed.understanding?.hasLocation)) && (
+                        <span className="text-[10px] font-semibold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          📍 {language === 'kz' ? 'Орналасқан жер' : 'Локация'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <RequestMediaView
+                    attachments={pendingAttachments}
+                    location={location}
+                    language={language}
+                    onRemoveAttachment={(id) =>
+                      setPendingAttachments((prev) => prev.filter((a) => a.id !== id))
+                    }
+                    onRemoveLocation={() => setLocation(undefined)}
+                    isEditable={true}
+                  />
+                </div>
+              )}
 
               {/* Question & Confirm / Edit Actions */}
               <div className="pt-2 space-y-2.5">
@@ -305,6 +519,25 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 «{initialNeed.originalQuery}»
               </p>
             </div>
+
+            {/* Request 2.0 Media & Location Preview */}
+            {(pendingAttachments.length > 0 || location) && (
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5">
+                <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider">
+                  {t.reqAttachmentsSectionTitle}
+                </span>
+                <RequestMediaView
+                  attachments={pendingAttachments}
+                  location={location}
+                  language={language}
+                  onRemoveAttachment={(id) =>
+                    setPendingAttachments((prev) => prev.filter((a) => a.id !== id))
+                  }
+                  onRemoveLocation={() => setLocation(undefined)}
+                  isEditable={true}
+                />
+              </div>
+            )}
 
             {/* Editable Form */}
             <form onSubmit={handleSubmit} className="space-y-3.5">

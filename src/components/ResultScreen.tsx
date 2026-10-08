@@ -17,6 +17,8 @@ import { repository, checkClientRateLimit, getFriendlyErrorMessage, getCurrentUs
 import { auth } from '../services/firebase';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { ReviewModal } from './ReviewModal';
+import { ChatScreen } from './ChatScreen';
+import { AppointmentSection } from './AppointmentSection';
 import {
   AlertTriangle,
   Clock,
@@ -24,6 +26,7 @@ import {
   Tag,
   Phone,
   MessageCircle,
+  MessageSquare,
   RotateCcw,
   SlidersHorizontal,
   X,
@@ -77,6 +80,9 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   // Rating & Review state
   const [existingReview, setExistingReview] = useState<Review | null>(null);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+
+  // In-App Chat state
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   const handleOpenProviderProfile = async (providerId: string) => {
     if (!providerId) return;
@@ -168,6 +174,10 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
     }
   };
 
+  // Customer completion confirmation modal state
+  const [showCompletionConfirmModal, setShowCompletionConfirmModal] = useState(false);
+  const [isSubmittingCompletion, setIsSubmittingCompletion] = useState(false);
+
   // Status Lifecycle Handlers
   const handleStartWork = async () => {
     if (!request) return;
@@ -180,20 +190,53 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
     }
   };
 
-  const handleCompleteWork = async () => {
-    if (!request) return;
+  const handleCompleteWorkClick = () => {
+    if (!request || isSubmittingCompletion) return;
+    const currentStatus = normalizeRequestStatus(request.status);
+    if (currentStatus !== 'IN_PROGRESS') return;
+    setShowCompletionConfirmModal(true);
+  };
+
+  const handleConfirmCompleteWork = async () => {
+    if (!request || isSubmittingCompletion) return;
+    const currentStatus = normalizeRequestStatus(request.status);
+    if (currentStatus !== 'IN_PROGRESS') {
+      setShowCompletionConfirmModal(false);
+      return;
+    }
+
+    setIsSubmittingCompletion(true);
+    setActionError(null);
+
     try {
-      setActionError(null);
       const updated = await repository.updateRequestStatus(request.id, 'COMPLETED');
       if (updated) {
         const fresh = (await repository.getRequest(request.id)) || updated;
         const normalized = { ...fresh, status: normalizeRequestStatus(fresh.status) };
         setRequest(normalized);
+
         const reviews = await repository.getReviews({ requestId: fresh.id });
-        setExistingReview(reviews[0] || null);
+        const existing = reviews[0] || null;
+        setExistingReview(existing);
+
+        setShowCompletionConfirmModal(false);
+        setIsSubmittingCompletion(false);
+
+        // Trigger Review modal automatically if conditions met:
+        // - request is COMPLETED
+        // - an accepted provider exists (selectedOffer)
+        // - no review submitted yet (!existing)
+        // - not evaluating self (!isSelfProvider)
+        if (selectedOffer && !existing && !isSelfProvider) {
+          setIsReviewModalOpen(true);
+        }
+      } else {
+        throw new Error('Failed to update request status');
       }
     } catch (err) {
-      setActionError(getFriendlyErrorMessage(err, language));
+      setIsSubmittingCompletion(false);
+      setShowCompletionConfirmModal(false);
+      setActionError(getFriendlyErrorMessage(err, language) || t.completeWorkError);
     }
   };
 
@@ -320,6 +363,19 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
         return null;
     }
   };
+
+  if (isChatOpen && request?.id) {
+    return (
+      <div className="w-full max-w-xl mx-auto px-0 sm:px-4 py-2 sm:py-5">
+        <ChatScreen
+          requestId={request.id}
+          language={language}
+          onBack={() => setIsChatOpen(false)}
+          userRole="customer"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col justify-between space-y-4">
@@ -525,6 +581,16 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 </p>
               )}
 
+              {/* In-App Chat Button: Available only for selected provider */}
+              <button
+                type="button"
+                onClick={() => setIsChatOpen(true)}
+                className="w-full min-h-[46px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>{t.chatWithProviderBtn}</span>
+              </button>
+
               {/* Call & WhatsApp buttons: Preserved phone/WhatsApp communication */}
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <button
@@ -585,8 +651,9 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                   <>
                     <button
                       type="button"
-                      onClick={handleCompleteWork}
-                      className="flex-1 min-h-[40px] px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5"
+                      disabled={isSubmittingCompletion}
+                      onClick={handleCompleteWorkClick}
+                      className="flex-1 min-h-[42px] px-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 active:scale-[0.99] text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <CheckCircle className="w-4 h-4" />
                       <span>{t.btnCompleteWork}</span>
@@ -594,7 +661,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                     <button
                       type="button"
                       onClick={handleCancelRequest}
-                      className="px-3 min-h-[40px] bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 font-semibold text-xs rounded-xl border border-slate-200 transition-colors"
+                      className="px-3 min-h-[42px] bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 font-semibold text-xs rounded-xl border border-slate-200 transition-colors cursor-pointer"
                     >
                       {t.btnCancelRequest}
                     </button>
@@ -602,6 +669,20 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 )}
               </div>
             </div>
+          )}
+
+        {/* Appointment Scheduling for Selected Provider */}
+        {(request?.status === 'PROVIDER_SELECTED' ||
+          request?.status === 'ACCEPTED' ||
+          request?.status === 'IN_PROGRESS' ||
+          request?.status === 'COMPLETED') &&
+          selectedOffer && (
+            <AppointmentSection
+              request={request}
+              selectedOffer={selectedOffer}
+              currentRole="customer"
+              language={language}
+            />
           )}
 
         {/* Cancelled Notice */}
@@ -900,6 +981,62 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
             >
               {t.closeButton}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Completion Confirmation Modal */}
+      {showCompletionConfirmModal && request && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn"
+          onClick={() => !isSubmittingCompletion && setShowCompletionConfirmModal(false)}
+        >
+          <div
+            className="w-full sm:max-w-md bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl border border-slate-100 p-5 space-y-4 animate-slideUp"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
+                <CheckCircle className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 font-display">
+                  {t.confirmCompleteWorkTitle}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  {t.confirmCompleteWorkSubtitle}
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isSubmittingCompletion}
+                onClick={() => setShowCompletionConfirmModal(false)}
+                className="flex-1 min-h-[44px] rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 active:scale-[0.99] text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+              >
+                {t.btnCancelCompleteWorkModal}
+              </button>
+
+              <button
+                type="button"
+                disabled={isSubmittingCompletion}
+                onClick={handleConfirmCompleteWork}
+                className="flex-1 min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 active:scale-[0.99] text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {isSubmittingCompletion ? (
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <CheckCircle className="w-4 h-4" />
+                    <span>{t.btnConfirmCompleteWork}</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

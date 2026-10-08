@@ -165,7 +165,13 @@ export function validateOfferData(
 
   // For fixed and from price types, price is strictly required
   if (effectivePriceType === 'fixed' || effectivePriceType === 'from') {
-    if (!data.price || data.price.trim().length === 0) {
+    const priceStr =
+      typeof data.price === 'number'
+        ? String(data.price)
+        : typeof data.price === 'string'
+        ? data.price.trim()
+        : '';
+    if (!priceStr) {
       return {
         valid: false,
         field: 'price',
@@ -295,3 +301,5 @@ export function validateReviewData(
 
   return { valid: true };
 }
+
+export { validateAndSanitizeRequestUnderstanding } from './requestUnderstanding';

@@ -1,10 +1,18 @@
 import {
+  Appointment,
+  AppNotification,
+  ChatAttachment,
+  ChatMessage,
+  Conversation,
   Provider,
   ProviderOffer,
+  RequestAttachment,
+  RequestLocation,
   RequestStatus,
   Review,
   ServiceRequest,
   User,
+  WorkStatus,
 } from '../types';
 
 export interface RequestFilter {
@@ -53,6 +61,11 @@ export interface Repository {
     status: RequestStatus,
     selectedOfferId?: string
   ): Promise<ServiceRequest | null>;
+  uploadRequestAttachment(
+    requestId: string,
+    file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string },
+    customerId?: string
+  ): Promise<RequestAttachment>;
 
   // Offers
   createOffer(offerData: Partial<ProviderOffer>): Promise<ProviderOffer>;
@@ -66,4 +79,59 @@ export interface Repository {
 
   // Matching
   matchProviders(request: ServiceRequest): Promise<Provider[]>;
+
+  // Conversations & In-App Chat
+  getConversation(conversationId: string): Promise<Conversation | null>;
+  getOrCreateConversation(requestId: string): Promise<Conversation>;
+  getMessages(conversationId: string, limitCount?: number): Promise<ChatMessage[]>;
+  sendMessage(conversationId: string, messageData: Partial<ChatMessage>): Promise<ChatMessage>;
+  uploadChatAttachment(
+    conversationId: string,
+    file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string }
+  ): Promise<ChatAttachment>;
+  sendChatMessageWithAttachment(
+    conversationId: string,
+    messageData: {
+      text?: string;
+      senderId?: string;
+      senderRole?: 'customer' | 'provider';
+      file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string };
+    }
+  ): Promise<ChatMessage>;
+  markMessagesAsRead(conversationId: string): Promise<void>;
+  subscribeToMessages(
+    conversationId: string,
+    onUpdate: (messages: ChatMessage[]) => void,
+    onError?: (error: any) => void
+  ): () => void;
+
+  // In-App Notifications
+  createNotification(notificationData: AppNotification): Promise<AppNotification>;
+  getNotifications(userId: string, limitCount?: number): Promise<AppNotification[]>;
+  markNotificationAsRead(notificationId: string): Promise<void>;
+  markAllNotificationsAsRead(userId: string): Promise<void>;
+  subscribeToNotifications(
+    userId: string,
+    onUpdate: (notifications: AppNotification[]) => void,
+    onError?: (error: any) => void
+  ): () => void;
+
+  // Appointments
+  getAppointment(requestId: string): Promise<Appointment | null>;
+  createAppointment(appointmentData: Omit<Appointment, 'id' | 'createdAt' | 'updatedAt'>): Promise<Appointment>;
+  updateAppointment(appointmentId: string, updates: Partial<Appointment>): Promise<Appointment>;
+  cancelAppointment(appointmentId: string, cancelledByRole: 'customer' | 'provider', reason?: string): Promise<Appointment>;
+  confirmAppointment(appointmentId: string, confirmedByRole: 'customer' | 'provider'): Promise<Appointment>;
+  rescheduleAppointment(appointmentId: string, scheduledAt: string, proposedBy: 'customer' | 'provider', note?: string): Promise<Appointment>;
+  completeAppointment(appointmentId: string): Promise<Appointment>;
+  updateWorkStatus(
+    appointmentId: string,
+    workStatus: WorkStatus,
+    providerUserId: string
+  ): Promise<Appointment>;
+  subscribeToAppointment(
+    requestId: string,
+    onUpdate: (appointment: Appointment | null) => void,
+    onError?: (error: any) => void
+  ): () => void;
 }

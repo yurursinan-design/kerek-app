@@ -23,7 +23,7 @@ export { exportLocalData, importLocalData } from './backupService';
 export { validateRequestData, validateProviderData, validateOfferData, validateReviewData } from './validation';
 export { matchProviders } from './matchingService';
 
-// AI Request Parser (Callable Cloud Function)
+// AI Request Parser & Request Understanding 2.0
 export { parseServiceRequest } from './aiRequestParser';
 export type {
   AiParsedRequestResult,
@@ -31,5 +31,27 @@ export type {
   AiParserError,
   AiParserErrorCode,
 } from './aiRequestParser';
+export {
+  analyzeRequestUnderstanding,
+  understandingToExtractedNeed,
+  LocalRequestUnderstandingProvider,
+  GeminiRequestUnderstandingProvider,
+  defaultRequestUnderstandingProvider,
+} from './requestUnderstanding';
+export type {
+  RequestUnderstandingContext,
+  RequestUnderstandingProvider,
+} from './requestUnderstanding';
+
+// In-App Notification System
+export {
+  notificationService,
+  playNotificationSound,
+  showBrowserNotificationIfGranted,
+} from './notificationService';
+
+// Offline Mutation Queue & Cloud Sync Service
+export { offlineQueueService, OfflineQueueService, isFatalError } from './offlineQueueService';
+export type { QueuedMutation, MutationType, MutationStatus } from './offlineQueueService';
 
 export type { Repository };

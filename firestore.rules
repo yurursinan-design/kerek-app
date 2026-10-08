@@ -9,7 +9,7 @@ service cloud.firestore {
 
     // Helper functions
     function isValidId(id) {
-      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() > 0 && id.size() <= 128;
     }
 
     function incoming() {
@@ -80,8 +80,26 @@ service cloud.firestore {
     // - Provider can only read and list requests matching their registered provider profile cityId + categoryId
     // - Blanket or unconstrained requests queries are strictly forbidden
     match /requests/{requestId} {
-      allow get: if isSignedIn() && isValidId(requestId);
-      allow list: if isSignedIn();
+      allow get: if isSignedIn() && isValidId(requestId) && (
+        resource.data.customerId == request.auth.uid ||
+        (isRegisteredProvider() && (
+          (resource.data.cityId is string && getProviderData().cityId is string &&
+           resource.data.cityId == getProviderData().cityId &&
+           resource.data.categoryId is string && getProviderData().categoryId is string &&
+           resource.data.categoryId == getProviderData().categoryId) ||
+          (resource.data.city == getProviderData().city && resource.data.category == getProviderData().category)
+        ))
+      );
+      allow list: if isSignedIn() && (
+        resource.data.customerId == request.auth.uid ||
+        (isRegisteredProvider() && (
+          (resource.data.cityId is string && getProviderData().cityId is string &&
+           resource.data.cityId == getProviderData().cityId &&
+           resource.data.categoryId is string && getProviderData().categoryId is string &&
+           resource.data.categoryId == getProviderData().categoryId) ||
+          (resource.data.city == getProviderData().city && resource.data.category == getProviderData().category)
+        ))
+      );
       allow create: if isSignedIn()
                     && isValidId(requestId)
                     && incoming().id == requestId
@@ -89,16 +107,47 @@ service cloud.firestore {
                     && incoming().city is string && incoming().city.size() <= 50
                     && incoming().category is string && incoming().category.size() <= 100
                     && ('service' in incoming()) && incoming()['service'] is string && incoming()['service'].size() <= 150
-                    && incoming().status in ['OPEN', 'PROVIDER_SELECTED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'NEW', 'MATCHING', 'OFFERS_RECEIVED', 'ACCEPTED', 'REJECTED'];
+                    && incoming().status in ['OPEN', 'NEW', 'MATCHING']
+                    && (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 15))
+                    && (!('location' in incoming()) || (incoming().location is map && ('latitude' in incoming().location) && ('longitude' in incoming().location)));
       allow update: if isSignedIn() && isValidId(requestId) && (
         // Customer updating their own request
-        (existing().customerId == request.auth.uid && incoming().customerId == existing().customerId && incoming().id == existing().id) ||
-        // Registered provider submitting offer or updating job status (in-progress, completed)
+        (existing().customerId == request.auth.uid &&
+         incoming().customerId == existing().customerId &&
+         incoming().id == existing().id &&
+         (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 15)) &&
+         (!('location' in incoming()) || (incoming().location is map && ('latitude' in incoming().location) && ('longitude' in incoming().location)))) ||
+        // Provider updating status to OFFERS_RECEIVED when submitting an offer
         (isRegisteredProvider() &&
          incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
-         incoming().status in ['OFFERS_RECEIVED', 'OPEN', 'IN_PROGRESS', 'COMPLETED'] &&
-         (existing().status in ['OPEN', 'MATCHING', 'NEW', 'OFFERS_RECEIVED', 'PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS']))
+         incoming().status == 'OFFERS_RECEIVED' &&
+         existing().status in ['OPEN', 'MATCHING', 'NEW', 'OFFERS_RECEIVED']) ||
+        // Selected provider updating job status (in-progress, completed)
+        (isRegisteredProvider() &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+         incoming().status in ['IN_PROGRESS', 'COMPLETED'] &&
+         existing().status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'] &&
+         existing().selectedOfferId is string &&
+         exists(/databases/$(database)/documents/offers/$(existing().selectedOfferId)) &&
+         (get(/databases/$(database)/documents/offers/$(existing().selectedOfferId)).data.providerUserId == request.auth.uid ||
+          get(/databases/$(database)/documents/offers/$(existing().selectedOfferId)).data.providerId == request.auth.uid))
       );
+      allow delete: if false;
+    }
+
+    // =================== Request Contacts Collection ===================
+    // Private Contact Info: Customer Phone Number
+    // - Only customer and the selected provider (whose offer was accepted) can read customer contact details
+    match /requestContacts/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId) && (
+        resource.data.customerId == request.auth.uid ||
+        (exists(/databases/$(database)/documents/requests/$(requestId)) &&
+         get(/databases/$(database)/documents/requests/$(requestId)).data.selectedOfferId is string &&
+         exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(requestId)).data.selectedOfferId)) &&
+         (get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(requestId)).data.selectedOfferId)).data.providerUserId == request.auth.uid ||
+          get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(requestId)).data.selectedOfferId)).data.providerId == request.auth.uid))
+      );
+      allow create, update: if isSignedIn() && isValidId(requestId) && incoming().customerId == request.auth.uid;
       allow delete: if false;
     }
 
@@ -126,15 +175,18 @@ service cloud.firestore {
                     && incoming().requestId is string && incoming().requestId.size() <= 64
                     && incoming().providerUserId == request.auth.uid
                     && incoming().price is string && incoming().price.size() <= 50
-                    && incoming().status in ['PENDING', 'ACCEPTED', 'REJECTED'];
+                    && incoming().status == 'PENDING';
       allow update: if isSignedIn() && isValidId(offerId) && (
-        // Provider updating their own offer
+        // Provider updating their own offer details while still PENDING
         (existing().providerUserId == request.auth.uid &&
          incoming().providerUserId == existing().providerUserId &&
          incoming().requestId == existing().requestId &&
-         incoming().id == existing().id) ||
+         incoming().id == existing().id &&
+         existing().status == 'PENDING' &&
+         incoming().status == 'PENDING') ||
         // Customer accepting or rejecting an offer on their request
         (get(/databases/$(database)/documents/requests/$(existing().requestId)).data.customerId == request.auth.uid &&
+         existing().status == 'PENDING' &&
          incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
          incoming().status in ['ACCEPTED', 'REJECTED'])
       );
@@ -168,6 +220,215 @@ service cloud.firestore {
                     && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.status == 'ACCEPTED'
                     && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerId == incoming().providerId;
       allow update: if false;
+      allow delete: if false;
+    }
+
+    // =================== Conversations Collection ===================
+    // Customer ↔ Selected Provider in-app messaging:
+    // - Document ID is strictly deterministic: conv_{requestId}
+    // - Only participants (customerId == auth.uid or providerUserId == auth.uid or providerId == auth.uid) can read
+    // - Cannot be created or accessed for OPEN requests (request must be in PROVIDER_SELECTED, ACCEPTED, IN_PROGRESS, or COMPLETED)
+    // - List queries strictly scoped to current user as participant (preventing blanket discovery)
+    match /conversations/{conversationId} {
+      allow get: if isSignedIn() && isValidId(conversationId) && (
+        resource.data.customerId == request.auth.uid ||
+        resource.data.providerUserId == request.auth.uid ||
+        resource.data.providerId == request.auth.uid
+      );
+      allow list: if isSignedIn() && (
+        resource.data.customerId == request.auth.uid ||
+        resource.data.providerUserId == request.auth.uid ||
+        resource.data.providerId == request.auth.uid
+      );
+      allow create: if isSignedIn()
+                    && isValidId(conversationId)
+                    && conversationId == ('conv_' + incoming().requestId)
+                    && (incoming().customerId == request.auth.uid || incoming().providerUserId == request.auth.uid || incoming().providerId == request.auth.uid)
+                    && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status != 'CANCELLED'
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == incoming().customerId
+                    && incoming().status in ['ACTIVE', 'ARCHIVED'];
+      allow update: if isSignedIn() && isValidId(conversationId) && (
+        resource.data.customerId == request.auth.uid ||
+        resource.data.providerUserId == request.auth.uid ||
+        resource.data.providerId == request.auth.uid
+      );
+      allow delete: if false;
+
+      // Messages Subcollection
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+                      && isValidId(messageId)
+                      && incoming().id == messageId
+                      && incoming().conversationId == conversationId
+                      && incoming().senderId == request.auth.uid
+                      && incoming().type in ['text', 'image', 'file']
+                      && incoming().text is string && incoming().text.size() <= 2000
+                      && (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 10))
+                      && conversationId == ('conv_' + incoming().requestId)
+                      && exists(/databases/$(database)/documents/conversations/$(conversationId))
+                      && get(/databases/$(database)/documents/conversations/$(conversationId)).data.requestId == incoming().requestId
+                      && (
+                        (get(/databases/$(database)/documents/conversations/$(conversationId)).data.customerId == request.auth.uid && incoming().senderRole == 'customer') ||
+                        ((get(/databases/$(database)/documents/conversations/$(conversationId)).data.providerUserId == request.auth.uid || get(/databases/$(database)/documents/conversations/$(conversationId)).data.providerId == request.auth.uid) && incoming().senderRole == 'provider')
+                      )
+                      && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
+                      && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']
+                      && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status != 'CANCELLED'
+                      && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status != 'OPEN';
+        allow update: if false;
+        allow delete: if false;
+      }
+    }
+
+    // =================== Notifications Collection ===================
+    // Spark MVP In-App Notification System:
+    // - Document ID is deterministic/idempotent: notif_{type}_{refId}
+    // - Reading & listing is strictly scoped to the recipient (recipientUserId == request.auth.uid)
+    // - Creating a notification requires authentication, valid document structure, and unread status
+    // - Updating is strictly restricted to marking as read (isRead, readAt) by the recipient
+    //   while core identity and relation fields remain completely immutable
+    // - Deletion is strictly prohibited
+    match /notifications/{notificationId} {
+      allow get, list: if isSignedIn() && isValidId(notificationId) && resource.data.recipientUserId == request.auth.uid;
+      allow create: if isSignedIn()
+                    && isValidId(notificationId)
+                    && incoming().id == notificationId
+                    && incoming().recipientUserId is string && incoming().recipientUserId.size() > 0
+                    && incoming().type is string
+                    && incoming().isRead == false
+                    && incoming().createdAt is string
+                    && (
+                      incoming().recipientUserId == request.auth.uid ||
+                      (
+                        incoming().requestId is string &&
+                        exists(/databases/$(database)/documents/requests/$(incoming().requestId)) &&
+                        (
+                          // Customer on request
+                          get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == request.auth.uid ||
+                          // Selected provider on request
+                          (
+                            get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId is string &&
+                            exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)) &&
+                            (
+                              get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerUserId == request.auth.uid ||
+                              get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerId == request.auth.uid
+                            )
+                          ) ||
+                          // Provider who submitted an offer for this request
+                          (
+                            ('offerId' in incoming()) &&
+                            incoming().offerId is string &&
+                            exists(/databases/$(database)/documents/offers/$(incoming().offerId)) &&
+                            get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.requestId == incoming().requestId &&
+                            (
+                              get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.providerUserId == request.auth.uid ||
+                              get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.providerId == request.auth.uid
+                            )
+                          ) ||
+                          // Participant in associated conversation
+                          (
+                            ('conversationId' in incoming()) &&
+                            incoming().conversationId is string &&
+                            exists(/databases/$(database)/documents/conversations/$(incoming().conversationId)) &&
+                            (
+                              get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.customerId == request.auth.uid ||
+                              get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.providerUserId == request.auth.uid ||
+                              get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.providerId == request.auth.uid
+                            )
+                          )
+                        )
+                      )
+                    );
+      allow update: if isSignedIn()
+                    && isValidId(notificationId)
+                    && resource.data.recipientUserId == request.auth.uid
+                    && incoming().recipientUserId == resource.data.recipientUserId
+                    && incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'readAt']);
+      allow delete: if false;
+    }
+
+    // =================== Appointments Collection ===================
+    // Service Appointments / Scheduling:
+    // - Deterministic ID: appointment_{requestId}
+    // - Only customer and accepted provider of the request can read, create, and update
+    // - Cannot create appointment for CANCELLED requests or requests without accepted/selected provider
+    // - Safe optional field checks for durationMinutes and note
+    // - Valid status transitions enforced:
+    //     PROPOSED -> CONFIRMED, RESCHEDULED, CANCELLED
+    //     CONFIRMED -> RESCHEDULED, CANCELLED, COMPLETED
+    //     RESCHEDULED -> CONFIRMED, RESCHEDULED, CANCELLED
+    // - Immutable keys: id, requestId, customerId, providerId, providerUserId, createdAt
+    match /appointments/{appointmentId} {
+      allow get, list: if isSignedIn() && (
+        resource.data.customerId == request.auth.uid ||
+        resource.data.providerUserId == request.auth.uid ||
+        resource.data.providerId == request.auth.uid
+      );
+
+      allow create: if isSignedIn()
+                    && isValidId(appointmentId)
+                    && appointmentId == ('appointment_' + incoming().requestId)
+                    && incoming().id == appointmentId
+                    && (
+                      (incoming().proposedBy == 'customer' && incoming().customerId == request.auth.uid) ||
+                      (incoming().proposedBy == 'provider' && (incoming().providerUserId == request.auth.uid || incoming().providerId == request.auth.uid))
+                    )
+                    && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status != 'CANCELLED'
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == incoming().customerId
+                    && incoming().status in ['PROPOSED', 'CONFIRMED']
+                    && incoming().scheduledAt is string && incoming().scheduledAt.size() >= 10 && incoming().scheduledAt.size() <= 40
+                    && (!('durationMinutes' in incoming()) || (incoming().durationMinutes is number && incoming().durationMinutes > 0 && incoming().durationMinutes <= 1440))
+                    && (!('note' in incoming()) || (incoming().note is string && incoming().note.size() <= 1000))
+                    && (!('workStatus' in incoming()) || incoming().workStatus in ['NOT_STARTED', 'PROVIDER_ON_THE_WAY', 'PROVIDER_ARRIVED', 'WORK_STARTED', 'WORK_COMPLETED', 'CANCELLED'])
+                    && (!('workStatusUpdatedAt' in incoming()) || incoming().workStatusUpdatedAt is string)
+                    && incoming().createdAt is string
+                    && incoming().updatedAt is string;
+
+      allow update: if isSignedIn()
+                    && isValidId(appointmentId)
+                    && (
+                      resource.data.customerId == request.auth.uid ||
+                      resource.data.providerUserId == request.auth.uid ||
+                      resource.data.providerId == request.auth.uid
+                    )
+                    && incoming().id == resource.data.id
+                    && incoming().requestId == resource.data.requestId
+                    && incoming().customerId == resource.data.customerId
+                    && incoming().providerId == resource.data.providerId
+                    && incoming().providerUserId == resource.data.providerUserId
+                    && incoming().createdAt == resource.data.createdAt
+                    && incoming().updatedAt is string
+                    && incoming().scheduledAt is string && incoming().scheduledAt.size() >= 10 && incoming().scheduledAt.size() <= 40
+                    && (!('durationMinutes' in incoming()) || (incoming().durationMinutes is number && incoming().durationMinutes > 0 && incoming().durationMinutes <= 1440))
+                    && (!('note' in incoming()) || (incoming().note is string && incoming().note.size() <= 1000))
+                    && (
+                      (resource.data.status == 'PROPOSED' && incoming().status in ['PROPOSED', 'CONFIRMED', 'RESCHEDULED', 'CANCELLED']) ||
+                      (resource.data.status == 'CONFIRMED' && incoming().status in ['CONFIRMED', 'RESCHEDULED', 'CANCELLED', 'COMPLETED']) ||
+                      (resource.data.status == 'RESCHEDULED' && incoming().status in ['RESCHEDULED', 'CONFIRMED', 'CANCELLED']) ||
+                      (resource.data.status == 'COMPLETED' && incoming().status == 'COMPLETED') ||
+                      (resource.data.status == 'CANCELLED' && incoming().status == 'CANCELLED')
+                    )
+                    && (
+                      (!('workStatus' in incoming()) && !('workStatus' in resource.data)) ||
+                      (('workStatus' in incoming()) && ('workStatus' in resource.data) && incoming().workStatus == resource.data.workStatus) ||
+                      (
+                        (request.auth.uid == resource.data.providerUserId || request.auth.uid == resource.data.providerId)
+                        && ('workStatus' in incoming())
+                        && (
+                          ((!('workStatus' in resource.data) || resource.data.workStatus == 'NOT_STARTED') && incoming().workStatus in ['NOT_STARTED', 'PROVIDER_ON_THE_WAY', 'CANCELLED']) ||
+                          (resource.data.workStatus == 'PROVIDER_ON_THE_WAY' && incoming().workStatus in ['PROVIDER_ON_THE_WAY', 'PROVIDER_ARRIVED', 'CANCELLED']) ||
+                          (resource.data.workStatus == 'PROVIDER_ARRIVED' && incoming().workStatus in ['PROVIDER_ARRIVED', 'WORK_STARTED', 'CANCELLED']) ||
+                          (resource.data.workStatus == 'WORK_STARTED' && incoming().workStatus in ['WORK_STARTED', 'WORK_COMPLETED', 'CANCELLED'])
+                        )
+                      )
+                    )
+                    && (!('workStatusUpdatedAt' in incoming()) || incoming().workStatusUpdatedAt is string);
+
       allow delete: if false;
     }
   }

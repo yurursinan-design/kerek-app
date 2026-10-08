@@ -275,6 +275,90 @@
         }
       },
       "required": ["id", "requestId", "customerId", "providerId", "rating", "createdAt"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Customer and provider in-app conversation metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "requestId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 100 },
+        "providerId": { "type": "string", "maxLength": 128 },
+        "providerUserId": { "type": "string", "maxLength": 128 },
+        "providerName": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["ACTIVE", "ARCHIVED"] },
+        "lastMessageText": { "type": "string", "maxLength": 2000 },
+        "lastMessageSenderId": { "type": "string", "maxLength": 128 },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "unreadCountCustomer": { "type": "integer" },
+        "unreadCountProvider": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "requestId", "customerId", "providerId", "status", "createdAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "In-app message sent between customer and provider",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "conversationId": { "type": "string", "maxLength": 128 },
+        "requestId": { "type": "string", "maxLength": 64 },
+        "senderId": { "type": "string", "maxLength": 128 },
+        "senderRole": { "type": "string", "enum": ["customer", "provider", "system"] },
+        "type": { "type": "string", "enum": ["text", "system"] },
+        "text": { "type": "string", "maxLength": 2000 },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "conversationId", "requestId", "senderId", "senderRole", "type", "text", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app notifications for customer and provider events",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "recipientUserId": { "type": "string", "maxLength": 128 },
+        "recipientRole": { "type": "string", "enum": ["customer", "provider"] },
+        "type": { "type": "string", "maxLength": 64 },
+        "title": { "type": "object" },
+        "body": { "type": "object" },
+        "requestId": { "type": "string", "maxLength": 64 },
+        "offerId": { "type": "string", "maxLength": 128 },
+        "conversationId": { "type": "string", "maxLength": 128 },
+        "providerId": { "type": "string", "maxLength": 128 },
+        "targetScreen": { "type": "string", "maxLength": 64 },
+        "isRead": { "type": "boolean" },
+        "readAt": { "type": ["string", "null"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "recipientUserId", "recipientRole", "type", "isRead", "createdAt"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Scheduled service appointment between customer and provider",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "requestId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 128 },
+        "providerId": { "type": "string", "maxLength": 128 },
+        "providerUserId": { "type": "string", "maxLength": 128 },
+        "proposedBy": { "type": "string", "enum": ["customer", "provider"] },
+        "scheduledAt": { "type": "string", "maxLength": 40 },
+        "durationMinutes": { "type": "number", "minimum": 1, "maximum": 1440 },
+        "status": { "type": "string", "enum": ["PROPOSED", "CONFIRMED", "RESCHEDULED", "CANCELLED", "COMPLETED"] },
+        "note": { "type": "string", "maxLength": 1000 },
+        "workStatus": { "type": "string", "enum": ["NOT_STARTED", "PROVIDER_ON_THE_WAY", "PROVIDER_ARRIVED", "WORK_STARTED", "WORK_COMPLETED", "CANCELLED"] },
+        "workStatusUpdatedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "requestId", "customerId", "providerId", "providerUserId", "proposedBy", "scheduledAt", "status", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -297,6 +381,22 @@
     "/reviews/{reviewId}": {
       "schema": { "$ref": "#/entities/Review" },
       "description": "Customer reviews keyed by requestId"
+    },
+    "/conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/Conversation" },
+      "description": "Conversation metadata between customer and selected provider"
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "Messages subcollection in conversation"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "In-app notifications for users"
+    },
+    "/appointments/{appointmentId}": {
+      "schema": { "$ref": "#/entities/Appointment" },
+      "description": "Scheduled appointments between customer and provider"
     }
   }
 }

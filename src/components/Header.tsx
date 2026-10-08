@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Language } from '../types';
+import { AppNotification, Language } from '../types';
 import { ArrowLeft, Database, Download, Upload, X, CheckCircle, AlertCircle, Cloud, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { exportLocalData, importLocalData, isFirebaseConfigured, resilientRepository, runFirebaseDiagnostics, getLatestDiagnosticReport } from '../services';
+import { NotificationBell } from './NotificationBell';
 
 interface HeaderProps {
   currentScreen: 'home' | 'interpretation' | 'results';
@@ -10,6 +11,10 @@ interface HeaderProps {
   onBack: () => void;
   onHomeClick: () => void;
   onDataImported?: () => void;
+  notifications?: AppNotification[];
+  unreadCount?: number;
+  currentUserId?: string;
+  onSelectNotification?: (notif: AppNotification) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -19,6 +24,10 @@ export const Header: React.FC<HeaderProps> = ({
   onBack,
   onHomeClick,
   onDataImported,
+  notifications = [],
+  unreadCount = 0,
+  currentUserId = '',
+  onSelectNotification,
 }) => {
   const [showDemoModal, setShowDemoModal] = useState(false);
   const [importStatus, setImportStatus] = useState<{ success: boolean; message: string } | null>(null);
@@ -158,6 +167,15 @@ export const Header: React.FC<HeaderProps> = ({
                 RU
               </button>
             </div>
+
+            {/* In-App Notifications Bell */}
+            <NotificationBell
+              notifications={notifications}
+              unreadCount={unreadCount}
+              language={language}
+              currentUserId={currentUserId}
+              onSelectNotification={onSelectNotification || (() => {})}
+            />
           </div>
         </div>
       </header>

@@ -1,7 +1,7 @@
 import { DemoProvider, ExtractedNeed, Language } from '../types';
 import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 
-function enrich(providers: DemoProvider[], defaultCatId: string, defaultCityId: string): DemoProvider[] {
+function enrich(providers: DemoProvider[], defaultCatId: string, defaultCityId?: string): DemoProvider[] {
   return providers.map((p) => ({
     ...p,
     cityId: p.cityId || defaultCityId,

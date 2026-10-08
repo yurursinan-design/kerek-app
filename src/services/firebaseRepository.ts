@@ -6,16 +6,39 @@ import {
   setDoc,
   updateDoc,
   writeBatch,
+  runTransaction,
   query,
   where,
+  orderBy,
+  limit,
+  onSnapshot,
 } from 'firebase/firestore';
 import {
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+} from 'firebase/storage';
+import {
+  Appointment,
+  AppNotification,
+  ChatAttachment,
+  ChatMessage,
+  Conversation,
+  getAppointmentId,
+  getConversationId,
   Provider,
   ProviderOffer,
+  RequestAttachment,
+  RequestLocation,
   RequestStatus,
   Review,
+  sanitizeFileName,
   ServiceRequest,
   User,
+  validateChatAttachment,
+  validateRequestAttachment,
+  WorkStatus,
+  isValidWorkStatusTransition,
 } from '../types';
 import {
   OfferFilter,
@@ -27,6 +50,7 @@ import {
 import {
   db,
   auth,
+  storage,
   isFirebaseConfigured,
   ensureFirebaseAuth,
   handleFirestoreError,
@@ -35,6 +59,7 @@ import {
 } from './firebase';
 import { matchProviders } from './matchingService';
 import { INITIAL_DEMO_PROVIDERS } from './storage';
+import { notificationService } from './notificationService';
 import {
   validateOfferData,
   validateProviderData,
@@ -358,26 +383,145 @@ export class FirebaseRepository implements Repository {
       createdAt: requestData.createdAt || new Date().toISOString(),
     };
 
-    if (requestData.customerPhone && requestData.customerPhone.trim()) {
-      newRequest.customerPhone = requestData.customerPhone.trim();
-    }
     if (requestData.selectedOfferId && requestData.selectedOfferId.trim()) {
       newRequest.selectedOfferId = requestData.selectedOfferId.trim();
+    }
+    if (requestData.attachments && requestData.attachments.length > 0) {
+      newRequest.attachments = requestData.attachments;
+    }
+    if (requestData.location) {
+      newRequest.location = requestData.location;
+    }
+    if (requestData.understanding) {
+      newRequest.understanding = requestData.understanding;
     }
 
     try {
       const reqRef = doc(firestore, 'requests', id);
       await setDoc(reqRef, sanitizeForFirestore(newRequest));
 
+      // Privacy: Store private customer phone number in restricted requestContacts collection
+      let customerPhone: string | undefined = undefined;
+      if (requestData.customerPhone && requestData.customerPhone.trim()) {
+        customerPhone = requestData.customerPhone.trim();
+        const contactRef = doc(firestore, 'requestContacts', id);
+        await setDoc(
+          contactRef,
+          sanitizeForFirestore({
+            requestId: id,
+            customerId: customerId || auth?.currentUser?.uid || id,
+            customerPhone,
+            createdAt: new Date().toISOString(),
+          }),
+          { merge: true }
+        );
+      }
+
       // Generate demo offers to simulate immediate marketplace responsiveness
-      await this.generateDemoOffersForRequest(newRequest);
+      await this.generateDemoOffersForRequest({
+        ...newRequest,
+        ...(customerPhone ? { customerPhone } : {}),
+      });
 
       return {
         ...newRequest,
+        ...(customerPhone ? { customerPhone } : {}),
         status: normalizeRequestStatus(newRequest.status),
       };
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `requests/${id}`);
+    }
+  }
+
+  async uploadRequestAttachment(
+    requestId: string,
+    file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string },
+    customerId?: string
+  ): Promise<RequestAttachment> {
+    await ensureFirebaseAuth();
+    const cleanId = (requestId || '').trim();
+    if (!cleanId) {
+      throw new Error('Validation Error: requestId is required');
+    }
+
+    const authUid = auth?.currentUser?.uid;
+    const effectiveCustId = customerId || authUid || getCurrentUserId();
+
+    // If request already exists, verify current caller is the owner
+    try {
+      const existing = await this.getRequest(cleanId);
+      if (existing && authUid && existing.customerId !== authUid) {
+        throw new Error(`Unauthorized: Only the creator of request ${cleanId} can upload attachments`);
+      }
+    } catch (e: any) {
+      if (e?.message?.startsWith('Unauthorized:')) {
+        throw e;
+      }
+      // If request doc does not exist yet, proceed with upload
+    }
+
+    const validation = validateRequestAttachment(file);
+    if (!validation.isValid) {
+      throw new Error(`Validation Error: ${validation.errorKey}`);
+    }
+
+    const sanitizedName = sanitizeFileName(file.name);
+    const attachmentId = `att_req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const storagePath = `requests/${cleanId}/${attachmentId}_${sanitizedName}`;
+
+    if (!storage) {
+      throw new Error('Firebase Storage is not configured or unavailable');
+    }
+
+    // Determine binary payload
+    let blobPayload: Blob | Uint8Array | ArrayBuffer;
+    if (file.data instanceof Blob) {
+      blobPayload = file.data;
+    } else if (file.data instanceof Uint8Array || file.data instanceof ArrayBuffer) {
+      blobPayload = file.data;
+    } else if (typeof file.data === 'string' && file.data.startsWith('data:')) {
+      const parts = file.data.split(',');
+      const byteString = atob(parts[1] || '');
+      const mime = parts[0].split(':')[1]?.split(';')[0] || file.type;
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+      }
+      blobPayload = new Blob([ab], { type: mime });
+    } else {
+      throw new Error('Attachment payload data is missing or invalid');
+    }
+
+    const fileRef = storageRef(storage, storagePath);
+    const metadata = {
+      contentType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mp3'),
+      customMetadata: {
+        requestId: cleanId,
+        uploadedBy: authUid || effectiveCustId,
+        fileName: sanitizedName,
+      },
+    };
+
+    try {
+      const uploadResult = await uploadBytes(fileRef, blobPayload, metadata);
+      const downloadUrl = await getDownloadURL(uploadResult.ref);
+
+      const attachment: RequestAttachment = {
+        id: attachmentId,
+        type: validation.type,
+        storagePath,
+        downloadUrl,
+        fileName: sanitizedName,
+        mimeType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mp3'),
+        sizeBytes: file.size,
+        createdAt: new Date().toISOString(),
+      };
+
+      return attachment;
+    } catch (err: any) {
+      console.error('[FirebaseRepository] uploadRequestAttachment failed:', err);
+      throw new Error(`Failed to upload request attachment: ${err?.message || err}`);
     }
   }
 
@@ -393,8 +537,23 @@ export class FirebaseRepository implements Repository {
         typeof data.selectedOfferId === 'string' && data.selectedOfferId.trim()
           ? data.selectedOfferId.trim()
           : undefined;
+
+      let customerPhone = data.customerPhone;
+      if (!customerPhone) {
+        try {
+          const contactRef = doc(firestore, 'requestContacts', requestId);
+          const contactSnap = await getDoc(contactRef);
+          if (contactSnap.exists()) {
+            customerPhone = contactSnap.data()?.customerPhone;
+          }
+        } catch {
+          // If unauthorized or contact not present, ignore and proceed without customerPhone
+        }
+      }
+
       return {
         ...data,
+        ...(customerPhone ? { customerPhone } : {}),
         status: normalizeRequestStatus(data.status),
         selectedOfferId: cleanSelectedOfferId,
         cityId: data.cityId || normalizeCityId(data.city),
@@ -577,6 +736,29 @@ export class FirebaseRepository implements Repository {
 
     try {
       const reqRef = doc(firestore, 'requests', cleanReqId);
+      const reqSnap = await getDoc(reqRef);
+      if (reqSnap.exists()) {
+        const existingData = reqSnap.data() as ServiceRequest;
+        const normStatus = normalizeRequestStatus(existingData.status);
+        if (normStatus === 'CANCELLED' && safeUpdates.status && safeUpdates.status !== 'CANCELLED') {
+          throw new Error('Validation Error: Cannot change status of CANCELLED request');
+        }
+        if (
+          normStatus === 'PROVIDER_SELECTED' ||
+          normStatus === 'COMPLETED' ||
+          normStatus === 'CANCELLED'
+        ) {
+          const nonStatusKeys = Object.keys(safeUpdates).filter(
+            (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId'
+          );
+          if (nonStatusKeys.length > 0) {
+            throw new Error(
+              `Validation Error: Cannot edit request details in status: ${existingData.status}`
+            );
+          }
+        }
+      }
+
       await updateDoc(reqRef, sanitizeForFirestore(safeUpdates));
       return await this.getRequest(cleanReqId);
     } catch (err) {
@@ -593,7 +775,41 @@ export class FirebaseRepository implements Repository {
     if (selectedOfferId && selectedOfferId.trim()) {
       updates.selectedOfferId = selectedOfferId.trim();
     }
-    return this.updateRequest(requestId, updates);
+    const updated = await this.updateRequest(requestId, updates);
+    if (updated) {
+      const norm = normalizeRequestStatus(status);
+      if (norm === 'COMPLETED') {
+        const firestore = this.ensureDb();
+        let provUserId: string | undefined;
+        if (updated.selectedOfferId) {
+          getDoc(doc(firestore, 'offers', updated.selectedOfferId))
+            .then((snap) => {
+              if (snap.exists()) {
+                provUserId = snap.data()?.providerUserId || snap.data()?.providerId;
+              }
+              notificationService.notifyWorkCompleted(updated, provUserId).catch(() => {});
+            })
+            .catch(() => {
+              notificationService.notifyWorkCompleted(updated).catch(() => {});
+            });
+        } else {
+          notificationService.notifyWorkCompleted(updated).catch(() => {});
+        }
+      } else if (norm === 'CANCELLED') {
+        const firestore = this.ensureDb();
+        if (updated.selectedOfferId) {
+          getDoc(doc(firestore, 'offers', updated.selectedOfferId))
+            .then((snap) => {
+              if (snap.exists()) {
+                const provUserId = snap.data()?.providerUserId || snap.data()?.providerId;
+                notificationService.notifyRequestCancelled(updated, provUserId).catch(() => {});
+              }
+            })
+            .catch(() => {});
+        }
+      }
+    }
+    return updated;
   }
 
   // =================== Offers ===================
@@ -639,9 +855,17 @@ export class FirebaseRepository implements Repository {
 
       // Upgrade request status to OFFERS_RECEIVED if it was NEW or MATCHING
       if (newOffer.requestId) {
-        const req = await this.getRequest(newOffer.requestId);
-        if (req && (req.status === 'MATCHING' || req.status === 'NEW')) {
-          await this.updateRequest(req.id, { status: 'OFFERS_RECEIVED' });
+        try {
+          const req = await this.getRequest(newOffer.requestId);
+          if (req) {
+            if (req.status === 'MATCHING' || req.status === 'NEW') {
+              await this.updateRequest(req.id, { status: 'OFFERS_RECEIVED' });
+            }
+            // Trigger customer notification
+            notificationService.notifyNewOffer(req, newOffer).catch(() => {});
+          }
+        } catch (upgradeErr) {
+          console.warn('[FirebaseRepository] Note upgrading request status on offer creation:', upgradeErr);
         }
       }
 
@@ -681,7 +905,12 @@ export class FirebaseRepository implements Repository {
         let offers = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProviderOffer));
 
         if (filter.providerId) {
-          offers = offers.filter((o) => !o.providerId || o.providerId === filter.providerId);
+          offers = offers.filter(
+            (o) =>
+              !o.providerId ||
+              o.providerId === filter.providerId ||
+              o.providerUserId === filter.providerId
+          );
         }
 
         return offers;
@@ -706,10 +935,13 @@ export class FirebaseRepository implements Repository {
   }
 
   /**
-   * Atomically accepts an offer for a request:
-   * 1. Accepted offer: status = "ACCEPTED"
-   * 2. Request: status = "ACCEPTED", selectedOfferId = cleanOfferId
-   * 3. Sibling offers for this request: status = "REJECTED"
+   * Atomically accepts an offer for a request inside a single Firestore Transaction:
+   * 1. Validates preconditions (request ownership, offer PENDING status, non-accepted status)
+   * 2. Request: status = "PROVIDER_SELECTED", selectedOfferId = cleanOfferId
+   * 3. Target offer: status = "ACCEPTED"
+   * 4. Sibling offers for this request: status = "REJECTED"
+   * 5. Conversation: deterministic conv_{requestId} created/updated
+   * 6. Appointment: deterministic appointment_{requestId} created/updated
    */
   async acceptOffer(
     requestId: string,
@@ -724,79 +956,215 @@ export class FirebaseRepository implements Repository {
       throw new Error(`acceptOffer requires valid requestId and offerId. Received: '${requestId}', '${offerId}'`);
     }
 
+    const currentUid = auth?.currentUser?.uid || getCurrentUserId();
+
+    // 1. Pre-fetch sibling offer document references for cleanReqId
+    let siblingItems: { id: string; ref: any }[] = [];
     try {
-      // 1. Fetch sibling offers for this request
-      let siblingOffers: ProviderOffer[] = [];
-      try {
-        siblingOffers = await this.getOffers({ requestId: cleanReqId });
-      } catch (siblingFetchErr) {
-        console.warn('[FirebaseRepository] Note fetching sibling offers before accept:', siblingFetchErr);
-      }
+      const offersColl = collection(firestore, 'offers');
+      const q = query(offersColl, where('requestId', '==', cleanReqId));
+      const snap = await getDocs(q);
+      siblingItems = snap.docs.map((d) => ({ id: d.id, ref: d.ref }));
+    } catch (siblingFetchErr) {
+      console.warn('[FirebaseRepository] Note fetching sibling offer refs before accept:', siblingFetchErr);
+    }
 
-      // 2. Perform atomic batch update
-      const batch = writeBatch(firestore);
-      const offerRef = doc(firestore, 'offers', cleanOfferId);
-      const reqRef = doc(firestore, 'requests', cleanReqId);
+    const reqRef = doc(firestore, 'requests', cleanReqId);
+    const targetOfferRef = doc(firestore, 'offers', cleanOfferId);
+    const convId = getConversationId(cleanReqId);
+    const convRef = doc(firestore, 'conversations', convId);
+    const apptId = getAppointmentId(cleanReqId);
+    const apptRef = doc(firestore, 'appointments', apptId);
 
-      batch.update(offerRef, { status: 'ACCEPTED' });
-      batch.update(reqRef, {
-        status: 'PROVIDER_SELECTED',
-        selectedOfferId: cleanOfferId,
-      });
+    try {
+      let resultReq: ServiceRequest | null = null;
+      let resultOffer: ProviderOffer | null = null;
 
-      for (const sibling of siblingOffers) {
-        if (sibling.id && sibling.id !== cleanOfferId) {
-          batch.update(doc(firestore, 'offers', sibling.id), { status: 'REJECTED' });
+      await runTransaction(firestore, async (transaction) => {
+        // READ PHASE
+        const reqSnap = await transaction.get(reqRef);
+        if (!reqSnap.exists()) {
+          throw new Error(`Request not found: ${cleanReqId}`);
         }
-      }
+        const reqData = reqSnap.data() as ServiceRequest;
 
-      await batch.commit();
+        const offerSnap = await transaction.get(targetOfferRef);
+        if (!offerSnap.exists()) {
+          throw new Error(`Offer not found: ${cleanOfferId}`);
+        }
+        const offerData = offerSnap.data() as ProviderOffer;
 
-      const [updatedReq, updatedOfferSnap] = await Promise.all([
-        this.getRequest(cleanReqId),
-        getDoc(offerRef),
-      ]);
+        const convSnap = await transaction.get(convRef);
+        const apptSnap = await transaction.get(apptRef);
 
-      const updatedOffer = updatedOfferSnap.exists()
-        ? ({ id: updatedOfferSnap.id, ...updatedOfferSnap.data() } as ProviderOffer)
-        : null;
+        const siblingSnaps = await Promise.all(
+          siblingItems.map(async (item) => {
+            const snap = await transaction.get(item.ref);
+            return { id: item.id, ref: item.ref, snap };
+          })
+        );
 
-      return { request: updatedReq, offer: updatedOffer };
-    } catch (batchErr) {
-      console.warn('[FirebaseRepository] Batch accept failed, executing safe sequential writes:', batchErr);
+        // TRANSACTION VALIDATIONS
+        // Check customer ownership
+        if (reqData.customerId && currentUid && reqData.customerId !== currentUid) {
+          throw new Error(`Unauthorized: Only the customer who created request ${cleanReqId} can accept offers`);
+        }
 
-      // Safe sequential fallback
-      try {
-        await updateDoc(doc(firestore, 'offers', cleanOfferId), { status: 'ACCEPTED' });
-        await updateDoc(doc(firestore, 'requests', cleanReqId), {
+        // Check request-offer relationship
+        if (offerData.requestId !== cleanReqId) {
+          throw new Error(`Validation Error: Offer ${cleanOfferId} does not belong to request ${cleanReqId}`);
+        }
+
+        // Idempotency check: If already accepted for this exact offer, complete idempotently
+        if (reqData.selectedOfferId === cleanOfferId && offerData.status === 'ACCEPTED') {
+          resultReq = { ...reqData, id: cleanReqId, selectedOfferId: cleanOfferId, status: 'PROVIDER_SELECTED' };
+          resultOffer = { ...offerData, id: cleanOfferId, status: 'ACCEPTED' };
+          return;
+        }
+
+        // Check if request is already accepted with a DIFFERENT offer or cancelled/completed
+        const normStatus = normalizeRequestStatus(reqData.status);
+        if (
+          reqData.selectedOfferId ||
+          normStatus === 'PROVIDER_SELECTED' ||
+          normStatus === 'ACCEPTED' ||
+          normStatus === 'IN_PROGRESS' ||
+          normStatus === 'COMPLETED' ||
+          normStatus === 'CANCELLED'
+        ) {
+          throw new Error('Validation Error: Request has already been accepted.');
+        }
+
+        // Check target offer status
+        if (offerData.status !== 'PENDING') {
+          throw new Error('Validation Error: Offer is no longer pending.');
+        }
+
+        // Check offer provider info
+        if (!offerData.providerId && !offerData.providerUserId) {
+          throw new Error('Validation Error: Target offer missing provider information.');
+        }
+
+        const now = new Date().toISOString();
+
+        // WRITE PHASE
+        // 1. Request: status = 'PROVIDER_SELECTED', selectedOfferId = cleanOfferId
+        transaction.update(reqRef, sanitizeForFirestore({
           status: 'PROVIDER_SELECTED',
           selectedOfferId: cleanOfferId,
-        });
+          updatedAt: now,
+        }));
 
-        const siblingOffers = await this.getOffers({ requestId: cleanReqId });
-        for (const sibling of siblingOffers) {
-          if (sibling.id && sibling.id !== cleanOfferId) {
-            try {
-              await updateDoc(doc(firestore, 'offers', sibling.id), { status: 'REJECTED' });
-            } catch (siblingErr) {
-              console.warn('[FirebaseRepository] Note on rejecting sibling offer:', sibling.id, siblingErr);
+        // 2. Target Offer: status = 'ACCEPTED'
+        transaction.update(targetOfferRef, sanitizeForFirestore({
+          status: 'ACCEPTED',
+          updatedAt: now,
+        }));
+
+        // 3. Sibling Offers: status = 'REJECTED'
+        for (const sibling of siblingSnaps) {
+          if (sibling.id !== cleanOfferId && sibling.snap.exists()) {
+            const sibData = sibling.snap.data() as ProviderOffer;
+            if (sibData.status === 'PENDING') {
+              transaction.update(sibling.ref, sanitizeForFirestore({
+                status: 'REJECTED',
+                updatedAt: now,
+              }));
             }
           }
         }
 
-        const [updatedReq, updatedOfferSnap] = await Promise.all([
-          this.getRequest(cleanReqId),
-          getDoc(doc(firestore, 'offers', cleanOfferId)),
-        ]);
+        // 4. Conversation: conv_{requestId}
+        const effectiveProviderId = offerData.providerId;
+        const effectiveProviderUserId = offerData.providerUserId || offerData.providerId;
+        const effectiveProviderName = offerData.providerName || 'Мастер';
 
-        const updatedOffer = updatedOfferSnap.exists()
-          ? ({ id: updatedOfferSnap.id, ...updatedOfferSnap.data() } as ProviderOffer)
-          : null;
+        if (!convSnap.exists()) {
+          const newConv: Conversation = {
+            id: convId,
+            requestId: cleanReqId,
+            customerId: reqData.customerId,
+            customerName: reqData.customerName || 'Клиент',
+            providerId: effectiveProviderId,
+            providerUserId: effectiveProviderUserId,
+            providerName: effectiveProviderName,
+            status: 'ACTIVE',
+            lastMessageText: '',
+            lastMessageSenderId: '',
+            lastMessageAt: now,
+            unreadCountCustomer: 0,
+            unreadCountProvider: 0,
+            createdAt: now,
+            updatedAt: now,
+          };
+          transaction.set(convRef, sanitizeForFirestore(newConv));
+        } else {
+          transaction.update(convRef, sanitizeForFirestore({
+            status: 'ACTIVE',
+            providerId: effectiveProviderId,
+            providerUserId: effectiveProviderUserId,
+            providerName: effectiveProviderName,
+            updatedAt: now,
+          }));
+        }
 
-        return { request: updatedReq, offer: updatedOffer };
-      } catch (seqErr) {
-        handleFirestoreError(seqErr, OperationType.UPDATE, `requests/${cleanReqId}`);
+        // 5. Appointment: appointment_{requestId}
+        if (!apptSnap.exists()) {
+          const newAppt: Appointment = {
+            id: apptId,
+            requestId: cleanReqId,
+            customerId: reqData.customerId,
+            providerId: effectiveProviderId,
+            providerUserId: effectiveProviderUserId,
+            proposedBy: 'provider',
+            scheduledAt: offerData.availability || now,
+            status: 'PROPOSED',
+            workStatus: 'NOT_STARTED',
+            workStatusUpdatedAt: now,
+            createdAt: now,
+            updatedAt: now,
+          };
+          transaction.set(apptRef, sanitizeForFirestore(newAppt));
+        } else {
+          transaction.update(apptRef, sanitizeForFirestore({
+            providerId: effectiveProviderId,
+            providerUserId: effectiveProviderUserId,
+            updatedAt: now,
+          }));
+        }
+
+        resultReq = {
+          ...reqData,
+          id: cleanReqId,
+          status: 'PROVIDER_SELECTED',
+          selectedOfferId: cleanOfferId,
+        };
+        resultOffer = {
+          ...offerData,
+          id: cleanOfferId,
+          status: 'ACCEPTED',
+        };
+      });
+
+      // Post-transaction Notification (outside transaction)
+      if (resultReq && resultOffer) {
+        notificationService.notifyOfferAccepted(resultReq, resultOffer).catch((err) => {
+          console.warn('[FirebaseRepository] Non-blocking notification error after acceptOffer:', err);
+        });
       }
+
+      return { request: resultReq, offer: resultOffer };
+    } catch (err: any) {
+      if (
+        err?.message?.startsWith('Validation Error:') ||
+        err?.message?.startsWith('Unauthorized:') ||
+        err?.message?.includes('Request has already been accepted') ||
+        err?.message?.includes('no longer pending') ||
+        err?.message?.includes('not found')
+      ) {
+        throw err;
+      }
+      handleFirestoreError(err, OperationType.UPDATE, `requests/${cleanReqId}/acceptOffer`);
     }
   }
 
@@ -810,6 +1178,29 @@ export class FirebaseRepository implements Repository {
 
     try {
       const offerRef = doc(firestore, 'offers', cleanOfferId);
+      const offerSnap = await getDoc(offerRef);
+      if (offerSnap.exists()) {
+        const existingOffer = offerSnap.data() as ProviderOffer;
+        if (existingOffer.status === 'ACCEPTED' || existingOffer.status === 'REJECTED') {
+          throw new Error(`Validation Error: Cannot update offer in status ${existingOffer.status}`);
+        }
+        if (existingOffer.requestId) {
+          const reqSnap = await getDoc(doc(firestore, 'requests', existingOffer.requestId));
+          if (reqSnap.exists()) {
+            const parentReq = reqSnap.data() as ServiceRequest;
+            const normStatus = normalizeRequestStatus(parentReq.status);
+            if (
+              normStatus === 'PROVIDER_SELECTED' ||
+              normStatus === 'COMPLETED' ||
+              normStatus === 'CANCELLED'
+            ) {
+              throw new Error(
+                `Validation Error: Cannot update offer because request is in status ${parentReq.status}`
+              );
+            }
+          }
+        }
+      }
 
       // If an offer is ACCEPTED, route to acceptOffer if requestId can be resolved
       if (updates.status === 'ACCEPTED') {
@@ -846,10 +1237,15 @@ export class FirebaseRepository implements Repository {
   // =================== Matching ===================
   async matchProviders(request: ServiceRequest): Promise<Provider[]> {
     try {
-      const all = await this.getProviders();
-      return matchProviders(request, all);
+      const reqCityId = request.cityId || (request.city ? normalizeCityId(request.city) : undefined);
+      if (request.city && request.city.trim() !== '' && !reqCityId) {
+        return [];
+      }
+      const reqCatId = request.categoryId || (request.category ? normalizeCategoryId(request.category) : undefined);
+      const candidates = await this.getProviders(reqCityId ? { cityId: reqCityId, categoryId: reqCatId } : undefined);
+      return matchProviders(request, candidates);
     } catch {
-      return INITIAL_DEMO_PROVIDERS.slice(0, 3);
+      return [];
     }
   }
 
@@ -1044,11 +1440,910 @@ export class FirebaseRepository implements Repository {
     }
   }
 
-  // =================== Real-Time Preparation ===================
-  // TODO: Future: Firestore realtime listeners for requests and offers.
-  // Example future implementation:
-  // subscribeToCustomerRequests(customerId: string, onUpdate: (requests: ServiceRequest[]) => void): () => void
-  // subscribeToRequestOffers(requestId: string, onUpdate: (offers: ProviderOffer[]) => void): () => void
+  // =================== Conversations & In-App Chat ===================
+  async getConversation(conversationId: string): Promise<Conversation | null> {
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const cleanId = (conversationId || '').trim();
+    if (!cleanId) return null;
+
+    try {
+      const convRef = doc(firestore, 'conversations', cleanId);
+      const snap = await getDoc(convRef);
+      if (!snap.exists()) return null;
+      return snap.data() as Conversation;
+    } catch (err: any) {
+      const code = err?.code || '';
+      const msg = err?.message || String(err);
+      if (
+        code === 'permission-denied' ||
+        msg.includes('permission') ||
+        msg.includes('Missing or insufficient permissions')
+      ) {
+        console.warn('[FirebaseRepository] Note: Conversation get restricted by security rules.');
+        return null;
+      }
+      handleFirestoreError(err, OperationType.GET, `conversations/${cleanId}`);
+    }
+  }
+
+  async getOrCreateConversation(requestId: string): Promise<Conversation> {
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const cleanReqId = (requestId || '').trim();
+    if (!cleanReqId) {
+      throw new Error('Validation Error: requestId is required to get or create conversation');
+    }
+
+    const convId = getConversationId(cleanReqId);
+    const existing = await this.getConversation(convId);
+    if (existing) {
+      return existing;
+    }
+
+    // Verify parent request and ensure it is not OPEN
+    const req = await this.getRequest(cleanReqId);
+    if (!req) {
+      throw new Error(`Request not found: ${cleanReqId}`);
+    }
+
+    const normStatus = normalizeRequestStatus(req.status);
+    if (normStatus === 'OPEN') {
+      throw new Error('Chat cannot be opened for OPEN requests. A provider offer must be accepted first.');
+    }
+
+    if (!req.selectedOfferId) {
+      throw new Error('Chat cannot be opened: No provider offer has been selected for this request.');
+    }
+
+    // Fetch accepted offer
+    const offerRef = doc(firestore, 'offers', req.selectedOfferId);
+    const offerSnap = await getDoc(offerRef);
+    if (!offerSnap.exists()) {
+      throw new Error(`Selected offer not found: ${req.selectedOfferId}`);
+    }
+    const selectedOffer = offerSnap.data() as ProviderOffer;
+
+    const now = new Date().toISOString();
+    const newConv: Conversation = {
+      id: convId,
+      requestId: cleanReqId,
+      customerId: req.customerId,
+      customerName: req.customerName || 'Клиент',
+      providerId: selectedOffer.providerId,
+      providerUserId: selectedOffer.providerUserId || selectedOffer.providerId,
+      providerName: selectedOffer.providerName || 'Мастер',
+      status: 'ACTIVE',
+      lastMessageText: '',
+      lastMessageSenderId: '',
+      lastMessageAt: now,
+      unreadCountCustomer: 0,
+      unreadCountProvider: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    try {
+      const convRef = doc(firestore, 'conversations', convId);
+      await setDoc(convRef, sanitizeForFirestore(newConv), { merge: true });
+      return newConv;
+    } catch (err: any) {
+      const code = err?.code || '';
+      const msg = err?.message || String(err);
+      if (
+        code === 'permission-denied' ||
+        msg.includes('permission') ||
+        msg.includes('Missing or insufficient permissions')
+      ) {
+        console.warn(
+          `[FirebaseRepository] Note: Cloud Firestore conversation write on 'conversations/${convId}' restricted by security rules. Falling back gracefully to LocalRepository.`
+        );
+        throw new Error(`FirestorePermissionDenied: ${msg}`);
+      }
+      handleFirestoreError(err, OperationType.WRITE, `conversations/${convId}`);
+    }
+  }
+
+  async getMessages(conversationId: string, limitCount = 30): Promise<ChatMessage[]> {
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const cleanId = (conversationId || '').trim();
+    if (!cleanId) return [];
+
+    try {
+      const msgsCol = collection(firestore, 'conversations', cleanId, 'messages');
+      const q = query(msgsCol, orderBy('createdAt', 'desc'), limit(limitCount));
+      const snap = await getDocs(q);
+
+      const msgs: ChatMessage[] = [];
+      snap.forEach((d) => {
+        msgs.push(d.data() as ChatMessage);
+      });
+
+      // Sort newest fetched messages in chronological order for chat timeline
+      msgs.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      return msgs;
+    } catch (err: any) {
+      const code = err?.code || '';
+      const msg = err?.message || String(err);
+      if (
+        code === 'permission-denied' ||
+        msg.includes('permission') ||
+        msg.includes('Missing or insufficient permissions')
+      ) {
+        console.warn('[FirebaseRepository] Note: Messages list query restricted by security rules.');
+        return [];
+      }
+      handleFirestoreError(err, OperationType.LIST, `conversations/${cleanId}/messages`);
+    }
+  }
+
+  async sendMessage(conversationId: string, messageData: Partial<ChatMessage>): Promise<ChatMessage> {
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const cleanId = (conversationId || '').trim();
+    const text = (messageData.text || '').trim();
+    const hasAttachments = Boolean(messageData.attachments && messageData.attachments.length > 0);
+
+    // Either text or attachment must be present
+    if (!text && !hasAttachments) {
+      throw new Error('Validation Error: Message text cannot be empty without an attachment');
+    }
+    if (text.length > 2000) {
+      throw new Error('Validation Error: Message text exceeds 2000 characters limit');
+    }
+
+    const conv = await this.getConversation(cleanId);
+    if (!conv) {
+      throw new Error(`Conversation not found: ${cleanId}`);
+    }
+
+    // Verify parent request status
+    const req = await this.getRequest(conv.requestId);
+    if (req && normalizeRequestStatus(req.status) === 'CANCELLED') {
+      throw new Error('Cannot send message: Request is cancelled');
+    }
+
+    const authUid = auth?.currentUser?.uid;
+    if (!authUid) {
+      throw new Error('Unauthorized: You must be authenticated to send messages');
+    }
+
+    // Authenticated participant verification:
+    // Do NOT blindly trust client-supplied senderId. Verify auth.uid against conversation participants.
+    const isCustomer = authUid === conv.customerId;
+    const isProvider = authUid === conv.providerUserId || authUid === conv.providerId;
+
+    if (!isCustomer && !isProvider) {
+      throw new Error('Unauthorized: You are not a participant in this conversation');
+    }
+
+    const senderRole: 'customer' | 'provider' =
+      messageData.senderRole === 'provider' && isProvider
+        ? 'provider'
+        : messageData.senderRole === 'customer' && isCustomer
+        ? 'customer'
+        : isCustomer
+        ? 'customer'
+        : 'provider';
+    const now = new Date().toISOString();
+    const messageId = messageData.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const resolvedType = messageData.type || (hasAttachments ? messageData.attachments![0].type : 'text');
+
+    const newMsg: ChatMessage = {
+      id: messageId,
+      conversationId: cleanId,
+      requestId: conv.requestId,
+      senderId: authUid, // Enforce real authenticated participant UID
+      senderRole,
+      type: resolvedType,
+      text,
+      ...(hasAttachments ? { attachments: messageData.attachments } : {}),
+      isRead: false,
+      readAt: null,
+      createdAt: now,
+    };
+
+    const summaryText = text || (newMsg.attachments?.[0]?.type === 'image' ? '📷 Фото' : '📎 Файл');
+
+    try {
+      const batch = writeBatch(firestore);
+      const msgRef = doc(firestore, 'conversations', cleanId, 'messages', messageId);
+      const convRef = doc(firestore, 'conversations', cleanId);
+
+      batch.set(msgRef, sanitizeForFirestore(newMsg));
+      batch.update(
+        convRef,
+        sanitizeForFirestore({
+          lastMessageText: summaryText,
+          lastMessageSenderId: authUid,
+          lastMessageAt: now,
+          updatedAt: now,
+          ...(isCustomer
+            ? { unreadCountProvider: (conv.unreadCountProvider || 0) + 1 }
+            : { unreadCountCustomer: (conv.unreadCountCustomer || 0) + 1 }),
+        })
+      );
+
+      await batch.commit();
+
+      // Non-blocking notification to peer (chat delivery never blocked by notification errors)
+      notificationService.notifyNewMessage(conv, newMsg).catch(() => {});
+
+      return newMsg;
+    } catch (err: any) {
+      const code = err?.code || '';
+      const msg = err?.message || String(err);
+      if (
+        code === 'permission-denied' ||
+        msg.includes('permission') ||
+        msg.includes('Missing or insufficient permissions')
+      ) {
+        console.warn(
+          `[FirebaseRepository] Note: Cloud Firestore message write on 'conversations/${cleanId}/messages/${messageId}' restricted by security rules. Falling back gracefully to LocalRepository.`
+        );
+        throw new Error(`FirestorePermissionDenied: ${msg}`);
+      }
+      handleFirestoreError(err, OperationType.WRITE, `conversations/${cleanId}/messages/${messageId}`);
+    }
+  }
+
+  async uploadChatAttachment(
+    conversationId: string,
+    file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string }
+  ): Promise<ChatAttachment> {
+    await ensureFirebaseAuth();
+    const cleanId = (conversationId || '').trim();
+    if (!cleanId) {
+      throw new Error('Validation Error: conversationId is required');
+    }
+
+    const conv = await this.getConversation(cleanId);
+    if (!conv) {
+      throw new Error(`Conversation not found: ${cleanId}`);
+    }
+
+    const authUid = auth?.currentUser?.uid;
+    if (!authUid) {
+      throw new Error('Unauthorized: You must be authenticated to upload files');
+    }
+    const isCustomer = authUid === conv.customerId;
+    const isProvider = authUid === conv.providerUserId || authUid === conv.providerId;
+    if (!isCustomer && !isProvider) {
+      throw new Error('Unauthorized: You are not a participant in this conversation');
+    }
+
+    const validation = validateChatAttachment(file);
+    if (!validation.isValid) {
+      throw new Error(`Validation Error: ${validation.errorKey}`);
+    }
+
+    const sanitizedName = sanitizeFileName(file.name);
+    const attachmentId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const messageId = `msg_pending_${Date.now()}`;
+    const storagePath = `chat/${cleanId}/${messageId}/${attachmentId}_${sanitizedName}`;
+
+    if (!storage) {
+      throw new Error('Firebase Storage is not configured or unavailable');
+    }
+
+    // Determine binary payload
+    let blobPayload: Blob | Uint8Array | ArrayBuffer;
+    if (file.data instanceof Blob) {
+      blobPayload = file.data;
+    } else if (file.data instanceof Uint8Array || file.data instanceof ArrayBuffer) {
+      blobPayload = file.data;
+    } else if (typeof file.data === 'string' && file.data.startsWith('data:')) {
+      // Data URL to Blob
+      const parts = file.data.split(',');
+      const byteString = atob(parts[1] || '');
+      const mime = parts[0].split(':')[1]?.split(';')[0] || file.type;
+      const ab = new ArrayBuffer(byteString.length);
+      const ia = new Uint8Array(ab);
+      for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
+      }
+      blobPayload = new Blob([ab], { type: mime });
+    } else {
+      throw new Error('Attachment payload data is missing or invalid');
+    }
+
+    const fileRef = storageRef(storage, storagePath);
+    const metadata = {
+      contentType: file.type || (validation.type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+      customMetadata: {
+        conversationId: cleanId,
+        uploadedBy: authUid,
+        fileName: sanitizedName,
+      },
+    };
+
+    try {
+      const uploadResult = await uploadBytes(fileRef, blobPayload, metadata);
+      const downloadUrl = await getDownloadURL(uploadResult.ref);
+
+      const attachment: ChatAttachment = {
+        id: attachmentId,
+        type: validation.type,
+        storagePath,
+        downloadUrl,
+        fileName: sanitizedName,
+        mimeType: file.type || (validation.type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+        sizeBytes: file.size,
+        createdAt: new Date().toISOString(),
+      };
+
+      return attachment;
+    } catch (err: any) {
+      console.error('[FirebaseRepository] uploadChatAttachment failed:', err);
+      throw new Error(`Failed to upload attachment: ${err?.message || err}`);
+    }
+  }
+
+  async sendChatMessageWithAttachment(
+    conversationId: string,
+    messageData: {
+      text?: string;
+      senderId?: string;
+      senderRole?: 'customer' | 'provider';
+      file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string };
+    }
+  ): Promise<ChatMessage> {
+    // 1. Upload to storage first (fails fast without creating orphaned Firestore document)
+    const attachment = await this.uploadChatAttachment(conversationId, messageData.file);
+
+    // 2. Now record Firestore document referencing the uploaded attachment
+    return await this.sendMessage(conversationId, {
+      text: (messageData.text || '').trim(),
+      senderId: messageData.senderId,
+      senderRole: messageData.senderRole,
+      type: attachment.type,
+      attachments: [attachment],
+    });
+  }
+
+  async markMessagesAsRead(conversationId: string): Promise<void> {
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const cleanId = (conversationId || '').trim();
+    if (!cleanId) return;
+
+    try {
+      const conv = await this.getConversation(cleanId);
+      if (!conv) return;
+
+      const currentUid = auth?.currentUser?.uid || getCurrentUserId();
+      const updates: Record<string, any> = {};
+      if (currentUid === conv.customerId && conv.unreadCountCustomer > 0) {
+        updates.unreadCountCustomer = 0;
+      } else if (
+        (currentUid === conv.providerUserId || currentUid === conv.providerId) &&
+        conv.unreadCountProvider > 0
+      ) {
+        updates.unreadCountProvider = 0;
+      }
+
+      if (Object.keys(updates).length > 0) {
+        const convRef = doc(firestore, 'conversations', cleanId);
+        await updateDoc(convRef, updates);
+      }
+    } catch (err: any) {
+      console.warn('[FirebaseRepository] markMessagesAsRead note:', err?.message || err);
+    }
+  }
+
+  subscribeToMessages(
+    conversationId: string,
+    onUpdate: (messages: ChatMessage[]) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    if (!isFirebaseConfigured() || !db) {
+      return () => {};
+    }
+    const cleanId = (conversationId || '').trim();
+    if (!cleanId) {
+      return () => {};
+    }
+
+    try {
+      const msgsCol = collection(db, 'conversations', cleanId, 'messages');
+      const q = query(msgsCol, orderBy('createdAt', 'asc'), limit(50));
+
+      const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const msgs: ChatMessage[] = [];
+          snapshot.forEach((d) => {
+            msgs.push(d.data() as ChatMessage);
+          });
+          onUpdate(msgs);
+        },
+        (err) => {
+          const isPermission =
+            err?.code === 'permission-denied' ||
+            String(err?.message || err).includes('permission') ||
+            String(err?.message || err).includes('PERMISSION_DENIED');
+          if (isPermission) {
+            console.warn('[FirebaseRepository] Note: Cloud Firestore realtime listener restricted by rules, falling back gracefully:', err?.message || err);
+          } else {
+            console.warn('[FirebaseRepository] subscribeToMessages realtime snapshot error note:', err?.message || err);
+          }
+          if (onError) {
+            onError(err);
+          }
+        }
+      );
+
+      return () => {
+        try {
+          unsubscribe();
+        } catch {}
+      };
+    } catch (err) {
+      console.warn('[FirebaseRepository] subscribeToMessages initialization error note:', err);
+      if (onError) {
+        onError(err);
+      }
+      return () => {};
+    }
+  }
+
+  // =================== In-App Notifications ===================
+
+  async createNotification(notificationData: AppNotification): Promise<AppNotification> {
+    if (!db) throw new Error('Firestore is not initialized');
+    await ensureFirebaseAuth();
+
+    const cleanId = (notificationData.id || '').trim();
+    if (!cleanId) {
+      throw new Error('Validation Error: notification id is required');
+    }
+    const cleanRecipient = (notificationData.recipientUserId || '').trim();
+    if (!cleanRecipient) {
+      throw new Error('Validation Error: notification recipientUserId is required');
+    }
+
+    const payload: AppNotification = {
+      id: cleanId,
+      recipientUserId: cleanRecipient,
+      recipientRole: notificationData.recipientRole,
+      type: notificationData.type,
+      title: notificationData.title,
+      body: notificationData.body,
+      targetScreen: notificationData.targetScreen,
+      isRead: false,
+      readAt: null,
+      createdAt: notificationData.createdAt || new Date().toISOString(),
+    };
+
+    if (notificationData.requestId) payload.requestId = notificationData.requestId;
+    if (notificationData.offerId) payload.offerId = notificationData.offerId;
+    if (notificationData.conversationId) payload.conversationId = notificationData.conversationId;
+    if (notificationData.providerId) payload.providerId = notificationData.providerId;
+
+    try {
+      const notifRef = doc(db, 'notifications', cleanId);
+      await setDoc(notifRef, payload, { merge: true });
+      return payload;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `notifications/${cleanId}`);
+      throw error;
+    }
+  }
+
+  async getNotifications(userId: string, limitCount = 50): Promise<AppNotification[]> {
+    if (!db) return [];
+    await ensureFirebaseAuth();
+
+    const cleanUid = (userId || '').trim();
+    if (!cleanUid) return [];
+
+    try {
+      const notifsCol = collection(db, 'notifications');
+      const q = query(notifsCol, where('recipientUserId', '==', cleanUid));
+      const snapshot = await getDocs(q);
+
+      const items: AppNotification[] = [];
+      snapshot.forEach((d) => {
+        items.push(d.data() as AppNotification);
+      });
+
+      // Sort in memory to guarantee ordering without requiring a composite index on Spark
+      items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      return items.slice(0, limitCount);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'notifications');
+      return [];
+    }
+  }
+
+  async markNotificationAsRead(notificationId: string): Promise<void> {
+    if (!db) return;
+    await ensureFirebaseAuth();
+
+    const cleanId = (notificationId || '').trim();
+    if (!cleanId) return;
+
+    try {
+      const notifRef = doc(db, 'notifications', cleanId);
+      await updateDoc(notifRef, {
+        isRead: true,
+        readAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `notifications/${cleanId}`);
+    }
+  }
+
+  async markAllNotificationsAsRead(userId: string): Promise<void> {
+    if (!db) return;
+    await ensureFirebaseAuth();
+
+    const cleanUid = (userId || '').trim();
+    if (!cleanUid) return;
+
+    try {
+      const notifsCol = collection(db, 'notifications');
+      const q = query(notifsCol, where('recipientUserId', '==', cleanUid));
+      const snapshot = await getDocs(q);
+
+      const batch = writeBatch(db);
+      let count = 0;
+      const now = new Date().toISOString();
+
+      snapshot.forEach((d) => {
+        const data = d.data() as AppNotification;
+        if (!data.isRead) {
+          batch.update(d.ref, { isRead: true, readAt: now });
+          count++;
+        }
+      });
+
+      if (count > 0) {
+        await batch.commit();
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'notifications/markAllAsRead');
+    }
+  }
+
+  subscribeToNotifications(
+    userId: string,
+    onUpdate: (notifications: AppNotification[]) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    if (!db) {
+      return () => {};
+    }
+
+    const cleanUid = (userId || '').trim();
+    if (!cleanUid) {
+      return () => {};
+    }
+
+    try {
+      const notifsCol = collection(db, 'notifications');
+      const q = query(notifsCol, where('recipientUserId', '==', cleanUid));
+
+      const unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const items: AppNotification[] = [];
+          snapshot.forEach((d) => {
+            items.push(d.data() as AppNotification);
+          });
+          // Sort descending in memory
+          items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          onUpdate(items);
+        },
+        (err) => {
+          console.warn('[FirebaseRepository] subscribeToNotifications snapshot note:', err?.message || err);
+          if (onError) {
+            onError(err);
+          }
+        }
+      );
+
+      return () => {
+        try {
+          unsubscribe();
+        } catch {}
+      };
+    } catch (err) {
+      console.warn('[FirebaseRepository] subscribeToNotifications init note:', err);
+      if (onError) {
+        onError(err);
+      }
+      return () => {};
+    }
+  }
+
+  // =================== Appointments ===================
+  async getAppointment(requestId: string): Promise<Appointment | null> {
+    if (!db) return null;
+    await ensureFirebaseAuth();
+    const cleanId = (requestId || '').trim();
+    if (!cleanId) return null;
+    const docId = cleanId.startsWith('appointment_') ? cleanId : getAppointmentId(cleanId);
+    try {
+      const snap = await getDoc(doc(db, 'appointments', docId));
+      if (!snap.exists()) return null;
+      return snap.data() as Appointment;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `appointments/${docId}`);
+      return null;
+    }
+  }
+
+  async createAppointment(
+    appointmentData: Omit<Appointment, 'id' | 'createdAt' | 'updatedAt'>
+  ): Promise<Appointment> {
+    if (!db) throw new Error('Firestore not initialized');
+    await ensureFirebaseAuth();
+    const docId = getAppointmentId(appointmentData.requestId);
+    const now = new Date().toISOString();
+    const newAppt: Appointment = {
+      ...appointmentData,
+      id: docId,
+      status: appointmentData.status || 'PROPOSED',
+      createdAt: now,
+      updatedAt: now,
+    };
+    try {
+      const cleanData = sanitizeForFirestore(newAppt);
+      await setDoc(doc(db, 'appointments', docId), cleanData);
+      return newAppt;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `appointments/${docId}`);
+      throw error;
+    }
+  }
+
+  async updateAppointment(appointmentId: string, updates: Partial<Appointment>): Promise<Appointment> {
+    if (!db) throw new Error('Firestore not initialized');
+    await ensureFirebaseAuth();
+    const docId = appointmentId.startsWith('appointment_') ? appointmentId : getAppointmentId(appointmentId);
+    try {
+      const existingSnap = await getDoc(doc(db, 'appointments', docId));
+      if (!existingSnap.exists()) {
+        throw new Error(`Appointment ${docId} does not exist`);
+      }
+      const existing = existingSnap.data() as Appointment;
+      const updated: Appointment = {
+        ...existing,
+        ...updates,
+        id: existing.id,
+        requestId: existing.requestId,
+        customerId: existing.customerId,
+        providerId: existing.providerId,
+        providerUserId: existing.providerUserId,
+        createdAt: existing.createdAt,
+        updatedAt: new Date().toISOString(),
+      };
+      const cleanData = sanitizeForFirestore(updated);
+      await setDoc(doc(db, 'appointments', docId), cleanData, { merge: true });
+      return updated;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `appointments/${docId}`);
+      throw error;
+    }
+  }
+
+  async cancelAppointment(
+    appointmentId: string,
+    cancelledByRole: 'customer' | 'provider',
+    reason?: string
+  ): Promise<Appointment> {
+    const existing = await this.getAppointment(appointmentId);
+    const note = reason ? (existing?.note ? `${existing.note} | ${reason}` : reason) : existing?.note;
+    return await this.updateAppointment(appointmentId, {
+      status: 'CANCELLED',
+      ...(note !== undefined ? { note } : {}),
+    });
+  }
+
+  async confirmAppointment(
+    appointmentId: string,
+    confirmedByRole: 'customer' | 'provider'
+  ): Promise<Appointment> {
+    return await this.updateAppointment(appointmentId, {
+      status: 'CONFIRMED',
+    });
+  }
+
+  async rescheduleAppointment(
+    appointmentId: string,
+    scheduledAt: string,
+    proposedBy: 'customer' | 'provider',
+    note?: string
+  ): Promise<Appointment> {
+    return await this.updateAppointment(appointmentId, {
+      status: 'RESCHEDULED',
+      scheduledAt,
+      proposedBy,
+      ...(note !== undefined ? { note } : {}),
+    });
+  }
+
+  async completeAppointment(appointmentId: string): Promise<Appointment> {
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const cleanApptId = (appointmentId || '').trim();
+    if (!cleanApptId) {
+      throw new Error('Validation Error: appointmentId is required');
+    }
+    const docId = cleanApptId.startsWith('appointment_') ? cleanApptId : getAppointmentId(cleanApptId);
+
+    return await runTransaction(firestore, async (transaction) => {
+      const apptRef = doc(firestore, 'appointments', docId);
+      const apptSnap = await transaction.get(apptRef);
+      if (!apptSnap.exists()) {
+        throw new Error(`Appointment not found: ${docId}`);
+      }
+
+      const existingAppt = apptSnap.data() as Appointment;
+      if (existingAppt.status !== 'CONFIRMED' && existingAppt.status !== 'COMPLETED') {
+        throw new Error(`Cannot complete appointment that is in status: ${existingAppt.status}`);
+      }
+
+      const now = new Date().toISOString();
+      const apptUpdates: Partial<Appointment> = {
+        status: 'COMPLETED',
+        workStatus: 'WORK_COMPLETED',
+        workStatusUpdatedAt: now,
+        updatedAt: now,
+      };
+
+      const reqRef = doc(firestore, 'requests', existingAppt.requestId);
+      const reqSnap = await transaction.get(reqRef);
+
+      transaction.update(apptRef, sanitizeForFirestore(apptUpdates));
+
+      if (reqSnap.exists()) {
+        const reqData = reqSnap.data() as ServiceRequest;
+        if (reqData.status !== 'COMPLETED') {
+          transaction.update(reqRef, {
+            status: 'COMPLETED',
+            updatedAt: now,
+          });
+        }
+      }
+
+      return {
+        ...existingAppt,
+        ...apptUpdates,
+      } as Appointment;
+    });
+  }
+
+  async updateWorkStatus(
+    appointmentId: string,
+    workStatus: WorkStatus,
+    providerUserId: string
+  ): Promise<Appointment> {
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const cleanApptId = (appointmentId || '').trim();
+    if (!cleanApptId) {
+      throw new Error('Validation Error: appointmentId is required');
+    }
+    const docId = cleanApptId.startsWith('appointment_') ? cleanApptId : getAppointmentId(cleanApptId);
+    const authUid = auth?.currentUser?.uid || getCurrentUserId();
+
+    return await runTransaction(firestore, async (transaction) => {
+      const apptRef = doc(firestore, 'appointments', docId);
+      const apptSnap = await transaction.get(apptRef);
+      if (!apptSnap.exists()) {
+        throw new Error(`Appointment not found: ${docId}`);
+      }
+
+      const existingAppt = apptSnap.data() as Appointment;
+
+      if (existingAppt.status === 'CANCELLED') {
+        throw new Error('Validation Error: Cannot update work status on a CANCELLED appointment');
+      }
+
+      // Authorization check: Only assigned provider can update work status
+      const cleanProviderUid = (providerUserId || '').trim();
+      const assignedProviderUserId = (existingAppt.providerUserId || '').trim();
+      const assignedProviderId = (existingAppt.providerId || '').trim();
+
+      const isAssignedProvider =
+        (cleanProviderUid && (cleanProviderUid === assignedProviderUserId || cleanProviderUid === assignedProviderId)) ||
+        (authUid && (authUid === assignedProviderUserId || authUid === assignedProviderId));
+
+      if (!isAssignedProvider) {
+        throw new Error(`Unauthorized: Only assigned provider can update work status`);
+      }
+
+      // Transition validation
+      if (!isValidWorkStatusTransition(existingAppt.workStatus, workStatus)) {
+        throw new Error(
+          `Invalid work status transition from ${existingAppt.workStatus || 'NOT_STARTED'} to ${workStatus}`
+        );
+      }
+
+      const now = new Date().toISOString();
+      const apptUpdates: Partial<Appointment> = {
+        workStatus,
+        workStatusUpdatedAt: now,
+        updatedAt: now,
+      };
+
+      if (workStatus === 'WORK_COMPLETED' && (existingAppt.status === 'CONFIRMED' || existingAppt.status === 'PROPOSED' || existingAppt.status === 'RESCHEDULED')) {
+        apptUpdates.status = 'COMPLETED';
+      }
+
+      const reqRef = doc(firestore, 'requests', existingAppt.requestId);
+      const reqSnap = await transaction.get(reqRef);
+
+      transaction.update(apptRef, sanitizeForFirestore(apptUpdates));
+
+      if (reqSnap.exists()) {
+        const reqData = reqSnap.data() as ServiceRequest;
+        if (workStatus === 'WORK_COMPLETED') {
+          if (reqData.status !== 'COMPLETED') {
+            transaction.update(reqRef, {
+              status: 'COMPLETED',
+              updatedAt: now,
+            });
+          }
+        } else if (workStatus === 'WORK_STARTED' || workStatus === 'PROVIDER_ARRIVED' || workStatus === 'PROVIDER_ON_THE_WAY') {
+          if (reqData.status === 'PROVIDER_SELECTED' || reqData.status === 'ACCEPTED') {
+            transaction.update(reqRef, {
+              status: 'IN_PROGRESS',
+              updatedAt: now,
+            });
+          }
+        }
+      }
+
+      return {
+        ...existingAppt,
+        ...apptUpdates,
+      } as Appointment;
+    });
+  }
+
+  subscribeToAppointment(
+    requestId: string,
+    onUpdate: (appointment: Appointment | null) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    if (!db) {
+      return () => {};
+    }
+    const cleanId = (requestId || '').trim();
+    if (!cleanId) {
+      return () => {};
+    }
+    const docId = cleanId.startsWith('appointment_') ? cleanId : getAppointmentId(cleanId);
+    try {
+      const unsub = onSnapshot(
+        doc(db, 'appointments', docId),
+        (snap) => {
+          if (snap.exists()) {
+            onUpdate(snap.data() as Appointment);
+          } else {
+            onUpdate(null);
+          }
+        },
+        (err) => {
+          console.warn('[FirebaseRepository] subscribeToAppointment snapshot error:', err?.message || err);
+          if (onError) onError(err);
+        }
+      );
+      return () => {
+        try {
+          unsub();
+        } catch {}
+      };
+    } catch (err) {
+      console.warn('[FirebaseRepository] subscribeToAppointment init error:', err);
+      if (onError) onError(err);
+      return () => {};
+    }
+  }
 }
 
 export const firebaseRepository = new FirebaseRepository();

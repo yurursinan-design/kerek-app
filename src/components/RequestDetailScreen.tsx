@@ -14,6 +14,8 @@ import { repository, getCurrentUserId } from '../services';
 import { auth } from '../services/firebase';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { ReviewModal } from './ReviewModal';
+import { AppointmentSection } from './AppointmentSection';
+import { RequestMediaView } from './RequestMediaView';
 import {
   Clock,
   MapPin,
@@ -339,6 +341,17 @@ export const RequestDetailScreen: React.FC<RequestDetailScreenProps> = ({
             )}
           </div>
 
+          {/* Request 2.0 Media Attachments & Location */}
+          {Boolean(request.attachments?.length || request.location) && (
+            <div className="pt-2 border-t border-slate-100">
+              <RequestMediaView
+                attachments={request.attachments}
+                location={request.location}
+                language={language}
+              />
+            </div>
+          )}
+
           {/* Cancel option for Open requests */}
           {(request.status === 'OPEN' ||
             request.status === 'NEW' ||
@@ -510,6 +523,20 @@ export const RequestDetailScreen: React.FC<RequestDetailScreenProps> = ({
                 )}
               </div>
             </div>
+          )}
+
+        {/* Appointment Scheduling */}
+        {(reqStatus === 'PROVIDER_SELECTED' ||
+          reqStatus === 'ACCEPTED' ||
+          reqStatus === 'IN_PROGRESS' ||
+          reqStatus === 'COMPLETED') &&
+          selectedOffer && (
+            <AppointmentSection
+              request={request}
+              selectedOffer={selectedOffer}
+              currentRole="customer"
+              language={language}
+            />
           )}
 
         {/* Cancelled Notice */}

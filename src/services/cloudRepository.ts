@@ -13,12 +13,20 @@
  */
 
 import {
+  Appointment,
+  AppNotification,
+  ChatAttachment,
+  ChatMessage,
+  Conversation,
   Provider,
   ProviderOffer,
+  RequestAttachment,
+  RequestLocation,
   RequestStatus,
   Review,
   ServiceRequest,
   User,
+  WorkStatus,
 } from '../types';
 import {
   OfferFilter,
@@ -87,6 +95,14 @@ export class CloudRepository implements Repository {
     throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
   }
 
+  async uploadRequestAttachment(
+    _requestId: string,
+    _file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string },
+    _customerId?: string
+  ): Promise<RequestAttachment> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
   async createOffer(_offerData: Partial<ProviderOffer>): Promise<ProviderOffer> {
     throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
   }
@@ -119,6 +135,140 @@ export class CloudRepository implements Repository {
 
   async matchProviders(_request: ServiceRequest): Promise<Provider[]> {
     throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async getConversation(_conversationId: string): Promise<Conversation | null> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async getOrCreateConversation(_requestId: string): Promise<Conversation> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async getMessages(_conversationId: string, _limitCount?: number): Promise<ChatMessage[]> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async sendMessage(
+    _conversationId: string,
+    _messageData: Partial<ChatMessage>
+  ): Promise<ChatMessage> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async uploadChatAttachment(
+    _conversationId: string,
+    _file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string }
+  ): Promise<ChatAttachment> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async sendChatMessageWithAttachment(
+    _conversationId: string,
+    _messageData: {
+      text?: string;
+      senderId?: string;
+      senderRole?: 'customer' | 'provider';
+      file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string };
+    }
+  ): Promise<ChatMessage> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async markMessagesAsRead(_conversationId: string): Promise<void> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  subscribeToMessages(
+    _conversationId: string,
+    _onUpdate: (messages: ChatMessage[]) => void
+  ): () => void {
+    return () => {};
+  }
+
+  // In-App Notifications
+  async createNotification(_notificationData: AppNotification): Promise<AppNotification> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async getNotifications(_userId: string, _limitCount?: number): Promise<AppNotification[]> {
+    return [];
+  }
+
+  async markNotificationAsRead(_notificationId: string): Promise<void> {}
+
+  async markAllNotificationsAsRead(_userId: string): Promise<void> {}
+
+  subscribeToNotifications(
+    _userId: string,
+    _onUpdate: (notifications: AppNotification[]) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    return () => {};
+  }
+
+  // Appointments
+  async getAppointment(_requestId: string): Promise<Appointment | null> {
+    return null;
+  }
+
+  async createAppointment(
+    _appointmentData: Omit<Appointment, 'id' | 'createdAt' | 'updatedAt'>
+  ): Promise<Appointment> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async updateAppointment(
+    _appointmentId: string,
+    _updates: Partial<Appointment>
+  ): Promise<Appointment> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async cancelAppointment(
+    _appointmentId: string,
+    _cancelledByRole: 'customer' | 'provider',
+    _reason?: string
+  ): Promise<Appointment> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async confirmAppointment(
+    _appointmentId: string,
+    _confirmedByRole: 'customer' | 'provider'
+  ): Promise<Appointment> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async rescheduleAppointment(
+    _appointmentId: string,
+    _scheduledAt: string,
+    _proposedBy: 'customer' | 'provider',
+    _note?: string
+  ): Promise<Appointment> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async completeAppointment(
+    _appointmentId: string
+  ): Promise<Appointment> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  async updateWorkStatus(
+    _appointmentId: string,
+    _workStatus: WorkStatus,
+    _providerUserId: string
+  ): Promise<Appointment> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
+  subscribeToAppointment(
+    _requestId: string,
+    _onUpdate: (appointment: Appointment | null) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    return () => {};
   }
 }
 

@@ -1,6 +1,7 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth, signInAnonymously, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { getFirestore, Firestore, doc, getDoc, setDoc, getDocFromServer } from 'firebase/firestore';
+import { getStorage, FirebaseStorage } from 'firebase/storage';
 
 /**
  * Firebase Client Initialization
@@ -55,12 +56,19 @@ export function isFirebaseConfigured(): boolean {
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
+let storage: FirebaseStorage | null = null;
 
 if (isFirebaseConfigured()) {
   try {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
     auth = getAuth(app);
     db = getFirestore(app);
+    try {
+      storage = getStorage(app);
+    } catch (stErr) {
+      console.warn('[KEREK Firebase] Storage init note:', stErr);
+      storage = null;
+    }
 
     // Keep local storage user ID in sync with Firebase Auth UID
     onAuthStateChanged(auth, (user: FirebaseUser | null) => {
@@ -75,10 +83,11 @@ if (isFirebaseConfigured()) {
     app = null;
     auth = null;
     db = null;
+    storage = null;
   }
 }
 
-export { app, auth, db };
+export { app, auth, db, storage };
 
 let authInitPromise: Promise<string | null> | null = null;
 

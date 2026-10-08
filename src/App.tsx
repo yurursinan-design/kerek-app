@@ -1,5 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { ExtractedNeed, Language, ServiceRequest } from './types';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  AppNotification,
+  ExtractedNeed,
+  Language,
+  PendingAttachment,
+  RequestAttachment,
+  RequestLocation,
+  ServiceRequest,
+} from './types';
 import { Header } from './components/Header';
 import { BottomNav, MainTab } from './components/BottomNav';
 import { HomeScreen } from './components/HomeScreen';
@@ -7,6 +15,7 @@ import { InterpretationScreen } from './components/InterpretationScreen';
 import { ResultScreen } from './components/ResultScreen';
 import { MyRequestsScreen } from './components/MyRequestsScreen';
 import { ProviderModeScreen } from './components/ProviderModeScreen';
+import { InAppToast } from './components/InAppToast';
 import { analyzeRequestLocally } from './services/analyzer';
 import {
   repository,
@@ -16,6 +25,11 @@ import {
   isFirebaseConfigured,
   ensureFirebaseAuth,
   parseServiceRequest,
+  playNotificationSound,
+  showBrowserNotificationIfGranted,
+  analyzeRequestUnderstanding,
+  understandingToExtractedNeed,
+  RequestUnderstandingContext,
 } from './services';
 import {
   normalizeCategoryId,
@@ -34,6 +48,75 @@ export default function App() {
   const [customerRequests, setCustomerRequests] = useState<ServiceRequest[]>([]);
   const [hasProviderProfile, setHasProviderProfile] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
+
+  // In-App Notifications State
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [activeToastNotification, setActiveToastNotification] = useState<AppNotification | null>(null);
+  const seenNotifIdsRef = useRef<Set<string>>(new Set());
+  const isInitialNotifFetchRef = useRef<boolean>(true);
+
+  const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+  // Realtime Notifications Listener (Single active subscription for the current authenticated user)
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    let isMounted = true;
+
+    const setupNotifSubscription = () => {
+      const uid = getCurrentUserId();
+      if (!uid) return;
+
+      unsubscribe = repository.subscribeToNotifications(
+        uid,
+        (items) => {
+          if (!isMounted) return;
+          setNotifications(items);
+
+          if (!isInitialNotifFetchRef.current && items.length > 0) {
+            // Check for freshly arrived unread notifications
+            const newUnreads = items.filter(
+              (n) => !n.isRead && !seenNotifIdsRef.current.has(n.id)
+            );
+            if (newUnreads.length > 0) {
+              const latest = newUnreads[0];
+              seenNotifIdsRef.current.add(latest.id);
+              setActiveToastNotification(latest);
+              playNotificationSound();
+              showBrowserNotificationIfGranted(
+                latest.title[language] || latest.title.ru,
+                latest.body[language] || latest.body.ru,
+                () => handleNotificationClick(latest)
+              );
+            }
+          } else if (isInitialNotifFetchRef.current) {
+            // First load: populate seen IDs without triggering toasts for historic items
+            items.forEach((n) => seenNotifIdsRef.current.add(n.id));
+            isInitialNotifFetchRef.current = false;
+          }
+        },
+        (err) => {
+          console.warn('[App] Notifications subscription listener note:', err);
+        }
+      );
+    };
+
+    if (isFirebaseConfigured()) {
+      ensureFirebaseAuth().finally(() => {
+        if (isMounted) setupNotifSubscription();
+      });
+    } else {
+      setupNotifSubscription();
+    }
+
+    return () => {
+      isMounted = false;
+      if (unsubscribe) {
+        try {
+          unsubscribe();
+        } catch {}
+      }
+    };
+  }, [language]);
 
   // Security rule: Customer only sees their own requests!
   const refreshData = useCallback(async () => {
@@ -65,73 +148,63 @@ export default function App() {
     };
   }, [refreshData]);
 
-  // Trigger search & analysis using Gemini AI parser (with reliable fallback)
-  const handleSearch = async (query: string) => {
+  // Trigger search & analysis using Request Understanding 2.0 (with AI Cloud Function merge)
+  const handleSearch = async (
+    query: string,
+    attachments?: PendingAttachment[],
+    location?: RequestLocation
+  ) => {
     setIsAnalyzing(true);
     setAppError(null);
 
-    // Baseline local parsing (instant, non-blocking fallback)
-    const localParsed = analyzeRequestLocally(query, language);
+    // 1. Build Request Understanding 2.0 Context
+    const context: RequestUnderstandingContext = {
+      language,
+      attachmentsPresent: {
+        images: (attachments || []).filter((a) => a.mediaType === 'image').length,
+        videos: (attachments || []).filter((a) => a.mediaType === 'video').length,
+        audios: (attachments || []).filter((a) => a.mediaType === 'audio').length,
+      },
+      hasLocation: Boolean(location && location.latitude),
+      location,
+    };
+
+    // 2. Perform Request Understanding 2.0
+    const understanding = analyzeRequestUnderstanding(query, context);
+    const need = understandingToExtractedNeed(understanding, query, language);
+    need.pendingAttachments = attachments || [];
+    need.location = location;
 
     try {
-      // 1. Invoke AI Request Parser abstraction
+      // 3. Attempt optional Cloud AI parser merge if configured (non-blocking)
       const aiResponse = await parseServiceRequest(query);
 
       if (aiResponse.success && aiResponse.data) {
         const aiData = aiResponse.data;
-
-        // 2. Validate and canonicalize against frontend taxonomy
-        const canonicalCityId = normalizeCityId(aiData.cityId || localParsed.cityId);
-        const canonicalCategoryId = normalizeCategoryId(aiData.categoryId || localParsed.categoryId);
-
-        const localizedCity = getCityDisplayName(canonicalCityId, language);
-        const localizedCategory = getCategoryDisplayName(canonicalCategoryId, language);
-
-        const validUrgency =
-          aiData.urgency === 'high' || aiData.urgency === 'normal' || aiData.urgency === 'low'
-            ? aiData.urgency
-            : localParsed.urgency;
-
-        const serviceText = (aiData.service || localParsed.service || query).trim();
-
-        const combinedNeed: ExtractedNeed = {
-          city: localizedCity,
-          cityId: canonicalCityId,
-          category: localizedCategory,
-          categoryId: canonicalCategoryId,
-          service: serviceText,
-          date: localParsed.date || (language === 'kz' ? 'Бүгін' : 'Сегодня'),
-          budget: localParsed.budget || (language === 'kz' ? 'Келісімді' : 'Договорная'),
-          urgency: validUrgency,
-          originalQuery: query.trim(),
-          confidence: aiData.confidence,
-          isAiParsed: true,
-        };
-
-        setExtractedNeed(combinedNeed);
-      } else {
-        // Spark plan / offline / Cloud function not deployed:
-        // Gracefully use local parser with high confidence and no error
-        const fallbackNeed: ExtractedNeed = {
-          ...localParsed,
-          originalQuery: query.trim(),
-          confidence: localParsed.confidence ?? 0.95,
-          isAiParsed: false,
-          aiError: null,
-        };
-        setExtractedNeed(fallbackNeed);
+        if (aiData.cityId) {
+          const canonicalCityId = normalizeCityId(aiData.cityId);
+          need.cityId = canonicalCityId;
+          need.city = getCityDisplayName(canonicalCityId, language);
+        }
+        if (aiData.categoryId) {
+          const canonicalCategoryId = normalizeCategoryId(aiData.categoryId);
+          need.categoryId = canonicalCategoryId;
+          need.category = getCategoryDisplayName(canonicalCategoryId, language);
+        }
+        if (aiData.service) {
+          need.service = aiData.service.trim();
+        }
+        if (aiData.urgency) {
+          need.urgency = aiData.urgency;
+        }
+        if (typeof aiData.confidence === 'number' && aiData.confidence > need.confidence!) {
+          need.confidence = aiData.confidence;
+        }
       }
     } catch (err) {
-      console.warn('[App] AI search fallback to local parser:', err);
-      const fallbackNeed: ExtractedNeed = {
-        ...localParsed,
-        originalQuery: query.trim(),
-        confidence: localParsed.confidence ?? 0.95,
-        isAiParsed: false,
-        aiError: null,
-      };
-      setExtractedNeed(fallbackNeed);
+      console.warn('[App] Cloud AI parser note (using local understanding):', err);
     } finally {
+      setExtractedNeed(need);
       setIsAnalyzing(false);
       setCurrentScreen('interpretation');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -158,8 +231,44 @@ export default function App() {
       const service = (updatedNeed.service || rawText || category).trim();
       const text = rawText || service;
 
+      const targetRequestId = `REQ-${Date.now().toString().slice(-6)}`;
+      const uploadedAttachments: RequestAttachment[] = [];
+
+      // Process pending attachments upload
+      if (updatedNeed.pendingAttachments && updatedNeed.pendingAttachments.length > 0) {
+        for (const item of updatedNeed.pendingAttachments) {
+          try {
+            const uploaded = await repository.uploadRequestAttachment(
+              targetRequestId,
+              {
+                name: item.name,
+                size: item.size,
+                type: item.type,
+                data: item.file || item.previewUrl,
+              },
+              currentUserId
+            );
+            uploadedAttachments.push(uploaded);
+          } catch (uploadErr) {
+            console.warn('[App] uploadRequestAttachment graceful fallback:', uploadErr);
+            uploadedAttachments.push({
+              id: item.id,
+              type: item.mediaType,
+              storagePath: `requests/${targetRequestId}/${item.id}_${item.name}`,
+              downloadUrl: item.previewUrl,
+              fileName: item.name,
+              mimeType: item.type,
+              sizeBytes: item.size,
+              durationSeconds: item.durationSeconds,
+              createdAt: new Date().toISOString(),
+            });
+          }
+        }
+      }
+
       // Repository handles ID generation (REQ-000001), storage, and matching demo offers
       const newReq = await repository.createRequest({
+        id: targetRequestId,
         customerId: currentUserId,
         requestText: text,
         description: text,
@@ -172,6 +281,9 @@ export default function App() {
         budget: updatedNeed.budget?.trim() || (language === 'kz' ? 'Келісімді' : 'Договорная'),
         urgency: updatedNeed.urgency || 'normal',
         status: 'OPEN',
+        ...(uploadedAttachments.length > 0 ? { attachments: uploadedAttachments } : {}),
+        ...(updatedNeed.location ? { location: updatedNeed.location } : {}),
+        ...(updatedNeed.understanding ? { understanding: updatedNeed.understanding } : {}),
       });
 
       setActiveRequest(newReq);
@@ -246,6 +358,38 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Handle click on notification (from bell drawer or in-app toast)
+  const handleNotificationClick = async (notif: AppNotification) => {
+    // 1. Mark as read
+    if (!notif.isRead) {
+      try {
+        await repository.markNotificationAsRead(notif.id);
+      } catch {}
+    }
+
+    // 2. Dismiss toast if visible
+    setActiveToastNotification(null);
+
+    // 3. Role / screen navigation
+    if (notif.recipientRole === 'provider') {
+      setActiveTab('provider-mode');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    // Customer notifications: navigate to relevant request screen
+    if (notif.requestId) {
+      try {
+        const req = await repository.getRequest(notif.requestId);
+        if (req) {
+          handleSelectRequestFromHistory(req);
+        }
+      } catch (err) {
+        console.warn('[App] Notification navigation note:', err);
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-start sm:py-4">
       {/* Mobile Shell Container */}
@@ -258,6 +402,18 @@ export default function App() {
           onBack={handleBack}
           onHomeClick={handleHomeClick}
           onDataImported={refreshData}
+          notifications={notifications}
+          unreadCount={unreadCount}
+          currentUserId={getCurrentUserId()}
+          onSelectNotification={handleNotificationClick}
+        />
+
+        {/* Realtime In-App Notification Toast */}
+        <InAppToast
+          notification={activeToastNotification}
+          language={language}
+          onClick={handleNotificationClick}
+          onDismiss={() => setActiveToastNotification(null)}
         />
 
         {/* Global Error Banner if repository operation fails */}
@@ -320,6 +476,9 @@ export default function App() {
             <ProviderModeScreen
               language={language}
               onOfferSent={() => {
+                refreshData();
+              }}
+              onProfileCreated={() => {
                 refreshData();
               }}
             />

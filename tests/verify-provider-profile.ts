@@ -116,13 +116,12 @@ async function runTests() {
     !modalHtmlRu.toLowerCase().includes('whatsapp')
   );
 
-  // Critical Anti-Slop Assertion: no fake rating, stars or reviews
+  // Critical Anti-Slop Assertion: no fake rating or stars (shows verified empty state)
   assert(
-    'No ratings or reviews rendered in ProviderProfileModal',
-    !modalHtmlRu.toLowerCase().includes('rating') &&
+    'No fake ratings or reviews rendered in ProviderProfileModal',
     !modalHtmlRu.includes('★') &&
     !modalHtmlRu.includes('5.0') &&
-    !modalHtmlRu.toLowerCase().includes('отзыв')
+    (modalHtmlRu.includes('Нет оценок') || modalHtmlRu.includes('Пока нет отзывов'))
   );
 
   // Render in Kazakh

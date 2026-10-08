@@ -14,6 +14,10 @@ import { auth } from '../services/firebase';
 import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
 import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
+import { ProviderOnboarding } from './ProviderOnboarding';
+import { ChatScreen } from './ChatScreen';
+import { AppointmentSection } from './AppointmentSection';
+import { RequestMediaView } from './RequestMediaView';
 import {
   Briefcase,
   CheckCircle,
@@ -28,11 +32,13 @@ import {
   Wallet,
   Star,
   UserCheck,
+  MessageSquare,
 } from 'lucide-react';
 
 interface ProviderModeScreenProps {
   language: Language;
   onOfferSent?: () => void;
+  onProfileCreated?: () => void;
 }
 
 function isSelfRequest(
@@ -59,6 +65,7 @@ function isSelfRequest(
 export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   language,
   onOfferSent,
+  onProfileCreated,
 }) => {
   const t = translations[language];
 
@@ -67,6 +74,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isProfilePreviewOpen, setIsProfilePreviewOpen] = useState(false);
   const [providerReviews, setProviderReviews] = useState<Review[]>([]);
+  const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(null);
 
   // Registration Form State
   const [name, setName] = useState('');
@@ -158,14 +166,56 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         });
 
         // Load existing offers sent by this provider
-        const myOffers = await repository.getOffers({ providerId: myProv.id });
+        const myOffers = await repository.getOffers({
+          providerId: myProv.id,
+          providerUserId: myProv.userId || myProv.id,
+        });
         const offersMap: Record<string, ProviderOffer> = {};
         myOffers.forEach((o) => {
           offersMap[o.requestId] = o;
         });
 
+        // Ensure all requests that this provider has submitted offers for are included!
+        const offeredReqIds = Object.keys(offersMap);
+        const existingReqIds = new Set(matchingRequests.map((r) => r.id));
+        const missingReqPromises = offeredReqIds
+          .filter((id) => !existingReqIds.has(id))
+          .map(async (id) => {
+            const fetched = await repository.getRequest(id);
+            if (fetched) return fetched;
+            // Fallback shell from existing offer if getRequest returns null (e.g. permission-denied fallback)
+            const off = offersMap[id];
+            if (off) {
+              const fallbackReq: ServiceRequest = {
+                id,
+                customerId: '',
+                customerName: language === 'kz' ? 'Клиент' : 'Клиент',
+                requestText: off.message || (language === 'kz' ? 'Өтініш' : 'Заявка клиента'),
+                service: language === 'kz' ? 'Тапсырыс' : 'Услуга',
+                city: myProv.city,
+                cityId: myProv.cityId,
+                category: myProv.category,
+                categoryId: myProv.categoryId,
+                date: language === 'kz' ? 'Бүгін' : 'Сегодня',
+                budget: off.price,
+                urgency: 'normal',
+                status: off.status === 'ACCEPTED' ? 'PROVIDER_SELECTED' : 'OPEN',
+                createdAt: off.createdAt || new Date().toISOString(),
+                selectedOfferId: off.status === 'ACCEPTED' ? off.id : undefined,
+              };
+              return fallbackReq;
+            }
+            return null;
+          });
+
+        const missingReqs = (await Promise.all(missingReqPromises)).filter(
+          (r): r is ServiceRequest => r !== null
+        );
+
+        const combinedRequests = [...matchingRequests, ...missingReqs];
+
         if (isMounted) {
-          setRequests(matchingRequests);
+          setRequests(combinedRequests);
           setSentOffersMap(offersMap);
         }
 
@@ -188,62 +238,75 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   }, []);
 
   // Save profile via repository
-  const handleSaveProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !phone.trim()) return;
-
+  const handleSaveProfileData = async (providerData: Partial<Provider>) => {
     if (!checkClientRateLimit('save_provider_profile', 800)) return;
 
     try {
       const uid = getCurrentUserId();
       // Provider document ID is strictly the user's Auth UID
       const providerId = uid;
-      const catId = normalizeCategoryId(category);
-      const cId = normalizeCityId(city);
+      const targetCategory = (providerData.category || category).trim();
+      const targetCity = (providerData.city || city).trim();
+      const catId = normalizeCategoryId(targetCategory);
+      const cId = normalizeCityId(targetCity);
 
       let expYears: number | undefined = undefined;
-      const cleanExp = experienceYears.replace(/[^\d]/g, '');
-      if (cleanExp) {
-        const val = parseInt(cleanExp, 10);
-        if (!isNaN(val) && val >= 0 && val <= 70) {
-          expYears = val;
-        }
+      if (providerData.experienceYears !== undefined && providerData.experienceYears !== null) {
+        expYears = Number(providerData.experienceYears);
       }
+
+      // Important Rule 3: verified cannot be self-granted by new provider!
+      // New provider registration starts with verified: false.
+      // If editing an existing provider, preserve their existing verified status.
+      const isAlreadyVerified = provider?.verified ?? false;
 
       const savedProvider = await repository.createProvider({
         id: providerId,
         userId: uid,
-        name: name.trim(),
-        phone: phone.trim(),
-        whatsapp: (whatsapp || phone).trim(),
-        city: city.trim(),
+        name: (providerData.name || '').trim(),
+        phone: (providerData.phone || '').trim(),
+        whatsapp: (providerData.whatsapp || providerData.phone || '').trim(),
+        city: targetCity,
         cityId: cId,
-        district: district.trim(),
-        category: category.trim(),
+        district: (providerData.district || '').trim(),
+        category: targetCategory,
         categoryId: catId,
-        services: services.trim(),
-        priceRange: priceRange.trim(),
-        workingHours: workingHours.trim(),
+        services: (providerData.services || '').trim(),
+        priceRange: (providerData.priceRange || '').trim(),
+        workingHours: (providerData.workingHours || '').trim() || '09:00 - 20:00',
         experienceYears: expYears,
-        description: description.trim(),
-        verified: true,
+        description: (providerData.description || '').trim(),
+        verified: isAlreadyVerified, // Secure: false for new providers!
         isDemo: false,
       });
 
       setProvider(savedProvider);
       setIsEditingProfile(false);
 
-      // Refresh matching requests for this updated profile
+      if (onProfileCreated) {
+        onProfileCreated();
+      }
+
+      // Refresh matching requests for this updated profile, preserving any previously offered requests
       const matchingRequests = await repository.getRequests({
         city: savedProvider.city,
         cityId: savedProvider.cityId || cId,
         category: savedProvider.category,
         categoryId: savedProvider.categoryId || catId,
       });
-      setRequests(matchingRequests);
+      setRequests((prev) => {
+        const existingOffered = prev.filter((r) => sentOffersMap[r.id]);
+        const map = new Map<string, ServiceRequest>();
+        matchingRequests.forEach((r) => map.set(r.id, r));
+        existingOffered.forEach((r) => {
+          if (!map.has(r.id)) map.set(r.id, r);
+        });
+        return Array.from(map.values());
+      });
     } catch (err) {
       setErrorMessage(getFriendlyErrorMessage(err, language));
       setTimeout(() => setErrorMessage(null), 4000);
+      throw err;
     }
   };
 
@@ -325,6 +388,14 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         [selectedRequestForOffer.id]: newOffer,
       }));
 
+      // Ensure the request is always present in requests feed
+      setRequests((prev) => {
+        if (!prev.some((r) => r.id === selectedRequestForOffer.id)) {
+          return [selectedRequestForOffer, ...prev];
+        }
+        return prev;
+      });
+
       setSelectedRequestForOffer(null);
 
       setNotification(t.offerSentSuccess);
@@ -350,6 +421,10 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
 
   const visibleRequests = requests.filter((r) => {
     if (dismissedReqIds.includes(r.id) || r.status === 'CANCELLED') return false;
+    // If an offer was already sent to this request, always keep it visible in provider feed
+    if (sentOffersMap[r.id]) {
+      return true;
+    }
     // Providers cannot bid on their own genuine customer requests
     if (isSelfRequest(r, provider, isAnonymousSession)) {
       return false;
@@ -361,6 +436,19 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     }
     return true;
   });
+
+  if (activeChatRequestId) {
+    return (
+      <div className="w-full max-w-xl mx-auto px-0 sm:px-4 py-2 sm:py-5">
+        <ChatScreen
+          requestId={activeChatRequestId}
+          language={language}
+          onBack={() => setActiveChatRequestId(null)}
+          userRole="provider"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col justify-between space-y-5">
@@ -383,218 +471,14 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
           </div>
         )}
 
-        {/* 1. Profile Registration / Edit Form */}
+        {/* 1. Provider Onboarding & Profile Editing Flow */}
         {isEditingProfile ? (
-          <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm space-y-4">
-            <div className="text-center space-y-1">
-              <div className="w-12 h-12 rounded-2xl bg-sky-100 text-sky-700 flex items-center justify-center mx-auto">
-                <Briefcase className="w-6 h-6 stroke-[2.5]" />
-              </div>
-              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight font-display">
-                {provider ? t.updateProfileBtn : t.providerRegTitle}
-              </h2>
-              <p className="text-xs text-slate-500 max-w-xs mx-auto leading-relaxed">
-                {t.providerRegSubtitle}
-              </p>
-            </div>
-
-            <form onSubmit={handleSaveProfile} className="space-y-3 pt-1">
-              {/* Name */}
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-600">
-                  {t.providerNameField} *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Мастер Серик / ТОО Сыр-Шебер"
-                  className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
-                />
-              </div>
-
-              {/* Phone & WhatsApp */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-600">
-                    {t.providerPhoneField} *
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+7 777 000 00 00"
-                    className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-600">
-                    {t.providerWhatsappField}
-                  </label>
-                  <input
-                    type="tel"
-                    value={whatsapp}
-                    onChange={(e) => setWhatsapp(e.target.value)}
-                    placeholder="+7 777 000 00 00"
-                    className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
-                  />
-                </div>
-              </div>
-
-              {/* City & District */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-600">
-                    {t.fieldCity} *
-                  </label>
-                  <select
-                    value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    className="w-full h-11 px-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
-                  >
-                    {ALL_CITIES_LIST.map((c) => {
-                      const cName = language === 'kz' ? c.kz : c.ru;
-                      return (
-                        <option key={c.ru} value={cName}>
-                          {cName}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-600">
-                    {t.providerDistrictField}
-                  </label>
-                  <input
-                    type="text"
-                    value={district}
-                    onChange={(e) => setDistrict(e.target.value)}
-                    placeholder="Астана даңғылы / Центр"
-                    className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
-                  />
-                </div>
-              </div>
-
-              {/* Category */}
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-600">
-                  {t.fieldCategory} *
-                </label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
-                >
-                  {CATEGORIES_LIST.map((cat) => {
-                    const catName = language === 'kz' ? cat.kz : cat.ru;
-                    return (
-                      <option key={cat.id} value={catName}>
-                        {catName}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-
-              {/* Services */}
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-600">
-                  {t.providerServicesField}
-                </label>
-                <input
-                  type="text"
-                  value={services}
-                  onChange={(e) => setServices(e.target.value)}
-                  placeholder="Ремонт стиральных машин, замена деталей"
-                  className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
-                />
-              </div>
-
-              {/* Price Range & Hours */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-600">
-                    {t.providerPriceRangeField}
-                  </label>
-                  <input
-                    type="text"
-                    value={priceRange}
-                    onChange={(e) => setPriceRange(e.target.value)}
-                    placeholder="5 000 – 15 000 ₸"
-                    className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-slate-600">
-                    {t.providerHoursField}
-                  </label>
-                  <input
-                    type="text"
-                    value={workingHours}
-                    onChange={(e) => setWorkingHours(e.target.value)}
-                    placeholder="09:00 - 20:00"
-                    className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
-                  />
-                </div>
-              </div>
-
-              {/* Experience Years */}
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-600">
-                  {t.providerExperienceField}
-                </label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={experienceYears}
-                  onChange={(e) => {
-                    const digits = e.target.value.replace(/[^\d]/g, '');
-                    setExperienceYears(digits.slice(0, 2));
-                  }}
-                  placeholder={t.providerExperiencePlaceholder}
-                  className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
-                />
-              </div>
-
-              {/* Short Description */}
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-600">
-                  {t.providerDescField}
-                </label>
-                <textarea
-                  rows={2}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Опыт, гарантия, выезд..."
-                  className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white resize-none"
-                />
-              </div>
-
-              {/* Submit Buttons */}
-              <div className="pt-2 space-y-2">
-                <button
-                  type="submit"
-                  className="w-full min-h-[50px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-sky-600/20 transition-all"
-                >
-                  {provider ? t.updateProfileBtn : t.createProfileBtn}
-                </button>
-
-                {provider && (
-                  <button
-                    type="button"
-                    onClick={() => setIsEditingProfile(false)}
-                    className="w-full min-h-[40px] text-xs font-medium text-slate-500 hover:text-slate-800"
-                  >
-                    {language === 'kz' ? 'Артқа қайту' : 'Отмена'}
-                  </button>
-                )}
-              </div>
-            </form>
-          </div>
+          <ProviderOnboarding
+            language={language}
+            initialProvider={provider}
+            onSave={handleSaveProfileData}
+            onCancel={provider ? () => setIsEditingProfile(false) : undefined}
+          />
         ) : (
           /* 2. Provider Dashboard */
           <div className="space-y-4">
@@ -755,17 +639,54 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         </span>
                       </div>
 
+                      {/* Request 2.0 Media Attachments & Location for Provider */}
+                      {Boolean(req.attachments?.length || req.location) && (
+                        <div className="pt-1 border-t border-slate-100">
+                          <RequestMediaView
+                            attachments={req.attachments}
+                            location={req.location}
+                            language={language}
+                          />
+                        </div>
+                      )}
+
                       {/* Provider Actions: "Могу выполнить" & "Не могу" */}
                       <div className="pt-2 border-t border-slate-100">
                         {existingOffer ? (
-                          <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-bold flex items-center justify-between">
-                            <div className="flex items-center gap-1.5">
-                              <CheckCircle className="w-4 h-4 text-emerald-600" />
-                              <span>{t.alreadySentOffer}</span>
+                          <div className="space-y-2">
+                            <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-bold flex items-center justify-between">
+                              <div className="flex items-center gap-1.5">
+                                <CheckCircle className="w-4 h-4 text-emerald-600" />
+                                <span>{t.alreadySentOffer}</span>
+                              </div>
+                              <span className="font-mono text-emerald-900 font-bold">
+                                {formatOfferDisplayPrice(existingOffer, language)}
+                              </span>
                             </div>
-                            <span className="font-mono text-emerald-900 font-bold">
-                              {formatOfferDisplayPrice(existingOffer, language)}
-                            </span>
+
+                            {(existingOffer.status === 'ACCEPTED' ||
+                              req.selectedOfferId === existingOffer.id ||
+                              req.status === 'PROVIDER_SELECTED' ||
+                              req.status === 'IN_PROGRESS' ||
+                              req.status === 'COMPLETED') && (
+                              <div className="space-y-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveChatRequestId(req.id)}
+                                  className="w-full min-h-[42px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                                >
+                                  <MessageSquare className="w-4 h-4" />
+                                  <span>{t.chatWithCustomerBtn}</span>
+                                </button>
+
+                                <AppointmentSection
+                                  request={req}
+                                  selectedOffer={existingOffer}
+                                  currentRole="provider"
+                                  language={language}
+                                />
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="grid grid-cols-2 gap-2">
