@@ -38,7 +38,7 @@ import {
 } from './validation';
 import { logTechnicalError } from './errorHandler';
 import { auth } from './firebase';
-import { normalizeCategoryId, normalizeCityId } from './taxonomy';
+import { normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 
 const STORAGE_KEY_USER_ID = 'kerek_current_user_id_v2';
 const STORAGE_KEY_USERS = 'kerek_users_v2';
@@ -204,9 +204,9 @@ export class LocalRepository implements Repository {
       const id = providerData.id || userId;
 
       const city = providerData.city?.trim() || 'Қызылорда';
-      const cityId = providerData.cityId || normalizeCityId(city);
+      const cityId = normalizeCityId(providerData.cityId || city) || providerData.cityId || 'kyzylorda';
       const category = providerData.category?.trim() || '';
-      const categoryId = providerData.categoryId || normalizeCategoryId(category);
+      const categoryId = normalizeCategoryId(providerData.categoryId || category);
 
       const newProvider: Provider = {
         id,
@@ -272,20 +272,28 @@ export class LocalRepository implements Repository {
       // Merge with seeded DEMO providers
       const all = [...combined, ...INITIAL_DEMO_PROVIDERS].map((p) => ({
         ...p,
-        cityId: p.cityId || normalizeCityId(p.city),
-        categoryId: p.categoryId || normalizeCategoryId(p.category),
+        cityId: normalizeCityId(p.cityId || p.city) || p.cityId,
+        categoryId: normalizeCategoryId(p.categoryId || p.category),
       }));
 
       if (!filter) return all;
 
-      const targetCityId = filter.cityId || (filter.city ? normalizeCityId(filter.city) : undefined);
-      const targetCatId = filter.categoryId || (filter.category ? normalizeCategoryId(filter.category) : undefined);
+      const targetCityId = filter.cityId
+        ? normalizeCityId(filter.cityId) || filter.cityId
+        : filter.city
+        ? normalizeCityId(filter.city)
+        : undefined;
+      const targetCatId = filter.categoryId
+        ? normalizeCategoryId(filter.categoryId)
+        : filter.category
+        ? normalizeCategoryId(filter.category)
+        : undefined;
 
       return all.filter((p) => {
-        if (targetCityId && p.cityId !== targetCityId) {
+        if (targetCityId && (normalizeCityId(p.cityId || p.city) || p.cityId) !== targetCityId) {
           return false;
         }
-        if (targetCatId && p.categoryId !== targetCatId) {
+        if (targetCatId && !isCategoryMatch(p.categoryId, targetCatId)) {
           return false;
         }
         return true;
@@ -350,9 +358,9 @@ export class LocalRepository implements Repository {
       const customerId = requestData.customerId || getCurrentUserId();
 
       const city = requestData.city?.trim() || 'Қызылорда';
-      const cityId = requestData.cityId || normalizeCityId(city);
+      const cityId = normalizeCityId(requestData.cityId || city) || requestData.cityId || 'kyzylorda';
       const category = requestData.category?.trim() || 'Тұрмыстық техника жөндеу';
-      const categoryId = requestData.categoryId || normalizeCategoryId(category);
+      const categoryId = normalizeCategoryId(requestData.categoryId || category);
       const reqText = (requestData.requestText || requestData.description || requestData.service || '').trim();
       const service = (requestData.service || reqText || category).trim();
 
@@ -455,8 +463,8 @@ export class LocalRepository implements Repository {
       return {
         ...req,
         status: normalizeRequestStatus(req.status),
-        cityId: req.cityId || normalizeCityId(req.city),
-        categoryId: req.categoryId || normalizeCategoryId(req.category),
+        cityId: normalizeCityId(req.cityId || req.city) || req.cityId,
+        categoryId: normalizeCategoryId(req.categoryId || req.category),
       };
     } catch (e) {
       logTechnicalError('LocalRepository.getRequest', e);
@@ -470,14 +478,22 @@ export class LocalRepository implements Repository {
       const enriched = all.map((r) => ({
         ...r,
         status: normalizeRequestStatus(r.status),
-        cityId: r.cityId || normalizeCityId(r.city),
-        categoryId: r.categoryId || normalizeCategoryId(r.category),
+        cityId: normalizeCityId(r.cityId || r.city) || r.cityId,
+        categoryId: normalizeCategoryId(r.categoryId || r.category),
       }));
 
       if (!filter) return enriched;
 
-      const targetCityId = filter.cityId || (filter.city ? normalizeCityId(filter.city) : undefined);
-      const targetCatId = filter.categoryId || (filter.category ? normalizeCategoryId(filter.category) : undefined);
+      const targetCityId = filter.cityId
+        ? normalizeCityId(filter.cityId) || filter.cityId
+        : filter.city
+        ? normalizeCityId(filter.city)
+        : undefined;
+      const targetCatId = filter.categoryId
+        ? normalizeCategoryId(filter.categoryId)
+        : filter.category
+        ? normalizeCategoryId(filter.category)
+        : undefined;
 
       return enriched.filter((r) => {
         // Customer Security Filter: Customer only sees their own requests
@@ -485,11 +501,11 @@ export class LocalRepository implements Repository {
           return false;
         }
         // City Filter (canonical cityId check)
-        if (targetCityId && r.cityId !== targetCityId) {
+        if (targetCityId && (normalizeCityId(r.cityId || r.city) || r.cityId) !== targetCityId) {
           return false;
         }
         // Category Filter (canonical categoryId check bridges KZ and RU)
-        if (targetCatId && r.categoryId !== targetCatId) {
+        if (targetCatId && !isCategoryMatch(r.categoryId, targetCatId)) {
           return false;
         }
         return true;
@@ -798,11 +814,11 @@ export class LocalRepository implements Repository {
   // =================== Matching Engine ===================
   async matchProviders(request: ServiceRequest): Promise<Provider[]> {
     try {
-      const reqCityId = request.cityId || (request.city ? normalizeCityId(request.city) : undefined);
+      const reqCityId = normalizeCityId(request.cityId || request.city) || request.cityId;
       if (request.city && request.city.trim() !== '' && !reqCityId) {
         return [];
       }
-      const reqCatId = request.categoryId || (request.category ? normalizeCategoryId(request.category) : undefined);
+      const reqCatId = normalizeCategoryId(request.categoryId || request.category);
       const candidates = await this.getProviders(reqCityId ? { cityId: reqCityId, categoryId: reqCatId } : undefined);
       return matchProviders(request, candidates);
     } catch (e) {
@@ -1575,10 +1591,10 @@ export class LocalRepository implements Repository {
       throw new Error(`Cannot create appointment for request in status: ${req.status}`);
     }
 
-    // 2. Prevent duplicate active appointments for this request
+    // 2. If active appointment already exists for this request, update it idempotently
     const existing = await this.getAppointment(appointmentData.requestId);
     if (existing && existing.status !== 'CANCELLED' && existing.status !== 'COMPLETED') {
-      throw new Error('An active appointment already exists for this request');
+      return await this.updateAppointment(existing.id, appointmentData);
     }
 
     // 3. Validate fields

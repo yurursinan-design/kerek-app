@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AppNotification, Language } from '../types';
-import { ArrowLeft, Database, Download, Upload, X, CheckCircle, AlertCircle, Cloud, RefreshCw, ShieldAlert, ShieldCheck } from 'lucide-react';
-import { exportLocalData, importLocalData, isFirebaseConfigured, resilientRepository, runFirebaseDiagnostics, getLatestDiagnosticReport } from '../services';
+import { ArrowLeft, Database, Download, Upload, X, CheckCircle, AlertCircle, Cloud, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from 'lucide-react';
+import { exportLocalData, importLocalData, clearAllKerekLocalStorage, isFirebaseConfigured, resilientRepository, runFirebaseDiagnostics, getLatestDiagnosticReport } from '../services';
 import { NotificationBell } from './NotificationBell';
 
 interface HeaderProps {
@@ -34,6 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [isCloud, setIsCloud] = useState<boolean>(() => resilientRepository.isCloudActive());
   const [diagReport, setDiagReport] = useState<any>(() => getLatestDiagnosticReport());
   const [isRunningDiag, setIsRunningDiag] = useState<boolean>(false);
+  const [isResetting, setIsResetting] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync cloud status periodically or when modal opens
@@ -354,6 +355,49 @@ export const Header: React.FC<HeaderProps> = ({
                 onChange={handleImportFile}
                 className="hidden"
               />
+
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={() => {
+                  console.log("RESET BUTONU TIKLANDI");
+                  setIsResetting(true);
+                  try {
+                    if (typeof (window as any).resetKerekLocalStorage === 'function') {
+                      (window as any).resetKerekLocalStorage();
+                    } else {
+                      clearAllKerekLocalStorage();
+                    }
+                    console.log("[KEREK] LocalStorage başarıyla sıfırlandı. Sayfa yenileniyor...");
+                  } catch (err) {
+                    console.error("[KEREK] Reset hatası:", err);
+                    clearAllKerekLocalStorage();
+                  }
+                  setTimeout(() => {
+                    window.location.reload();
+                  }, 250);
+                }}
+                className={`w-full min-h-[42px] px-3 rounded-xl font-semibold text-xs flex items-center justify-center gap-2 border transition-all ${
+                  isResetting
+                    ? 'bg-rose-600 text-white border-rose-700 animate-pulse'
+                    : 'bg-rose-50 hover:bg-rose-100 active:bg-rose-200 text-rose-700 border-rose-200'
+                }`}
+              >
+                <Trash2 className={`w-4 h-4 ${isResetting ? 'text-white animate-spin' : 'text-rose-600'}`} />
+                <span>
+                  {isResetting
+                    ? (language === 'kz'
+                        ? 'Тазартылуда... Қайта жүктелуде'
+                        : language === 'tr'
+                        ? 'Sıfırlanıyor... Yenileniyor'
+                        : 'Сброс... Перезагрузка')
+                    : (language === 'kz'
+                        ? 'LocalStorage толық тазалау (Reset)'
+                        : language === 'tr'
+                        ? 'LocalStorage Sıfırla (Tam Reset)'
+                        : 'Полный сброс LocalStorage')}
+                </span>
+              </button>
             </div>
 
             <button

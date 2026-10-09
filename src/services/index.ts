@@ -20,6 +20,7 @@ export { getCurrentUserId, generateUUID };
 export { getFriendlyErrorMessage, logTechnicalError } from './errorHandler';
 export { checkClientRateLimit, resetClientRateLimit } from './rateLimiter';
 export { exportLocalData, importLocalData } from './backupService';
+export { clearAllKerekLocalStorage } from './storage';
 export { validateRequestData, validateProviderData, validateOfferData, validateReviewData } from './validation';
 export { matchProviders } from './matchingService';
 

@@ -202,10 +202,12 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
   let detectedService = '';
 
   if (
-    /котел|котёл|қазандық|отоплени|жылыту|аристон|байпасс|байпас|батарея|печь|печка|радиатор|тепло/i.test(
+    /котел|котёл|қазандық|отоплени|жылыту|аристон|байпасс|байпас|батарея|печь|печка|радиатор|тепло|kombi|комби|колонка|газовая колонка|су жылытқыш/i.test(
       normalized
     )
   ) {
+    const isKombiWord = /kombi/i.test(normalized);
+    const isKombiOrSimilar = /kombi|комби|колонка|газовая колонка|су жылытқыш/i.test(normalized);
     detectedCategory =
       lang === 'tr'
         ? 'Kombi, Şofben & Isıtma'
@@ -213,8 +215,10 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
         ? 'Жылыту және қазандықтар'
         : 'Отопление и котлы';
     detectedService =
-      lang === 'tr'
-        ? 'Kombi ve ısıtma servisi'
+      isKombiWord || lang === 'tr'
+        ? 'Kombi tamiri'
+        : isKombiOrSimilar
+        ? (lang === 'kz' ? 'Комби жөндеу' : 'Ремонт комби / колонок')
         : lang === 'kz'
         ? 'Қазандық пен жылыту жүйесін жөндеу'
         : 'Ремонт котла и системы отопления';

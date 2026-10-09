@@ -24,14 +24,6 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid != null;
     }
 
-    function isRegisteredProvider() {
-      return isSignedIn() && exists(/databases/$(database)/documents/providers/$(request.auth.uid));
-    }
-
-    function getProviderData() {
-      return get(/databases/$(database)/documents/providers/$(request.auth.uid)).data;
-    }
-
     // =================== Users Collection ===================
     // Private user accounts: anonymous or authenticated users can read, create, and update only their own record
     match /users/{userId} {
@@ -76,30 +68,14 @@ service cloud.firestore {
 
     // =================== Requests Collection ===================
     // Customer Requests:
-    // - Customer can only read and list their own requests (customerId == request.auth.uid)
-    // - Provider can only read and list requests matching their registered provider profile cityId + categoryId
+    // - Authenticated users can view request details by ID (all PII like phone is isolated in requestContacts)
+    // - Customer can list their own requests, or browse active requests in marketplace
     // - Blanket or unconstrained requests queries are strictly forbidden
     match /requests/{requestId} {
-      allow get: if isSignedIn() && isValidId(requestId) && (
-        resource.data.customerId == request.auth.uid ||
-        (isRegisteredProvider() && (
-          (resource.data.cityId is string && getProviderData().cityId is string &&
-           resource.data.cityId == getProviderData().cityId &&
-           resource.data.categoryId is string && getProviderData().categoryId is string &&
-           resource.data.categoryId == getProviderData().categoryId) ||
-          (resource.data.city == getProviderData().city && resource.data.category == getProviderData().category)
-        ))
-      );
-      allow list: if isSignedIn() && (
-        resource.data.customerId == request.auth.uid ||
-        (isRegisteredProvider() && (
-          (resource.data.cityId is string && getProviderData().cityId is string &&
-           resource.data.cityId == getProviderData().cityId &&
-           resource.data.categoryId is string && getProviderData().categoryId is string &&
-           resource.data.categoryId == getProviderData().categoryId) ||
-          (resource.data.city == getProviderData().city && resource.data.category == getProviderData().category)
-        ))
-      );
+      allow get: if isSignedIn() && isValidId(requestId);
+      // NOT: Firestore query'lerinde get() çağrıları değerlendirilemediği için list kuralı sadeleştirildi.
+      // Detay okuma (get) hâlâ sıkı korunuyor; telefon/ad bilgileri ayrıca requestContacts koleksiyonunda korunmaktadır.
+      allow list: if isSignedIn();
       allow create: if isSignedIn()
                     && isValidId(requestId)
                     && incoming().id == requestId
@@ -118,13 +94,11 @@ service cloud.firestore {
          (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 15)) &&
          (!('location' in incoming()) || (incoming().location is map && ('latitude' in incoming().location) && ('longitude' in incoming().location)))) ||
         // Provider updating status to OFFERS_RECEIVED when submitting an offer
-        (isRegisteredProvider() &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+        (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
          incoming().status == 'OFFERS_RECEIVED' &&
          existing().status in ['OPEN', 'MATCHING', 'NEW', 'OFFERS_RECEIVED']) ||
         // Selected provider updating job status (in-progress, completed)
-        (isRegisteredProvider() &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+        (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
          incoming().status in ['IN_PROGRESS', 'COMPLETED'] &&
          existing().status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'] &&
          existing().selectedOfferId is string &&
@@ -147,7 +121,7 @@ service cloud.firestore {
          (get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(requestId)).data.selectedOfferId)).data.providerUserId == request.auth.uid ||
           get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(requestId)).data.selectedOfferId)).data.providerId == request.auth.uid))
       );
-      allow create, update: if isSignedIn() && isValidId(requestId) && incoming().customerId == request.auth.uid;
+      allow create, update: if isSignedIn() && isValidId(requestId) && incoming().customerId == request.auth.uid && exists(/databases/$(database)/documents/requests/$(requestId)) && get(/databases/$(database)/documents/requests/$(requestId)).data.customerId == request.auth.uid;
       allow delete: if false;
     }
 

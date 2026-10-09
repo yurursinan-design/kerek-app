@@ -1,5 +1,5 @@
 import { Provider, ServiceRequest } from '../types';
-import { normalizeCategoryId, normalizeCityId } from './taxonomy';
+import { normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 
 // Helper: Normalize text for matching (Cyrillic + Kazakh letters)
 export function normalizeText(str: string): string {
@@ -36,7 +36,9 @@ export function matchProviders(request: ServiceRequest, providers: Provider[]): 
     return [];
   }
 
-  const reqCatId = request.categoryId || (request.category ? normalizeCategoryId(request.category) : undefined);
+  const reqCatId = request.categoryId
+    ? normalizeCategoryId(request.categoryId)
+    : (request.category ? normalizeCategoryId(request.category) : undefined);
   const normCity = normalizeText(request.city);
   const normCat = normalizeText(request.category);
   const normSrv = normalizeText(request.service);
@@ -55,7 +57,7 @@ export function matchProviders(request: ServiceRequest, providers: Provider[]): 
     }
 
     // Strict City Filter: If request.cityId is known, provider MUST match request.cityId
-    const pCityId = p.cityId || normalizeCityId(p.city);
+    const pCityId = p.cityId ? (normalizeCityId(p.cityId) || p.cityId) : normalizeCityId(p.city);
     if (reqCityId) {
       if (!pCityId || pCityId !== reqCityId) {
         return false;
@@ -70,8 +72,10 @@ export function matchProviders(request: ServiceRequest, providers: Provider[]): 
   // 2. Score Candidate Providers
   const scored = candidateProviders.map((provider) => {
     let score = 0;
-    const pCityId = provider.cityId || normalizeCityId(provider.city);
-    const pCatId = provider.categoryId || normalizeCategoryId(provider.category);
+    const pCityId = provider.cityId ? (normalizeCityId(provider.cityId) || provider.cityId) : normalizeCityId(provider.city);
+    const pCatId = provider.categoryId
+      ? normalizeCategoryId(provider.categoryId)
+      : (provider.category ? normalizeCategoryId(provider.category) : undefined);
     const pCity = normalizeText(provider.city);
     const pCat = normalizeText(provider.category);
     const pSrv = normalizeText(provider.services);
@@ -86,7 +90,7 @@ export function matchProviders(request: ServiceRequest, providers: Provider[]): 
 
     // 2. Same Category (Canonical categoryId check - bridges Kazakh and Russian)
     let catMatch = false;
-    if (reqCatId && pCatId && reqCatId === pCatId) {
+    if (reqCatId && pCatId && (reqCatId === pCatId || isCategoryMatch(reqCatId, pCatId))) {
       score += 30;
       catMatch = true;
     } else if (pCat === normCat || (normCat && (normCat.includes(pCat) || pCat.includes(normCat)))) {

@@ -1,40 +1,6 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parseServiceRequest = exports.kaspiEscrowWebhook = void 0;
-const functions = __importStar(require("firebase-functions"));
 const app_1 = require("firebase-admin/app");
 const firestore_1 = require("firebase-admin/firestore");
 const https_1 = require("firebase-functions/v2/https");
@@ -46,8 +12,8 @@ if (!(0, app_1.getApps)().length) {
     (0, app_1.initializeApp)();
 }
 const db = (0, firestore_1.getFirestore)();
-// Access Gemini API key securely from Google Secret Manager
-const geminiApiKey = (0, params_1.defineSecret)(config_1.GEMINI_CONFIG.secretName);
+// Access secrets securely from Google Secret Manager
+const kaspiWebhookSecret = (0, params_1.defineSecret)('KASPI_WEBHOOK_SECRET');
 /**
  * Kaspi.kz Escrow Webhook
  * HTTP endpoint triggered by Kaspi payment system to confirm funds locked in escrow.
@@ -59,16 +25,29 @@ const geminiApiKey = (0, params_1.defineSecret)(config_1.GEMINI_CONFIG.secretNam
  *   status: string (e.g. 'PAID')
  * }
  */
-exports.kaspiEscrowWebhook = functions.https.onRequest(async (req, res) => {
+exports.kaspiEscrowWebhook = (0, https_1.onRequest)({
+    secrets: [kaspiWebhookSecret],
+}, async (req, res) => {
     // Support CORS preflight if invoked from browser or payment sandbox
     if (req.method === 'OPTIONS') {
         res.set('Access-Control-Allow-Origin', '*');
         res.set('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-        res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-kaspi-signature');
         res.status(204).send('');
         return;
     }
     res.set('Access-Control-Allow-Origin', '*');
+    // 1. Shared secret header verification
+    const signatureHeader = req.headers['x-kaspi-signature'];
+    const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+    const expectedSecret = kaspiWebhookSecret.value();
+    if (!signature || signature !== expectedSecret) {
+        res.status(401).json({
+            success: false,
+            error: 'Unauthorized: Invalid or missing webhook signature.',
+        });
+        return;
+    }
     try {
         const payload = req.body || {};
         const requestId = payload.requestId || req.query.requestId;
@@ -82,25 +61,45 @@ exports.kaspiEscrowWebhook = functions.https.onRequest(async (req, res) => {
             return;
         }
         if (status === 'PAID') {
-            const requestRef = db.collection('requests').doc(String(requestId).trim());
-            const offerRef = db.collection('offers').doc(String(offerId).trim());
+            const cleanRequestId = String(requestId).trim();
+            const cleanOfferId = String(offerId).trim();
+            const requestRef = db.collection('requests').doc(cleanRequestId);
+            const offerRef = db.collection('offers').doc(cleanOfferId);
             const [requestDoc, offerDoc] = await Promise.all([
                 requestRef.get(),
                 offerRef.get(),
             ]);
             if (!requestDoc.exists) {
-                console.warn(`[kaspiEscrowWebhook] ServiceRequest with id ${requestId} not found`);
+                console.warn(`[kaspiEscrowWebhook] ServiceRequest with id ${cleanRequestId} not found`);
                 res.status(404).json({
                     success: false,
-                    error: `ServiceRequest with id "${requestId}" not found.`,
+                    error: `ServiceRequest with id "${cleanRequestId}" not found.`,
                 });
                 return;
             }
             if (!offerDoc.exists) {
-                console.warn(`[kaspiEscrowWebhook] ProviderOffer with id ${offerId} not found`);
+                console.warn(`[kaspiEscrowWebhook] ProviderOffer with id ${cleanOfferId} not found`);
                 res.status(404).json({
                     success: false,
-                    error: `ProviderOffer with id "${offerId}" not found.`,
+                    error: `ProviderOffer with id "${cleanOfferId}" not found.`,
+                });
+                return;
+            }
+            const requestData = requestDoc.data();
+            const offerData = offerDoc.data();
+            // 2. requestId and offerId match check
+            if (!offerData || offerData.requestId !== cleanRequestId) {
+                res.status(400).json({
+                    success: false,
+                    error: 'offer does not belong to request',
+                });
+                return;
+            }
+            // 3. Idempotency guard: already processed check
+            if (requestData?.paymentStatus === 'held_in_escrow') {
+                res.status(200).json({
+                    success: true,
+                    message: 'already processed',
                 });
                 return;
             }
@@ -116,7 +115,7 @@ exports.kaspiEscrowWebhook = functions.https.onRequest(async (req, res) => {
                     updatedAt,
                 }),
             ]);
-            console.log(`[kaspiEscrowWebhook] Successfully held in escrow: requestId=${requestId}, offerId=${offerId}`);
+            console.log(`[kaspiEscrowWebhook] Successfully held in escrow: requestId=${cleanRequestId}, offerId=${cleanOfferId}`);
             res.status(200).json({
                 success: true,
                 message: 'Funds secured in escrow',
@@ -152,13 +151,43 @@ exports.kaspiEscrowWebhook = functions.https.onRequest(async (req, res) => {
  */
 exports.parseServiceRequest = (0, https_1.onCall)({
     region: config_1.GEMINI_CONFIG.region,
-    secrets: [geminiApiKey],
 }, async (request) => {
     // 1. Authentication check: Caller must be signed in (anonymous or permanent UID)
     if (!request.auth || !request.auth.uid) {
         throw new https_1.HttpsError('unauthenticated', 'User must be authenticated to use the AI request parser.');
     }
-    // 2. Input validation: text must be non-empty string <= 500 characters
+    const uid = request.auth.uid;
+    // 2. Server-side Rate Limit check (rateLimits/{uid})
+    const now = Date.now();
+    const rateLimitRef = db.collection('rateLimits').doc(uid);
+    const rateLimitDoc = await rateLimitRef.get();
+    if (rateLimitDoc.exists) {
+        const rateLimitData = rateLimitDoc.data() || {};
+        const lastCallAt = typeof rateLimitData.lastCallAt === 'number' ? rateLimitData.lastCallAt : 0;
+        const callCount = typeof rateLimitData.callCount === 'number' ? rateLimitData.callCount : 0;
+        if (now - lastCallAt < 60000 && callCount >= 10) {
+            throw new https_1.HttpsError('resource-exhausted', 'Too many requests. Please wait a moment before trying again.');
+        }
+        if (now - lastCallAt >= 60000) {
+            await rateLimitRef.set({
+                callCount: 1,
+                lastCallAt: now,
+            }, { merge: true });
+        }
+        else {
+            await rateLimitRef.set({
+                callCount: callCount + 1,
+                lastCallAt: now,
+            }, { merge: true });
+        }
+    }
+    else {
+        await rateLimitRef.set({
+            callCount: 1,
+            lastCallAt: now,
+        }, { merge: true });
+    }
+    // 3. Input validation: text must be non-empty string <= 500 characters
     const text = request.data?.text;
     if (typeof text !== 'string') {
         throw new https_1.HttpsError('invalid-argument', 'Parameter "text" is required and must be a string.');
@@ -170,8 +199,8 @@ exports.parseServiceRequest = (0, https_1.onCall)({
     if (trimmedText.length > config_1.GEMINI_CONFIG.maxInputChars) {
         throw new https_1.HttpsError('invalid-argument', `Input text exceeds maximum allowed limit of ${config_1.GEMINI_CONFIG.maxInputChars} characters.`);
     }
-    // 3. Resolve Gemini API Key from Secret Manager
-    const apiKey = geminiApiKey.value() || process.env.GEMINI_API_KEY;
+    // 3. Resolve Gemini API Key from Secret Manager or environment
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
         console.error('[parseServiceRequest] GEMINI_API_KEY secret is not configured.');
         throw new https_1.HttpsError('failed-precondition', 'Gemini API key is not configured in Secret Manager.');

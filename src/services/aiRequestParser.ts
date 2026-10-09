@@ -112,7 +112,6 @@ export async function parseServiceRequest(text: string): Promise<AiParserRespons
     // 4. Ensure an authenticated session exists before invoking callable function
     const userId = await ensureFirebaseAuth();
     if (!userId) {
-      resetClientRateLimit(RATE_LIMIT_ACTION);
       return {
         success: false,
         data: null,
@@ -133,6 +132,9 @@ export async function parseServiceRequest(text: string): Promise<AiParserRespons
     const result = await parseCallable({ text: trimmed });
     const payload = result.data;
 
+    // Reset rate limit cooldown only on successful request
+    resetClientRateLimit(RATE_LIMIT_ACTION);
+
     return {
       success: true,
       data: {
@@ -144,9 +146,6 @@ export async function parseServiceRequest(text: string): Promise<AiParserRespons
       },
     };
   } catch (err: any) {
-    // Reset rate limiter on failure so user is not penalized for backend/network errors
-    resetClientRateLimit(RATE_LIMIT_ACTION);
-
     console.warn('[aiRequestParser] Error invoking parseServiceRequest:', err);
 
     let code: AiParserErrorCode = 'UNKNOWN_ERROR';

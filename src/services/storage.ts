@@ -25,7 +25,7 @@ export const INITIAL_DEMO_PROVIDERS: Provider[] = [
     cityId: 'kyzylorda',
     district: 'Астана даңғылы',
     category: 'Тұрмыстық техника жөндеу',
-    categoryId: 'appliance_repair',
+    categoryId: 'appliances',
     services: 'Кір жуғыш машина жөндеу, мотор және барабан ауыстыру',
     priceRange: '12 000 – 18 000 ₸',
     workingHours: '09:00 - 20:00',
@@ -45,7 +45,7 @@ export const INITIAL_DEMO_PROVIDERS: Provider[] = [
     cityId: 'kyzylorda',
     district: 'мкр. Ақмешіт',
     category: 'Ремонт бытовой техники',
-    categoryId: 'appliance_repair',
+    categoryId: 'appliances',
     services: 'Ремонт стиральных машин, замена насосов, электроника',
     priceRange: '10 000 – 22 000 ₸',
     workingHours: '08:30 - 21:00',
@@ -63,7 +63,7 @@ export const INITIAL_DEMO_PROVIDERS: Provider[] = [
     cityId: 'kyzylorda',
     district: 'мкр. Мерей',
     category: 'Тұрмыстық техника жөндеу',
-    categoryId: 'appliance_repair',
+    categoryId: 'appliances',
     services: 'Кір жуғыш машина мен тоңазытқыш жөндеу',
     priceRange: 'Келісімді',
     workingHours: '24/7 шұғыл шақыру',
@@ -137,7 +137,7 @@ export const INITIAL_DEMO_PROVIDERS: Provider[] = [
     cityId: 'almaty',
     district: 'Бостандық ауданы',
     category: 'Тұрмыстық техника жөндеу',
-    categoryId: 'appliance_repair',
+    categoryId: 'appliances',
     services: 'Кір жуғыш машина жөндеу, үйге бару',
     priceRange: '8 000 – 20 000 ₸',
     workingHours: '09:00 - 21:00',
@@ -154,7 +154,7 @@ export const INITIAL_DEMO_PROVIDERS: Provider[] = [
     cityId: 'astana',
     district: 'Есіл ауданы',
     category: 'Ремонт бытовой техники',
-    categoryId: 'appliance_repair',
+    categoryId: 'appliances',
     services: 'Ремонт стиральных машин и бытовой техники',
     priceRange: '10 000 – 25 000 ₸',
     workingHours: '08:00 - 22:00',
@@ -439,3 +439,30 @@ export const StorageService = {
     }
   },
 };
+
+/**
+ * Completely purges all 'kerek_' entries from localStorage.
+ */
+export function clearAllKerekLocalStorage(): string[] {
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  const removed: string[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('kerek_') || key.startsWith('kerek'))) {
+        removed.push(key);
+      }
+    }
+    removed.forEach((k) => localStorage.removeItem(k));
+    console.log(`[KEREK] LocalStorage temizlendi (${removed.length} anahtar):`, removed);
+  } catch (e) {
+    console.warn('[KEREK] LocalStorage temizlenirken hata:', e);
+  }
+  return removed;
+}
+
+// Expose globally on window for easy developer & mobile debugging
+if (typeof window !== 'undefined') {
+  (window as any).resetKerekLocalStorage = clearAllKerekLocalStorage;
+}
+

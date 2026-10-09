@@ -81,6 +81,11 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
       /радиатор/i,
       /тепло/i,
       /отопител/i,
+      /kombi/i,
+      /комби/i,
+      /колонка/i,
+      /газовая колонка/i,
+      /су жылытқыш/i,
     ],
   },
   {
@@ -328,8 +333,13 @@ export function normalizeCategoryId(categoryOrId?: string): string {
   const clean = categoryOrId.trim().toLowerCase();
 
   // Backward compatibility alias checks
-  if (clean === 'appliance_repair' || clean === 'appliances_repair') {
-    return 'appliance_repair';
+  if (
+    clean === 'appliance_repair' ||
+    clean === 'appliances_repair' ||
+    clean === 'appliances' ||
+    clean === 'appliance'
+  ) {
+    return 'appliances';
   }
   if (clean === 'home_service' || clean === 'home_services') {
     return 'home_services';

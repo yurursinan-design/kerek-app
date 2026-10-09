@@ -1,4 +1,6 @@
 /**
+ * Bu dosya gelecekte özel bir cloud backend entegrasyonu için referans olarak saklanmaktadır. Şu anda aktif olarak kullanılmamaktadır. Gerçek Firebase entegrasyonu src/services/firebaseRepository.ts içindedir.
+ *
  * Cloud Repository Placeholder
  *
  * IMPORTANT ARCHITECTURAL NOTE:

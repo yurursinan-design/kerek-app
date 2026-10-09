@@ -352,7 +352,7 @@ export function analyzeRequestUnderstanding(
   // Sub-keyword category detection if not caught by primary patterns
   if (!detectedCategoryId) {
     if (
-      /котел|котёл|қазандық|отоплени|жылыту|аристон|байпасс|байпас|батарея|печь|печка|радиатор|тепло/i.test(
+      /котел|котёл|қазандық|отоплени|жылыту|аристон|байпасс|байпас|батарея|печь|печка|радиатор|тепло|kombi|комби|колонка|газовая колонка|су жылытқыш/i.test(
         normalized
       )
     ) {
@@ -370,7 +370,7 @@ export function analyzeRequestUnderstanding(
         normalized
       )
     ) {
-      detectedCategoryId = 'appliance_repair';
+      detectedCategoryId = 'appliances';
       detectedCategory = getCategoryDisplayName('appliances', lang);
     } else if (
       /сантехник|(?:^|[^а-яёa-z\d])кран|труба|су ағ|шүмек|унитаз|смеситель|канализаци|раковин|батарея|электрик|жарық|проводк|розетк|люстр|тоқ|plumb|electric/i.test(
@@ -527,7 +527,7 @@ export function analyzeRequestUnderstanding(
   const brandPrefix = detectedBrand ? `${detectedBrand} ` : '';
   const modelSuffix = detectedModel ? ` (${detectedModel})` : '';
 
-  if (detectedCategoryId === 'appliance_repair') {
+  if (detectedCategoryId === 'appliances' || detectedCategoryId === 'appliance_repair') {
     if (/кір жуғыш|стирал|çamaşır|washing\s*machine|washer/i.test(normalized)) {
       if (isEnglishQuery) {
         service = `${brandPrefix}washing machine repair${modelSuffix}`.trim();
@@ -591,6 +591,7 @@ export function analyzeRequestUnderstanding(
 
   // Check if brand/model is relevant but missing
   const needsBrand =
+    detectedCategoryId === 'appliances' ||
     detectedCategoryId === 'appliance_repair' ||
     detectedCategoryId === 'electronics' ||
     detectedCategoryId === 'auto';
@@ -741,7 +742,7 @@ export function understandingToExtractedNeed(
     city: understanding.city || defaultCity,
     cityId: understanding.cityId || 'kyzylorda',
     category: understanding.category || defaultCategory,
-    categoryId: understanding.categoryId || 'appliance_repair',
+    categoryId: normalizeCategoryId(understanding.categoryId) || 'appliances',
     service: understanding.service || originalQuery || 'Қызмет',
     date: understanding.preferredDate || (lang === 'kz' ? 'Бүгін' : 'Сегодня'),
     budget: lang === 'kz' ? 'Келісімді' : 'Договорная',

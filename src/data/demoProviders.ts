@@ -17,7 +17,7 @@ export function getDemoProviders(need: ExtractedNeed, lang: Language): DemoProvi
   const cityId = need.cityId || normalizeCityId(city);
 
   // 1. Appliances Repair (Кір жуғыш машина, стиралка, техника)
-  if (catId === 'appliance_repair' || cat.includes('техник') || srv.includes('кір жуғыш') || srv.includes('стирал') || srv.includes('тоңазытқыш')) {
+  if (catId === 'appliances' || catId === 'appliance_repair' || cat.includes('техник') || srv.includes('кір жуғыш') || srv.includes('стирал') || srv.includes('тоңазытқыш')) {
     return enrich([
       {
         id: 'demo-appliance-1',
@@ -67,7 +67,7 @@ export function getDemoProviders(need: ExtractedNeed, lang: Language): DemoProvi
         verified: true,
         addressSnippet: lang === 'kz' ? `${city}, өндірістік аймақ` : `${city}, промзона`,
       },
-    ], 'appliance_repair', cityId);
+    ], 'appliances', cityId);
   }
 
   // 2. Home Services (Plumbing, Electrician / Сантехник, Электрик)

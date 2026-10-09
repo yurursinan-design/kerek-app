@@ -67,7 +67,7 @@ import {
   validateReviewData,
 } from './validation';
 import { getCurrentUserId } from './localRepository';
-import { CANONICAL_CITIES, CANONICAL_CATEGORIES, normalizeCategoryId, normalizeCityId } from './taxonomy';
+import { CANONICAL_CITIES, CANONICAL_CATEGORIES, normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 
 /**
  * Sanitizes an object before sending to Cloud Firestore.
@@ -192,7 +192,16 @@ export class FirebaseRepository implements Repository {
       const snap = await getDoc(userRef);
       if (!snap.exists()) return null;
       return snap.data() as User;
-    } catch (err) {
+    } catch (err: any) {
+      const code = err?.code || '';
+      const msg = err?.message || String(err);
+      if (
+        code === 'permission-denied' ||
+        msg.includes('permission') ||
+        msg.includes('Missing or insufficient permissions')
+      ) {
+        return null;
+      }
       handleFirestoreError(err, OperationType.GET, `users/${userId}`);
     }
   }
@@ -212,9 +221,9 @@ export class FirebaseRepository implements Repository {
     const id = userId;
 
     const city = providerData.city?.trim() || 'Қызылорда';
-    const cityId = providerData.cityId || normalizeCityId(city);
+    const cityId = normalizeCityId(providerData.cityId || city) || providerData.cityId || 'kyzylorda';
     const category = providerData.category?.trim() || '';
-    const categoryId = providerData.categoryId || normalizeCategoryId(category);
+    const categoryId = normalizeCategoryId(providerData.categoryId || category);
 
     const newProvider: Provider = {
       id,
@@ -277,7 +286,24 @@ export class FirebaseRepository implements Repository {
         };
       }
       return null;
-    } catch (err) {
+    } catch (err: any) {
+      const code = err?.code || '';
+      const msg = err?.message || String(err);
+      if (
+        code === 'permission-denied' ||
+        msg.includes('permission') ||
+        msg.includes('Missing or insufficient permissions')
+      ) {
+        const demo = INITIAL_DEMO_PROVIDERS.find((p) => p.id === providerId);
+        if (demo) {
+          return {
+            ...demo,
+            cityId: demo.cityId || normalizeCityId(demo.city),
+            categoryId: demo.categoryId || normalizeCategoryId(demo.category),
+          };
+        }
+        return null;
+      }
       handleFirestoreError(err, OperationType.GET, `providers/${providerId}`);
     }
   }
@@ -287,8 +313,16 @@ export class FirebaseRepository implements Repository {
     const firestore = this.ensureDb();
     const providers: Provider[] = [];
 
-    const targetCityId = filter?.cityId || (filter?.city ? normalizeCityId(filter.city) : undefined);
-    const targetCatId = filter?.categoryId || (filter?.category ? normalizeCategoryId(filter.category) : undefined);
+    const targetCityId = filter?.cityId
+      ? normalizeCityId(filter.cityId) || filter.cityId
+      : filter?.city
+      ? normalizeCityId(filter.city)
+      : undefined;
+    const targetCatId = filter?.categoryId
+      ? normalizeCategoryId(filter.categoryId)
+      : filter?.category
+      ? normalizeCategoryId(filter.category)
+      : undefined;
 
     // Under strict Firestore Rules ("allow list: if false;"), blanket queries on
     // /providers are strictly prohibited to prevent provider directory scraping.
@@ -302,15 +336,15 @@ export class FirebaseRepository implements Repository {
           const rawProv = snap.data() as Provider;
           const prov: Provider = {
             ...rawProv,
-            cityId: rawProv.cityId || normalizeCityId(rawProv.city),
-            categoryId: rawProv.categoryId || normalizeCategoryId(rawProv.category),
+            cityId: normalizeCityId(rawProv.cityId || rawProv.city) || rawProv.cityId,
+            categoryId: normalizeCategoryId(rawProv.categoryId || rawProv.category),
           };
 
           let matches = true;
-          if (targetCityId && prov.cityId !== targetCityId) {
+          if (targetCityId && (normalizeCityId(prov.cityId || prov.city) || prov.cityId) !== targetCityId) {
             matches = false;
           }
-          if (targetCatId && prov.categoryId !== targetCatId) {
+          if (targetCatId && !isCategoryMatch(prov.categoryId, targetCatId)) {
             matches = false;
           }
           if (matches) {
@@ -326,15 +360,15 @@ export class FirebaseRepository implements Repository {
     // Merge with demo providers for rich experience, respecting canonical filter
     let demoList = INITIAL_DEMO_PROVIDERS.map((p) => ({
       ...p,
-      cityId: p.cityId || normalizeCityId(p.city),
-      categoryId: p.categoryId || normalizeCategoryId(p.category),
+      cityId: normalizeCityId(p.cityId || p.city) || p.cityId,
+      categoryId: normalizeCategoryId(p.categoryId || p.category),
     }));
 
     if (targetCityId) {
-      demoList = demoList.filter((p) => p.cityId === targetCityId);
+      demoList = demoList.filter((p) => (normalizeCityId(p.cityId || p.city) || p.cityId) === targetCityId);
     }
     if (targetCatId) {
-      demoList = demoList.filter((p) => p.categoryId === targetCatId);
+      demoList = demoList.filter((p) => isCategoryMatch(p.categoryId, targetCatId));
     }
 
     providers.push(...demoList);
@@ -357,9 +391,9 @@ export class FirebaseRepository implements Repository {
     const id = requestData.id || `REQ-${nowTimestamp}`;
 
     const city = requestData.city?.trim() || 'Қызылорда';
-    const cityId = requestData.cityId || normalizeCityId(city);
+    const cityId = normalizeCityId(requestData.cityId || city) || requestData.cityId || 'kyzylorda';
     const category = requestData.category?.trim() || 'Тұрмыстық техника жөндеу';
-    const categoryId = requestData.categoryId || normalizeCategoryId(category);
+    const categoryId = normalizeCategoryId(requestData.categoryId || category);
 
     const firestoreStatus =
       requestData.status === 'OPEN' || !requestData.status
@@ -562,7 +596,19 @@ export class FirebaseRepository implements Repository {
         cityId: data.cityId || normalizeCityId(data.city),
         categoryId: data.categoryId || normalizeCategoryId(data.category),
       };
-    } catch (err) {
+    } catch (err: any) {
+      const code = err?.code || '';
+      const msg = err?.message || String(err);
+      if (
+        code === 'permission-denied' ||
+        msg.includes('permission') ||
+        msg.includes('Missing or insufficient permissions')
+      ) {
+        console.warn(
+          `[FirebaseRepository] Note: getRequest('${requestId}') was restricted by security rules. Gracefully returning null to allow LocalRepository fallback.`
+        );
+        return null;
+      }
       handleFirestoreError(err, OperationType.GET, `requests/${requestId}`);
     }
   }
@@ -576,26 +622,54 @@ export class FirebaseRepository implements Repository {
       let q = query(requestsColl);
 
       let snap;
+      const targetCityId = filter?.cityId
+        ? normalizeCityId(filter.cityId) || filter.cityId
+        : filter?.city
+        ? normalizeCityId(filter.city)
+        : undefined;
+      const targetCatId = filter?.categoryId
+        ? normalizeCategoryId(filter.categoryId)
+        : filter?.category
+        ? normalizeCategoryId(filter.category)
+        : undefined;
+
       if (filter?.customerId) {
         // Customer view: align with authenticated customer ID if available
         const effectiveCustomerId = auth?.currentUser?.uid || filter.customerId;
         const q = query(requestsColl, where('customerId', '==', effectiveCustomerId));
         snap = await getDocs(q);
-      } else if (filter?.cityId && filter?.categoryId) {
+      } else if (targetCityId && targetCatId) {
         // Provider view: query by cityId and categoryId conforming to firestore.rules
         try {
           const q = query(
             requestsColl,
-            where('cityId', '==', filter.cityId),
-            where('categoryId', '==', filter.categoryId)
+            where('cityId', '==', targetCityId),
+            where('categoryId', '==', targetCatId)
           );
           snap = await getDocs(q);
+
+          // Support legacy 'appliance_repair' if searching for canonical 'appliances'
+          if (targetCatId === 'appliances') {
+            try {
+              const qLegacy = query(
+                requestsColl,
+                where('cityId', '==', targetCityId),
+                where('categoryId', '==', 'appliance_repair')
+              );
+              const snapLegacy = await getDocs(qLegacy);
+              const existingIds = new Set(snap.docs.map((d) => d.id));
+              const extraDocs = snapLegacy.docs.filter((d) => !existingIds.has(d.id));
+              snap = { docs: [...snap.docs, ...extraDocs] } as any;
+            } catch {
+              // Ignore legacy query error
+            }
+          }
         } catch (idErr: any) {
           // If Firestore security rules on project enforce city/category text match, fallback to text query on cloud
           const targetCity =
-            filter.city || CANONICAL_CITIES.find((c) => c.id === filter.cityId)?.nameKz;
+            filter?.city || CANONICAL_CITIES.find((c) => c.id === targetCityId)?.nameKz;
           const targetCategory =
-            filter.category || CANONICAL_CATEGORIES.find((c) => c.id === filter.categoryId)?.nameKz;
+            filter?.category || CANONICAL_CATEGORIES.find((c) => c.id === targetCatId)?.nameKz;
           let fetched = false;
           if (targetCity && targetCategory) {
             try {
@@ -629,17 +703,26 @@ export class FirebaseRepository implements Repository {
           where('category', '==', filter.category)
         );
         snap = await getDocs(q);
-      } else if (filter?.cityId) {
-        const q = query(requestsColl, where('cityId', '==', filter.cityId));
+      } else if (targetCityId) {
+        const q = query(requestsColl, where('cityId', '==', targetCityId));
         snap = await getDocs(q);
-      } else if (filter?.categoryId) {
-        const q = query(requestsColl, where('categoryId', '==', filter.categoryId));
+      } else if (targetCatId) {
+        const q = query(requestsColl, where('categoryId', '==', targetCatId));
         snap = await getDocs(q);
+        if (targetCatId === 'appliances') {
+          try {
+            const qLegacy = query(requestsColl, where('categoryId', '==', 'appliance_repair'));
+            const snapLegacy = await getDocs(qLegacy);
+            const existingIds = new Set(snap.docs.map((d) => d.id));
+            const extraDocs = snapLegacy.docs.filter((d) => !existingIds.has(d.id));
+            snap = { docs: [...snap.docs, ...extraDocs] } as any;
+          } catch {}
+        }
       } else {
         const q = query(requestsColl);
         snap = await getDocs(q);
       }
-      let requests: ServiceRequest[] = (snap ? snap.docs : []).map((d) => {
+      let requests: ServiceRequest[] = (snap ? snap.docs : []).map((d: any) => {
         const r = d.data() as ServiceRequest;
         const cleanSelectedOfferId =
           typeof r.selectedOfferId === 'string' && r.selectedOfferId.trim()
@@ -649,16 +732,18 @@ export class FirebaseRepository implements Repository {
           ...r,
           status: normalizeRequestStatus(r.status),
           selectedOfferId: cleanSelectedOfferId,
-          cityId: r.cityId || normalizeCityId(r.city),
-          categoryId: r.categoryId || normalizeCategoryId(r.category),
+          cityId: normalizeCityId(r.cityId || r.city) || r.cityId,
+          categoryId: normalizeCategoryId(r.categoryId || r.category),
         };
       });
 
-      if (filter?.cityId) {
-        requests = requests.filter((r) => r.cityId === filter.cityId);
+      if (targetCityId) {
+        requests = requests.filter(
+          (r) => (normalizeCityId(r.cityId || r.city) || r.cityId) === targetCityId
+        );
       }
-      if (filter?.categoryId) {
-        requests = requests.filter((r) => r.categoryId === filter.categoryId);
+      if (targetCatId) {
+        requests = requests.filter((r) => isCategoryMatch(r.categoryId, targetCatId));
       }
 
       // PRIVACY ENFORCEMENT:
@@ -1248,11 +1333,11 @@ export class FirebaseRepository implements Repository {
   // =================== Matching ===================
   async matchProviders(request: ServiceRequest): Promise<Provider[]> {
     try {
-      const reqCityId = request.cityId || (request.city ? normalizeCityId(request.city) : undefined);
+      const reqCityId = normalizeCityId(request.cityId || request.city) || request.cityId;
       if (request.city && request.city.trim() !== '' && !reqCityId) {
         return [];
       }
-      const reqCatId = request.categoryId || (request.category ? normalizeCategoryId(request.category) : undefined);
+      const reqCatId = normalizeCategoryId(request.categoryId || request.category);
       const candidates = await this.getProviders(reqCityId ? { cityId: reqCityId, categoryId: reqCatId } : undefined);
       return matchProviders(request, candidates);
     } catch {
@@ -2080,7 +2165,16 @@ export class FirebaseRepository implements Repository {
       const snap = await getDoc(doc(db, 'appointments', docId));
       if (!snap.exists()) return null;
       return snap.data() as Appointment;
-    } catch (error) {
+    } catch (error: any) {
+      const code = error?.code || '';
+      const msg = error?.message || String(error);
+      if (
+        code === 'permission-denied' ||
+        msg.includes('permission') ||
+        msg.includes('Missing or insufficient permissions')
+      ) {
+        return null;
+      }
       handleFirestoreError(error, OperationType.GET, `appointments/${docId}`);
       return null;
     }

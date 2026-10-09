@@ -1,7 +1,7 @@
 import * as functions from 'firebase-functions';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret } from 'firebase-functions/params';
 import { GEMINI_CONFIG } from './config';
 import { parseTextWithGemini, ParsedServiceRequest } from './geminiParser';
@@ -13,8 +13,8 @@ if (!getApps().length) {
 
 const db = getFirestore();
 
-// Access Gemini API key securely from Google Secret Manager
-const geminiApiKey = defineSecret(GEMINI_CONFIG.secretName);
+// Access secrets securely from Google Secret Manager
+const kaspiWebhookSecret = defineSecret('KASPI_WEBHOOK_SECRET');
 
 /**
  * Kaspi.kz Escrow Webhook
@@ -27,97 +27,138 @@ const geminiApiKey = defineSecret(GEMINI_CONFIG.secretName);
  *   status: string (e.g. 'PAID')
  * }
  */
-export const kaspiEscrowWebhook = functions.https.onRequest(async (req, res) => {
-  // Support CORS preflight if invoked from browser or payment sandbox
-  if (req.method === 'OPTIONS') {
+export const kaspiEscrowWebhook = onRequest(
+  {
+    secrets: [kaspiWebhookSecret],
+  },
+  async (req, res) => {
+    // Support CORS preflight if invoked from browser or payment sandbox
+    if (req.method === 'OPTIONS') {
+      res.set('Access-Control-Allow-Origin', '*');
+      res.set('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+      res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-kaspi-signature');
+      res.status(204).send('');
+      return;
+    }
+
     res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.status(204).send('');
-    return;
-  }
 
-  res.set('Access-Control-Allow-Origin', '*');
+    // 1. Shared secret header verification
+    const signatureHeader = req.headers['x-kaspi-signature'];
+    const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
+    const expectedSecret = kaspiWebhookSecret.value();
 
-  try {
-    const payload = req.body || {};
-    const requestId = payload.requestId || req.query.requestId;
-    const offerId = payload.offerId || req.query.offerId;
-    const status = payload.status || req.query.status;
-
-    if (!requestId || !offerId || !status) {
-      res.status(400).json({
+    if (!signature || signature !== expectedSecret) {
+      res.status(401).json({
         success: false,
-        error: 'Missing required parameters: requestId, offerId, and status are required.',
+        error: 'Unauthorized: Invalid or missing webhook signature.',
       });
       return;
     }
 
-    if (status === 'PAID') {
-      const requestRef = db.collection('requests').doc(String(requestId).trim());
-      const offerRef = db.collection('offers').doc(String(offerId).trim());
+    try {
+      const payload = req.body || {};
+      const requestId = payload.requestId || req.query.requestId;
+      const offerId = payload.offerId || req.query.offerId;
+      const status = payload.status || req.query.status;
 
-      const [requestDoc, offerDoc] = await Promise.all([
-        requestRef.get(),
-        offerRef.get(),
-      ]);
-
-      if (!requestDoc.exists) {
-        console.warn(`[kaspiEscrowWebhook] ServiceRequest with id ${requestId} not found`);
-        res.status(404).json({
+      if (!requestId || !offerId || !status) {
+        res.status(400).json({
           success: false,
-          error: `ServiceRequest with id "${requestId}" not found.`,
+          error: 'Missing required parameters: requestId, offerId, and status are required.',
         });
         return;
       }
 
-      if (!offerDoc.exists) {
-        console.warn(`[kaspiEscrowWebhook] ProviderOffer with id ${offerId} not found`);
-        res.status(404).json({
-          success: false,
-          error: `ProviderOffer with id "${offerId}" not found.`,
+      if (status === 'PAID') {
+        const cleanRequestId = String(requestId).trim();
+        const cleanOfferId = String(offerId).trim();
+        const requestRef = db.collection('requests').doc(cleanRequestId);
+        const offerRef = db.collection('offers').doc(cleanOfferId);
+
+        const [requestDoc, offerDoc] = await Promise.all([
+          requestRef.get(),
+          offerRef.get(),
+        ]);
+
+        if (!requestDoc.exists) {
+          console.warn(`[kaspiEscrowWebhook] ServiceRequest with id ${cleanRequestId} not found`);
+          res.status(404).json({
+            success: false,
+            error: `ServiceRequest with id "${cleanRequestId}" not found.`,
+          });
+          return;
+        }
+
+        if (!offerDoc.exists) {
+          console.warn(`[kaspiEscrowWebhook] ProviderOffer with id ${cleanOfferId} not found`);
+          res.status(404).json({
+            success: false,
+            error: `ProviderOffer with id "${cleanOfferId}" not found.`,
+          });
+          return;
+        }
+
+        const requestData = requestDoc.data();
+        const offerData = offerDoc.data();
+
+        // 2. requestId and offerId match check
+        if (!offerData || offerData.requestId !== cleanRequestId) {
+          res.status(400).json({
+            success: false,
+            error: 'offer does not belong to request',
+          });
+          return;
+        }
+
+        // 3. Idempotency guard: already processed check
+        if (requestData?.paymentStatus === 'held_in_escrow') {
+          res.status(200).json({
+            success: true,
+            message: 'already processed',
+          });
+          return;
+        }
+
+        const updatedAt = new Date().toISOString();
+
+        // Concurrently update both documents' paymentStatus to 'held_in_escrow'
+        await Promise.all([
+          requestRef.update({
+            paymentStatus: 'held_in_escrow',
+            updatedAt,
+          }),
+          offerRef.update({
+            paymentStatus: 'held_in_escrow',
+            updatedAt,
+          }),
+        ]);
+
+        console.log(
+          `[kaspiEscrowWebhook] Successfully held in escrow: requestId=${cleanRequestId}, offerId=${cleanOfferId}`
+        );
+
+        res.status(200).json({
+          success: true,
+          message: 'Funds secured in escrow',
         });
         return;
       }
 
-      const updatedAt = new Date().toISOString();
-
-      // Concurrently update both documents' paymentStatus to 'held_in_escrow'
-      await Promise.all([
-        requestRef.update({
-          paymentStatus: 'held_in_escrow',
-          updatedAt,
-        }),
-        offerRef.update({
-          paymentStatus: 'held_in_escrow',
-          updatedAt,
-        }),
-      ]);
-
-      console.log(
-        `[kaspiEscrowWebhook] Successfully held in escrow: requestId=${requestId}, offerId=${offerId}`
-      );
-
+      // Acknowledge non-PAID events without mutating escrow state
       res.status(200).json({
         success: true,
-        message: 'Funds secured in escrow',
+        message: `Status "${status}" received, no escrow hold action required.`,
       });
-      return;
+    } catch (err: any) {
+      console.error('[kaspiEscrowWebhook] Unexpected error:', err);
+      res.status(500).json({
+        success: false,
+        error: err?.message || 'Internal server error processing Kaspi escrow webhook',
+      });
     }
-
-    // Acknowledge non-PAID events without mutating escrow state
-    res.status(200).json({
-      success: true,
-      message: `Status "${status}" received, no escrow hold action required.`,
-    });
-  } catch (err: any) {
-    console.error('[kaspiEscrowWebhook] Unexpected error:', err);
-    res.status(500).json({
-      success: false,
-      error: err?.message || 'Internal server error processing Kaspi escrow webhook',
-    });
   }
-});
+);
 
 /**
  * Cloud Function v2: parseServiceRequest
@@ -138,7 +179,6 @@ export const parseServiceRequest = onCall<
 >(
   {
     region: GEMINI_CONFIG.region,
-    secrets: [geminiApiKey],
   },
   async (request) => {
     // 1. Authentication check: Caller must be signed in (anonymous or permanent UID)
@@ -149,7 +189,53 @@ export const parseServiceRequest = onCall<
       );
     }
 
-    // 2. Input validation: text must be non-empty string <= 500 characters
+    const uid = request.auth.uid;
+
+    // 2. Server-side Rate Limit check (rateLimits/{uid})
+    const now = Date.now();
+    const rateLimitRef = db.collection('rateLimits').doc(uid);
+    const rateLimitDoc = await rateLimitRef.get();
+
+    if (rateLimitDoc.exists) {
+      const rateLimitData = rateLimitDoc.data() || {};
+      const lastCallAt = typeof rateLimitData.lastCallAt === 'number' ? rateLimitData.lastCallAt : 0;
+      const callCount = typeof rateLimitData.callCount === 'number' ? rateLimitData.callCount : 0;
+
+      if (now - lastCallAt < 60000 && callCount >= 10) {
+        throw new HttpsError(
+          'resource-exhausted',
+          'Too many requests. Please wait a moment before trying again.'
+        );
+      }
+
+      if (now - lastCallAt >= 60000) {
+        await rateLimitRef.set(
+          {
+            callCount: 1,
+            lastCallAt: now,
+          },
+          { merge: true }
+        );
+      } else {
+        await rateLimitRef.set(
+          {
+            callCount: callCount + 1,
+            lastCallAt: now,
+          },
+          { merge: true }
+        );
+      }
+    } else {
+      await rateLimitRef.set(
+        {
+          callCount: 1,
+          lastCallAt: now,
+        },
+        { merge: true }
+      );
+    }
+
+    // 3. Input validation: text must be non-empty string <= 500 characters
     const text = request.data?.text;
     if (typeof text !== 'string') {
       throw new HttpsError(
@@ -173,8 +259,8 @@ export const parseServiceRequest = onCall<
       );
     }
 
-    // 3. Resolve Gemini API Key from Secret Manager
-    const apiKey = geminiApiKey.value() || process.env.GEMINI_API_KEY;
+    // 3. Resolve Gemini API Key from Secret Manager or environment
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       console.error('[parseServiceRequest] GEMINI_API_KEY secret is not configured.');
       throw new HttpsError(

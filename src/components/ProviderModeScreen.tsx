@@ -19,6 +19,7 @@ import {
   getCityDisplayName,
   normalizeCategoryId,
   normalizeCityId,
+  isCategoryMatch,
 } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { ProviderOnboarding } from './ProviderOnboarding';
@@ -134,6 +135,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   );
   const [notification, setNotification] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [debugError, setDebugError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<string>('');
 
   const handlePriceAmountChange = (val: string) => {
     const digitsOnly = val.replace(/[^\d]/g, '');
@@ -181,12 +184,20 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
 
         // REQUEST SECURITY: Provider should only see requests matching their provider profile!
         // City and category match (canonical cityId & categoryId bridge languages)
-        const matchingRequests = await repository.getRequests({
-          city: myProv.city,
-          cityId: myProv.cityId || normalizeCityId(myProv.city),
-          category: myProv.category,
-          categoryId: myProv.categoryId || normalizeCategoryId(myProv.category),
-        });
+        let matchingRequests: ServiceRequest[] = [];
+        try {
+          matchingRequests = await repository.getRequests({
+            city: myProv.city,
+            cityId: myProv.cityId ? (normalizeCityId(myProv.cityId) || myProv.cityId) : normalizeCityId(myProv.city),
+            category: myProv.category,
+            categoryId: myProv.categoryId ? normalizeCategoryId(myProv.categoryId) : normalizeCategoryId(myProv.category),
+          });
+          setDebugError(null);
+          setDebugInfo('✅ ' + matchingRequests.length + ' talep bulundu');
+        } catch (err: any) {
+          const errMsg = 'FIRESTORE HATA: ' + (err?.code || '') + ' - ' + (err?.message || String(err));
+          setDebugError(errMsg);
+        }
 
         // Load existing offers sent by this provider
         const myOffers = await repository.getOffers({
@@ -313,9 +324,9 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       // Refresh matching requests for this updated profile, preserving any previously offered requests
       const matchingRequests = await repository.getRequests({
         city: savedProvider.city,
-        cityId: savedProvider.cityId || cId,
+        cityId: savedProvider.cityId ? (normalizeCityId(savedProvider.cityId) || savedProvider.cityId) : cId,
         category: savedProvider.category,
-        categoryId: savedProvider.categoryId || catId,
+        categoryId: savedProvider.categoryId ? normalizeCategoryId(savedProvider.categoryId) : catId,
       });
       setRequests((prev) => {
         const existingOffered = prev.filter((r) => sentOffersMap[r.id]);
@@ -447,8 +458,16 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   };
 
   // Filter requests that are active and not dismissed, matching provider's canonical profile
-  const pCityId = provider?.cityId || (provider?.city ? normalizeCityId(provider.city) : '');
-  const pCatId = provider?.categoryId || (provider?.category ? normalizeCategoryId(provider.category) : '');
+  const pCityId = provider?.cityId
+    ? normalizeCityId(provider.cityId) || provider.cityId
+    : provider?.city
+    ? normalizeCityId(provider.city)
+    : '';
+  const pCatId = provider?.categoryId
+    ? normalizeCategoryId(provider.categoryId)
+    : provider?.category
+    ? normalizeCategoryId(provider.category)
+    : '';
 
   const isAnonymousSession = Boolean(
     !auth?.currentUser ||
@@ -457,21 +476,82 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     getCurrentUserId() === 'temp-local-user-id'
   );
 
+  console.log(
+    `[ProviderMode] visibleRequests değerlendiriliyor | Toplam talep: ${requests.length} | Usta cityId: "${pCityId}", categoryId: "${pCatId}"`
+  );
+
   const visibleRequests = requests.filter((r) => {
-    if (dismissedReqIds.includes(r.id) || r.status === 'CANCELLED') return false;
-    // If an offer was already sent to this request, always keep it visible in provider feed
-    if (sentOffersMap[r.id]) {
-      return true;
-    }
-    // Providers cannot bid on their own genuine customer requests
-    if (isSelfRequest(r, provider, isAnonymousSession)) {
+    const rCityId = normalizeCityId(r.cityId || r.city) || r.cityId || 'belirtilmemiş';
+    const rCatId = normalizeCategoryId(r.categoryId || r.category) || 'belirtilmemiş';
+    const selfReq = isSelfRequest(r, provider, isAnonymousSession);
+
+    // 1. Dismissed / İptal Kontrolü
+    if (dismissedReqIds.includes(r.id) || r.status === 'CANCELLED') {
+      console.log(`[visibleRequests] ❌ ${r.id} elendi | Sebep: dismissed`, {
+        '1. id': r.id,
+        '2. talep': { cityId: rCityId, categoryId: rCatId },
+        '3. usta': { cityId: pCityId, categoryId: pCatId },
+        '4. isSelfRequest': selfReq,
+        '5. elenme_sebebi': 'dismissed',
+      });
       return false;
     }
-    if (pCityId && pCatId) {
-      const rCityId = r.cityId || normalizeCityId(r.city);
-      const rCatId = r.categoryId || normalizeCategoryId(r.category);
-      if (rCityId !== pCityId || rCatId !== pCatId) return false;
+
+    // Önceden teklif verilmişse daima göster
+    if (sentOffersMap[r.id]) {
+      console.log(`[visibleRequests] ⭕ ${r.id} gösterildi | Sebep: daha önce teklif verilmiş`, {
+        '1. id': r.id,
+        '2. talep': { cityId: rCityId, categoryId: rCatId },
+        '3. usta': { cityId: pCityId, categoryId: pCatId },
+        '4. isSelfRequest': selfReq,
+        '5. durum': 'teklif_verilmis',
+      });
+      return true;
     }
+
+    // 2. isSelfRequest Kontrolü
+    if (selfReq) {
+      console.log(`[visibleRequests] ❌ ${r.id} elendi | Sebep: isSelfRequest`, {
+        '1. id': r.id,
+        '2. talep': { cityId: rCityId, categoryId: rCatId },
+        '3. usta': { cityId: pCityId, categoryId: pCatId },
+        '4. isSelfRequest': true,
+        '5. elenme_sebebi': 'isSelfRequest',
+      });
+      return false;
+    }
+
+    // 3. Şehir ve Kategori Uyuşmazlığı Kontrolü
+    if (pCityId && pCatId) {
+      if (rCityId !== pCityId) {
+        console.log(`[visibleRequests] ❌ ${r.id} elendi | Sebep: şehir uyuşmazlığı`, {
+          '1. id': r.id,
+          '2. talep': { cityId: rCityId, categoryId: rCatId },
+          '3. usta': { cityId: pCityId, categoryId: pCatId },
+          '4. isSelfRequest': selfReq,
+          '5. elenme_sebebi': 'şehir uyuşmazlığı',
+        });
+        return false;
+      }
+      if (rCatId !== pCatId && !isCategoryMatch(rCatId, pCatId)) {
+        console.log(`[visibleRequests] ❌ ${r.id} elendi | Sebep: kategori uyuşmazlığı`, {
+          '1. id': r.id,
+          '2. talep': { cityId: rCityId, categoryId: rCatId },
+          '3. usta': { cityId: pCityId, categoryId: pCatId },
+          '4. isSelfRequest': selfReq,
+          '5. elenme_sebebi': 'kategori uyuşmazlığı',
+        });
+        return false;
+      }
+    }
+
+    console.log(`[visibleRequests] ✅ ${r.id} GÖRÜNÜR (Eşleşti)`, {
+      '1. id': r.id,
+      '2. talep': { cityId: rCityId, categoryId: rCatId },
+      '3. usta': { cityId: pCityId, categoryId: pCatId },
+      '4. isSelfRequest': selfReq,
+      '5. durum': 'görünür',
+    });
     return true;
   });
 
@@ -490,6 +570,38 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col justify-between space-y-5">
+      {debugError && (
+        <div
+          style={{
+            background: '#dc2626',
+            color: 'white',
+            padding: '12px',
+            margin: '8px',
+            borderRadius: '8px',
+            fontSize: '12px',
+            fontFamily: 'monospace',
+            wordBreak: 'break-all',
+          }}
+        >
+          <strong>🔴 DEBUG:</strong> {debugError}
+        </div>
+      )}
+      {debugInfo && (
+        <div
+          style={{
+            background: '#16a34a',
+            color: 'white',
+            padding: '12px',
+            margin: '8px',
+            borderRadius: '8px',
+            fontSize: '12px',
+            fontFamily: 'monospace',
+            wordBreak: 'break-all',
+          }}
+        >
+          <strong>ℹ️ DEBUG:</strong> {debugInfo}
+        </div>
+      )}
       <div className="space-y-4">
         {/* Banner notification */}
         {notification && (
