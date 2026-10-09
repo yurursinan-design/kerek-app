@@ -4,6 +4,7 @@ export interface CategoryDefinition {
   id: string;
   nameKz: string;
   nameRu: string;
+  nameTr?: string;
   patterns: RegExp[];
 }
 
@@ -11,16 +12,102 @@ export interface CityDefinition {
   id: string;
   nameKz: string;
   nameRu: string;
+  nameTr?: string;
   patterns: RegExp[];
 }
 
 export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
   {
-    id: 'appliance_repair',
+    id: 'plumbing',
+    nameKz: 'Сантехника және құбырлар',
+    nameRu: 'Сантехника и канализация',
+    nameTr: 'Su Tesisatı & Kanalizasyon',
+    patterns: [
+      /plumbing/i,
+      /home_services/i,
+      /сантехник/i,
+      /сантехника/i,
+      /труба/i,
+      /құбыр/i,
+      /шүмек/i,
+      /смеситель/i,
+      /канализаци/i,
+      /засор/i,
+      /прочистка/i,
+      /раковин/i,
+      /унитаз/i,
+      /(?:^|[^\p{L}\d])кран[а-яё]*(?:[^\p{L}\d]|$)/iu,
+    ],
+  },
+  {
+    id: 'electrician',
+    nameKz: 'Электрик және тоқ желісі',
+    nameRu: 'Электрика и монтаж',
+    nameTr: 'Elektrik Tesisatı & Arıza',
+    patterns: [
+      /electrician/i,
+      /электрик/i,
+      /электрика/i,
+      /розетк/i,
+      /проводк/i,
+      /жарық/i,
+      /свет/i,
+      /люстр/i,
+      /замыкание/i,
+      /монтаж/i,
+      /выключател/i,
+    ],
+  },
+  {
+    id: 'heating_boiler',
+    nameKz: 'Жылыту және қазандықтар',
+    nameRu: 'Отопление и котлы',
+    nameTr: 'Kombi, Şofben & Isıtma',
+    patterns: [
+      /heating_boiler/i,
+      /heating/i,
+      /boiler/i,
+      /котел/i,
+      /котёл/i,
+      /қазандық/i,
+      /отоплени/i,
+      /жылыту/i,
+      /аристон/i,
+      /байпасс/i,
+      /байпас/i,
+      /батарея/i,
+      /печь/i,
+      /печка/i,
+      /радиатор/i,
+      /тепло/i,
+      /отопител/i,
+    ],
+  },
+  {
+    id: 'ac_ventilation',
+    nameKz: 'Кондиционерлер мен желдету',
+    nameRu: 'Кондиционеры и вентиляция',
+    nameTr: 'Klima & Havalandırma',
+    patterns: [
+      /ac_ventilation/i,
+      /кондиционер/i,
+      /фреон/i,
+      /сплит/i,
+      /салқындатқыш/i,
+      /чистка кондиционера/i,
+      /заправка кондиционер/i,
+      /вентиляци/i,
+      /климат/i,
+    ],
+  },
+  {
+    id: 'appliances',
     nameKz: 'Тұрмыстық техника жөндеу',
     nameRu: 'Ремонт бытовой техники',
+    nameTr: 'Beyaz Eşya Tamiri',
     patterns: [
       /appliances?_repair/i,
+      /appliances/i,
       /тұрмыстық техника/i,
       /бытовая техника/i,
       /бытовой техники/i,
@@ -36,49 +123,73 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
       /холодильник/i,
       /refrigerator/i,
       /fridge/i,
-      /бойлер/i,
       /пылесос/i,
-      /vacuum/i,
       /плита/i,
       /посудомойк/i,
       /dishwasher/i,
       /микроволновк/i,
       /духовк/i,
+      /electronics/i,
+      /смартфон/i,
+      /телефон/i,
+      /ноутбук/i,
     ],
   },
   {
-    id: 'home_services',
-    nameKz: 'Тұрмыстық қызметтер (Сантехник, Электрик)',
-    nameRu: 'Бытовые услуги (Сантехник, Электрик)',
+    id: 'furniture_carpentry',
+    nameKz: 'Жиһаз құрастыру',
+    nameRu: 'Сборка мебели',
+    nameTr: 'Mobilya Montajı & Marangozluk',
     patterns: [
-      /home_services/i,
-      /тұрмыстық қызметтер/i,
-      /бытовые услуги/i,
-      /сантехник/i,
-      /сантехника/i,
-      /plumb/i,
-      /труба/i,
-      /құбыр/i,
-      /(?:^|[^\p{L}\d])кран[а-яё]*(?:[^\p{L}\d]|$)/iu,
-      /шүмек/i,
-      /смеситель/i,
-      /канализаци/i,
-      /раковин/i,
-      /унитаз/i,
-      /электрик/i,
-      /electric/i,
-      /розетк/i,
-      /проводк/i,
-      /свет/i,
-      /люстр/i,
+      /furniture_carpentry/i,
+      /furniture/i,
+      /carpentry/i,
+      /жиһаз/i,
+      /мебель/i,
+      /сборка мебели/i,
+      /жиһаз құрастыру/i,
+      /шкаф/i,
+      /стол/i,
+      /диван/i,
+      /кровать/i,
+      /плотник/i,
+      /столяр/i,
+      /ағаш шебері/i,
     ],
   },
   {
-    id: 'cargo_moving',
-    nameKz: 'Жүк тасымалдау және көшу',
-    nameRu: 'Грузоперевозки и переезд',
+    id: 'painting_finishing',
+    nameKz: 'Бояу және жөндеу',
+    nameRu: 'Малярные работы и ремонт',
+    nameTr: 'Boya, Badana & Tadilat',
     patterns: [
+      /painting_finishing/i,
+      /painting/i,
+      /finishing/i,
+      /маляр/i,
+      /покраска/i,
+      /бояу/i,
+      /штукатурк/i,
+      /шпатлевк/i,
+      /обои/i,
+      /тушкағаз/i,
+      /пәтер жөндеу/i,
+      /ремонт квартир/i,
+      /кафель/i,
+      /плитка/i,
+    ],
+  },
+  {
+    id: 'cleaning_moving',
+    nameKz: 'Тазалау және көшу',
+    nameRu: 'Уборка и переезд',
+    nameTr: 'Temizlik & Taşıma',
+    patterns: [
+      /cleaning_moving/i,
       /cargo_moving/i,
+      /cleaning/i,
+      /moving/i,
+      /cargo/i,
       /жүк тасымалдау/i,
       /грузоперевозк/i,
       /переезд/i,
@@ -86,85 +197,9 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
       /көшіру/i,
       /газель/i,
       /грузчик/i,
-      /moving/i,
-      /cargo/i,
-      /truck/i,
-      /delivery/i,
-    ],
-  },
-  {
-    id: 'electronics',
-    nameKz: 'Электроника және гаджеттер',
-    nameRu: 'Электроника и покупка техники',
-    patterns: [
-      /electronics/i,
-      /электроника/i,
-      /смартфон/i,
-      /телефон/i,
-      /phone/i,
-      /smartphone/i,
-      /гаджет/i,
-      /ноутбук/i,
-      /laptop/i,
-      /компьютер/i,
-      /комп/i,
-      /айфон/i,
-      /iphone/i,
-      /дисплей/i,
-      /экран/i,
-      /планшет/i,
-      /ipad/i,
-    ],
-  },
-  {
-    id: 'cleaning',
-    nameKz: 'Тазалық қызметі (Клининг)',
-    nameRu: 'Клининг и уборка',
-    patterns: [
-      /cleaning/i,
+      /тазалау/i,
       /клининг/i,
       /уборка/i,
-      /уборк/i,
-      /cleaning/i,
-      /тазалық/i,
-      /тазалау/i,
-      /мойка/i,
-      /кілем жуу/i,
-      /чистк/i,
-    ],
-  },
-  {
-    id: 'auto',
-    nameKz: 'Автокөмек және эвакуатор',
-    nameRu: 'Автоуслуги и эвакуатор',
-    patterns: [
-      /auto/i,
-      /авто/i,
-      /автокөмек/i,
-      /автоуслуг/i,
-      /эвакуатор/i,
-      /tow\s*truck/i,
-      /сто/i,
-      /шина/i,
-      /шиномонтаж/i,
-      /дөңгелек/i,
-      /колесо/i,
-      /tire/i,
-      /машина жөндеу/i,
-      /ремонт авто/i,
-      /аккумулятор/i,
-    ],
-  },
-  {
-    id: 'other',
-    nameKz: 'Басқа қызметтер',
-    nameRu: 'Другие услуги',
-    patterns: [
-      /other/i,
-      /басқа/i,
-      /другие/i,
-      /қызметтер мен тауарлар/i,
-      /услуги и товары/i,
     ],
   },
 ];
@@ -174,96 +209,112 @@ export const CANONICAL_CITIES: CityDefinition[] = [
     id: 'kyzylorda',
     nameKz: 'Қызылорда',
     nameRu: 'Кызылорда',
+    nameTr: 'Kızılorda',
     patterns: [/kyzylord[a-zа-яё]*|kızılord[a-zа-яё]*|kizilord[a-zа-яё]*|қызылорд[а-яёқ]*|кызылорд[а-яё]*|\bкзо\b/i],
   },
   {
     id: 'almaty',
     nameKz: 'Алматы',
     nameRu: 'Алматы',
+    nameTr: 'Almatı',
     patterns: [/almat[a-zа-яё]*|алмат[а-яё]*|алма-ат[а-яё]*/i],
   },
   {
     id: 'astana',
     nameKz: 'Астана',
     nameRu: 'Астана',
+    nameTr: 'Astana',
     patterns: [/astan[a-zа-яё]*|астан[а-яё]*|нур-султан/i],
   },
   {
     id: 'shymkent',
     nameKz: 'Шымкент',
     nameRu: 'Шымкент',
+    nameTr: 'Çimkent',
     patterns: [/shymkent[a-zа-яё]*|шымкент[а-яё]*|чимкент[а-яё]*/i],
   },
   {
     id: 'aktobe',
     nameKz: 'Ақтөбе',
     nameRu: 'Актобе',
+    nameTr: 'Aktöbe',
     patterns: [/aktob[a-zа-яё]*|ақтөб[а-яё]*|актоб[а-яё]*/i],
   },
   {
     id: 'karaganda',
     nameKz: 'Қарағанды',
     nameRu: 'Караганда',
+    nameTr: 'Karaganda',
     patterns: [/karagand[a-zа-яё]*|қарағанд[а-яёқ]*|караганд[а-яё]*/i],
   },
   {
     id: 'taraz',
     nameKz: 'Тараз',
     nameRu: 'Тараз',
+    nameTr: 'Taraz',
     patterns: [/taraz[a-zа-яё]*|тараз[а-яё]*/i],
   },
   {
     id: 'pavlodar',
     nameKz: 'Павлодар',
     nameRu: 'Павлодар',
+    nameTr: 'Pavlodar',
     patterns: [/pavlodar[a-zа-яё]*|павлодар[а-яё]*/i],
   },
   {
     id: 'oskemen',
     nameKz: 'Өскемен',
     nameRu: 'Усть-Каменогорск',
+    nameTr: 'Öskemen',
     patterns: [/oskemen[a-zа-яё]*|өскемен[а-яё]*|усть-каменогорск[а-яё]*/i],
   },
   {
     id: 'semey',
     nameKz: 'Семей',
     nameRu: 'Семей',
+    nameTr: 'Semey',
     patterns: [/semey[a-zа-яё]*|семей[а-яё]*|семипалатинск[а-яё]*/i],
   },
   {
     id: 'atyrau',
     nameKz: 'Атырау',
     nameRu: 'Атырау',
+    nameTr: 'Atırav',
     patterns: [/atyrau[a-zа-яё]*|атырау[а-яё]*/i],
   },
   {
     id: 'aktau',
     nameKz: 'Ақтау',
     nameRu: 'Актау',
+    nameTr: 'Aktav',
     patterns: [/aktau[a-zа-яё]*|ақтау[а-яё]*|актау[а-яё]*/i],
   },
   {
     id: 'kostanay',
     nameKz: 'Қостанай',
     nameRu: 'Костанай',
+    nameTr: 'Kostanay',
     patterns: [/kostana[a-zа-яё]*|қостанай[а-яё]*|костанай[а-яё]*|костанае/i],
   },
   {
     id: 'oral',
     nameKz: 'Орал',
     nameRu: 'Уральск',
+    nameTr: 'Oral',
     patterns: [/oral[a-zа-яё]*|орал[а-яё]*|уральск[а-яё]*/i],
   },
   {
     id: 'turkestan',
     nameKz: 'Түркістан',
     nameRu: 'Туркестан',
+    nameTr: 'Türkistan',
     patterns: [/turkestan[a-zа-яё]*|түркістан[а-яё]*|туркестан[а-яё]*/i],
   },
   {
     id: 'kokshetau',
     nameKz: 'Көкшетау',
     nameRu: 'Кокшетау',
+    nameTr: 'Kökşetav',
     patterns: [/kokshetau[a-zа-яё]*|көкшетау[а-яё]*|кокшетау[а-яё]*/i],
   },
 ];
@@ -293,7 +344,11 @@ export function normalizeCategoryId(categoryOrId?: string): string {
 
   // 2. Pattern and name match
   for (const cat of CANONICAL_CATEGORIES) {
-    if (clean === cat.nameKz.toLowerCase() || clean === cat.nameRu.toLowerCase()) {
+    if (
+      clean === cat.nameKz.toLowerCase() ||
+      clean === cat.nameRu.toLowerCase() ||
+      (cat.nameTr && clean === cat.nameTr.toLowerCase())
+    ) {
       return cat.id;
     }
     for (const pat of cat.patterns) {
@@ -337,10 +392,26 @@ export function normalizeCityId(cityOrId?: string): string | undefined {
 /**
  * Returns localized display name for a canonical categoryId.
  */
-export function getCategoryDisplayName(categoryId: string, lang: Language): string {
+export function getCategoryDisplayName(categoryId: string | undefined, lang: Language): string {
+  if (!categoryId) {
+    if (lang === 'tr') return 'Genel Hizmet';
+    return lang === 'kz' ? 'Жалпы қызмет' : 'Общие услуги';
+  }
   const normId = normalizeCategoryId(categoryId);
-  const found = CANONICAL_CATEGORIES.find((c) => c.id === normId);
-  if (!found) return lang === 'kz' ? 'Басқа қызметтер' : 'Другие услуги';
+  let found = CANONICAL_CATEGORIES.find((c) => c.id === normId || c.id === categoryId);
+  if (!found) {
+    if (normId === 'appliance_repair' || categoryId === 'appliance_repair') {
+      found = CANONICAL_CATEGORIES.find((c) => c.id === 'appliances');
+    } else if (normId === 'home_services' || categoryId === 'home_services') {
+      found = CANONICAL_CATEGORIES.find((c) => c.id === 'plumbing');
+    } else if (normId === 'cargo_moving' || categoryId === 'cargo_moving') {
+      found = CANONICAL_CATEGORIES.find((c) => c.id === 'cleaning_moving');
+    }
+  }
+  if (!found) {
+    return categoryId;
+  }
+  if (lang === 'tr') return found.nameTr || found.nameRu;
   return lang === 'kz' ? found.nameKz : found.nameRu;
 }
 
@@ -348,11 +419,15 @@ export function getCategoryDisplayName(categoryId: string, lang: Language): stri
  * Returns localized display name for a canonical cityId.
  */
 export function getCityDisplayName(cityId: string | undefined, lang: Language): string {
-  if (!cityId) return lang === 'kz' ? 'Белгісіз қала' : 'Неуказанный город';
+  if (!cityId) {
+    if (lang === 'tr') return 'Belirtilmemiş Şehir';
+    return lang === 'kz' ? 'Белгісіз қала' : 'Неуказанный город';
+  }
   const normId = normalizeCityId(cityId);
   if (!normId) return cityId;
   const found = CANONICAL_CITIES.find((c) => c.id === normId);
   if (!found) return cityId;
+  if (lang === 'tr') return found.nameTr || found.nameRu;
   return lang === 'kz' ? found.nameKz : found.nameRu;
 }
 
@@ -361,7 +436,34 @@ export function getCityDisplayName(cityId: string | undefined, lang: Language): 
  */
 export function isCategoryMatch(cat1?: string, cat2?: string): boolean {
   if (!cat1 || !cat2) return false;
-  return normalizeCategoryId(cat1) === normalizeCategoryId(cat2);
+  const c1 = cat1.trim().toLowerCase();
+  const c2 = cat2.trim().toLowerCase();
+
+  if (c1 === c2) return true;
+
+  const n1 = normalizeCategoryId(c1);
+  const n2 = normalizeCategoryId(c2);
+
+  if (n1 === n2) return true;
+
+  // Cross-alias bridges between legacy IDs and 8 focus category IDs
+  const isAppl1 = n1 === 'appliances' || n1 === 'appliance_repair' || c1.includes('appliance');
+  const isAppl2 = n2 === 'appliances' || n2 === 'appliance_repair' || c2.includes('appliance');
+  if (isAppl1 && isAppl2) return true;
+
+  const isPlumb1 = n1 === 'plumbing' || n1 === 'home_services';
+  const isPlumb2 = n2 === 'plumbing' || n2 === 'home_services';
+  if (isPlumb1 && isPlumb2) return true;
+
+  const isElec1 = n1 === 'electrician' || n1 === 'home_services';
+  const isElec2 = n2 === 'electrician' || n2 === 'home_services';
+  if (isElec1 && isElec2) return true;
+
+  const isMove1 = n1 === 'cleaning_moving' || n1 === 'cargo_moving' || n1 === 'cleaning';
+  const isMove2 = n2 === 'cleaning_moving' || n2 === 'cargo_moving' || n2 === 'cleaning';
+  if (isMove1 && isMove2) return true;
+
+  return false;
 }
 
 /**

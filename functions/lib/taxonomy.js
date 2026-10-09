@@ -9,46 +9,52 @@ exports.validateAndNormalizeCategoryId = validateAndNormalizeCategoryId;
 exports.validateAndNormalizeCityId = validateAndNormalizeCityId;
 exports.CANONICAL_CATEGORIES = [
     {
-        id: 'appliance_repair',
+        id: 'plumbing',
+        nameRu: 'Сантехника и канализация',
+        nameKz: 'Сантехника және құбырлар',
+        description: 'Устранение засоров, замена кранов, труб, унитазов, смесителей',
+    },
+    {
+        id: 'electrician',
+        nameRu: 'Электрика и монтаж',
+        nameKz: 'Электрик және тоқ желісі',
+        description: 'Розетки, проводка, люстры, выключатели, устранение короткого замыкания',
+    },
+    {
+        id: 'heating_boiler',
+        nameRu: 'Отопление и котлы',
+        nameKz: 'Жылыту және қазандықтар',
+        description: 'Котлы, система отопления, радиаторы, аристоны, байпасы, печи',
+    },
+    {
+        id: 'ac_ventilation',
+        nameRu: 'Кондиционеры и вентиляция',
+        nameKz: 'Кондиционерлер мен желдету',
+        description: 'Установка и чистка кондиционеров, заправка фреоном, вентиляция',
+    },
+    {
+        id: 'appliances',
         nameRu: 'Ремонт бытовой техники',
         nameKz: 'Тұрмыстық техника жөндеу',
-        description: 'Стиральные машины, холодильники, бойлеры, пылесосы, духовки, кондиционеры',
+        description: 'Стиральные машины, холодильники, пылесосы, духовки, плиты',
     },
     {
-        id: 'home_services',
-        nameRu: 'Бытовые услуги (Сантехник, Электрик)',
-        nameKz: 'Тұрмыстық қызметтер (Сантехник, Электрик)',
-        description: 'Сантехника, краны, трубы, электрика, розетки, проводка, мелкий домашний ремонт',
+        id: 'furniture_carpentry',
+        nameRu: 'Сборка мебели',
+        nameKz: 'Жиһаз құрастыру',
+        description: 'Сборка шкафов, кроватей, столов, ремонт мебели, плотницкие работы',
     },
     {
-        id: 'cargo_moving',
-        nameRu: 'Грузоперевозки и переезд',
-        nameKz: 'Жүк тасымалдау және көшу',
-        description: 'Газель, грузчики, перевозка мебели, квартирный/офисный переезд',
+        id: 'painting_finishing',
+        nameRu: 'Малярные работы и ремонт',
+        nameKz: 'Бояу және жөндеу',
+        description: 'Покраска стен, поклейка обоев, штукатурка, кафель, ремонт квартир',
     },
     {
-        id: 'electronics',
-        nameRu: 'Электроника и гаджеты',
-        nameKz: 'Электроника және гаджеттер',
-        description: 'Ремонт телефонов, ноутбуков, компьютеров, планшетов, покупка техники',
-    },
-    {
-        id: 'cleaning',
-        nameRu: 'Клининг и уборка',
-        nameKz: 'Тазалық қызметі (Клининг)',
-        description: 'Уборка квартир, мытье окон, химчистка мебели, стирка ковров',
-    },
-    {
-        id: 'auto',
-        nameRu: 'Автоуслуги и эвакуатор',
-        nameKz: 'Автокөмек және эвакуатор',
-        description: 'СТО, эвакуатор, шиномонтаж, автоэлектрик, прикурить авто, буксировка',
-    },
-    {
-        id: 'other',
-        nameRu: 'Другие услуги',
-        nameKz: 'Басқа қызметтер',
-        description: 'Прочие бытовые, репетиторские, строительные и иные услуги',
+        id: 'cleaning_moving',
+        nameRu: 'Уборка и переезд',
+        nameKz: 'Тазалау және көшу',
+        description: 'Уборка квартир, клининг, грузоперевозки, Газель, переезд, грузчики',
     },
 ];
 exports.CANONICAL_CITIES = [
@@ -85,23 +91,20 @@ function validateAndNormalizeCategoryId(rawCategory) {
         return clean;
     }
     // 2. Backward compatibility & common aliases
-    if (clean === 'appliances_repair' || clean === 'appliance' || clean === 'бытовая техника' || clean === 'тұрмыстық техника') {
-        return 'appliance_repair';
+    if (clean === 'appliance_repair' || clean === 'appliances_repair' || clean === 'appliance' || clean === 'бытовая техника' || clean === 'тұрмыстық техника') {
+        return 'appliances';
     }
-    if (clean === 'home_service' || clean === 'plumber' || clean === 'electrician' || clean === 'сантехник' || clean === 'электрик') {
-        return 'home_services';
+    if (clean === 'home_services' || clean === 'home_service' || clean === 'plumber' || clean === 'сантехник') {
+        return 'plumbing';
     }
-    if (clean === 'cargo' || clean === 'moving' || clean === 'грузоперевозки' || clean === 'жүк тасымалдау') {
-        return 'cargo_moving';
+    if (clean === 'cargo_moving' || clean === 'cargo' || clean === 'moving' || clean === 'грузоперевозки' || clean === 'жүк тасымалдау' || clean === 'cleaning') {
+        return 'cleaning_moving';
     }
-    if (clean === 'electronic' || clean === 'gadgets' || clean === 'электроника') {
-        return 'electronics';
+    if (clean === 'electronics') {
+        return 'appliances';
     }
-    if (clean === 'clean' || clean === 'клининг' || clean === 'уборка') {
-        return 'cleaning';
-    }
-    if (clean === 'car' || clean === 'авто' || clean === 'эвакуатор') {
-        return 'auto';
+    if (clean === 'auto') {
+        return 'plumbing';
     }
     if (clean === 'другое' || clean === 'басқа' || clean === 'misc') {
         return 'other';

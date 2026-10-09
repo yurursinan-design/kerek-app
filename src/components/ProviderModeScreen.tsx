@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
+  formatDynamicBudget,
+  formatDynamicDate,
   formatOfferDisplayPrice,
   Language,
   OfferPriceType,
@@ -12,7 +14,12 @@ import { translations } from '../i18n/translations';
 import { repository, getCurrentUserId, checkClientRateLimit, getFriendlyErrorMessage } from '../services';
 import { auth } from '../services/firebase';
 import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
-import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
+import {
+  getCategoryDisplayName,
+  getCityDisplayName,
+  normalizeCategoryId,
+  normalizeCityId,
+} from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { ProviderOnboarding } from './ProviderOnboarding';
 import { ChatScreen } from './ChatScreen';
@@ -33,6 +40,8 @@ import {
   Star,
   UserCheck,
   MessageSquare,
+  ShieldCheck,
+  Award,
 } from 'lucide-react';
 
 interface ProviderModeScreenProps {
@@ -80,10 +89,18 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
-  const [city, setCity] = useState(language === 'kz' ? 'Қызылорда' : 'Кызылорда');
-  const [district, setDistrict] = useState('Орталық');
+  const [city, setCity] = useState(
+    language === 'kz' ? 'Қызылорда' : language === 'tr' ? 'Kızılorda' : 'Кызылорда'
+  );
+  const [district, setDistrict] = useState(
+    language === 'kz' ? 'Орталық' : language === 'tr' ? 'Merkez' : 'Центр'
+  );
   const [category, setCategory] = useState(
-    language === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники'
+    language === 'kz'
+      ? 'Тұрмыстық техника жөндеу'
+      : language === 'tr'
+      ? 'Beyaz Eşya Tamiri'
+      : 'Ремонт бытовой техники'
   );
   const [services, setServices] = useState('Ремонт стиральных машин, бойлеров');
   const [priceRange, setPriceRange] = useState('от 8 000 ₸');
@@ -102,11 +119,17 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [offerPriceType, setOfferPriceType] = useState<OfferPriceType>('fixed');
   const [offerPriceAmount, setOfferPriceAmount] = useState('15 000');
   const [offerTime, setOfferTime] = useState(
-    language === 'kz' ? 'Бүгін, 40 минут ішінде' : 'Сегодня, в течение 40 минут'
+    language === 'kz'
+      ? 'Бүгін, 40 минут ішінде'
+      : language === 'tr'
+      ? 'Bugün, 40 dakika içinde'
+      : 'Сегодня, в течение 40 минут'
   );
   const [offerMessage, setOfferMessage] = useState(
     language === 'kz'
       ? 'Құралдарым дайын, келіп сапалы жөндеп беремін.'
+      : language === 'tr'
+      ? 'Takımlarım hazır, gelip kaliteli şekilde tamir ederim.'
       : 'Готов подъехать со своим инструментом, дам гарантию на работу.'
   );
   const [notification, setNotification] = useState<string | null>(null);
@@ -345,6 +368,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       setErrorMessage(
         language === 'kz'
           ? 'Өз өтінішіңізге ұсыныс жібере алмайсыз'
+          : language === 'tr'
+          ? 'Kendi talebinize teklif gönderemezsiniz'
           : 'Вы не можете отправлять предложение на свою собственную заявку'
       );
       return;
@@ -353,11 +378,22 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     try {
       let finalPrice = '';
       if (offerPriceType === 'inspection') {
-        finalPrice = 'После осмотра';
+        finalPrice =
+          language === 'kz'
+            ? 'Қарап көрген соң'
+            : language === 'tr'
+            ? 'Keşif sonrası'
+            : 'После осмотра';
       } else {
         const digits = offerPriceAmount.replace(/[^\d]/g, '');
         if (!digits) {
-          setErrorMessage(language === 'kz' ? 'Бағасын көрсетіңіз' : 'Укажите примерную стоимость');
+          setErrorMessage(
+            language === 'kz'
+              ? 'Бағасын көрсетіңіз'
+              : language === 'tr'
+              ? 'Fiyat belirtin'
+              : 'Укажите примерную стоимость'
+          );
           return;
         }
         const spaced = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
@@ -380,6 +416,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         availability: offerTime.trim(),
         message: offerMessage.trim(),
         status: 'PENDING',
+        iinVerified: provider.iinVerified,
+        hasCertificate: provider.hasCertificate,
       });
 
       // Update sent offers mapping
@@ -490,11 +528,32 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     <span className="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
                       {t.providerDashboardTitle}
                     </span>
-                    <h3 className="text-base font-bold text-slate-900 mt-1">
-                      {provider.name}
-                    </h3>
+                    <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                      <h3 className="text-base font-bold text-slate-900">
+                        {provider.name}
+                      </h3>
+                      {provider.verified && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full" title={t.verifiedProviderBadge}>
+                          <CheckCircle className="w-3 h-3 text-emerald-600 stroke-[2.5]" />
+                          <span>{t.verifiedProviderBadge}</span>
+                        </span>
+                      )}
+                      {provider.iinVerified && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full" title={t.iinVerifiedBadge}>
+                          <ShieldCheck className="w-3 h-3 text-sky-600 stroke-[2.5]" />
+                          <span>{t.iinVerifiedBadge}</span>
+                        </span>
+                      )}
+                      {provider.hasCertificate && (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full" title={t.certifiedMasterBadge}>
+                          <Award className="w-3 h-3 text-purple-600 stroke-[2.5]" />
+                          <span>{t.certifiedMasterBadge}</span>
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-500">
-                      {provider.city} {provider.district ? `· ${provider.district}` : ''}
+                      {getCityDisplayName(provider.cityId || provider.city, language) || provider.city}{' '}
+                      {provider.district ? `· ${provider.district}` : ''}
                     </p>
                   </div>
 
@@ -503,10 +562,22 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         type="button"
                         onClick={() => setIsProfilePreviewOpen(true)}
                         className="min-h-[36px] px-2.5 rounded-lg bg-sky-50 hover:bg-sky-100 text-sky-700 text-xs font-semibold flex items-center gap-1 transition-colors"
-                        title={language === 'kz' ? 'Профильді көру' : 'Посмотреть профиль'}
+                        title={
+                          language === 'kz'
+                            ? 'Профильді көру'
+                            : language === 'tr'
+                            ? 'Profili Görüntüle'
+                            : 'Посмотреть профиль'
+                        }
                       >
                         <UserCheck className="w-3.5 h-3.5" />
-                        <span>{language === 'kz' ? 'Профиль' : 'Профиль'}</span>
+                        <span>
+                          {language === 'kz'
+                            ? 'Профиль'
+                            : language === 'tr'
+                            ? 'Profil'
+                            : 'Профиль'}
+                        </span>
                       </button>
 
                       <button
@@ -515,7 +586,13 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         className="min-h-[36px] px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1 transition-colors"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
-                        <span>{language === 'kz' ? 'Өңдеу' : 'Изменить'}</span>
+                        <span>
+                          {language === 'kz'
+                            ? 'Өңдеу'
+                            : language === 'tr'
+                            ? 'Düzenle'
+                            : 'Изменить'}
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -536,15 +613,34 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     <strong className="text-slate-700">ID:</strong> {provider.id}
                   </span>
                   <span>
-                    <strong className="text-slate-700">Санат:</strong> {provider.category}
+                    <strong className="text-slate-700">
+                      {language === 'kz'
+                        ? 'Санат:'
+                        : language === 'tr'
+                        ? 'Kategori:'
+                        : 'Категория:'}
+                    </strong>{' '}
+                    {getCategoryDisplayName(provider.categoryId || provider.category, language) || provider.category}
                   </span>
                   <span>
-                    <strong className="text-slate-700">{language === 'kz' ? 'Уақыты:' : 'Время:'}</strong>{' '}
+                    <strong className="text-slate-700">
+                      {language === 'kz'
+                        ? 'Уақыты:'
+                        : language === 'tr'
+                        ? 'Saat:'
+                        : 'Время:'}
+                    </strong>{' '}
                     {provider.workingHours}
                   </span>
                   {provider.experienceYears !== undefined && provider.experienceYears > 0 && (
                     <span>
-                      <strong className="text-slate-700">{language === 'kz' ? 'Тәжірибе:' : 'Опыт:'}</strong>{' '}
+                      <strong className="text-slate-700">
+                        {language === 'kz'
+                          ? 'Тәжірибе:'
+                          : language === 'tr'
+                          ? 'Deneyim:'
+                          : 'Опыт:'}
+                      </strong>{' '}
                       {provider.experienceYears} {t.experienceYearsUnit}
                     </span>
                   )}
@@ -560,7 +656,11 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                 </h3>
                 <p className="text-xs text-slate-500">
                   {visibleRequests.length}{' '}
-                  {language === 'kz' ? 'сәйкес өтініш табылды' : 'подходящих заявок'}
+                  {language === 'kz'
+                    ? 'сәйкес өтініш табылды'
+                    : language === 'tr'
+                    ? 'uygun talep bulundu'
+                    : 'подходящих заявок'}
                 </p>
               </div>
             </div>
@@ -577,6 +677,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                 <p className="text-xs text-slate-500 max-w-xs mx-auto">
                   {language === 'kz'
                     ? 'Сіздің қалаңыз бен санатыңызға сәйкес клиент сұраныс берген бойда, осы жерде ұсыныс жасау түймесі шығады.'
+                    : language === 'tr'
+                    ? 'Şehrinizde ve kategorinizde yeni bir talep açıldığında burada anında fiyat ve varış süresi teklifi gönderebilirsiniz.'
                     : 'Когда клиенты оформят заявку в вашем городе и категории, вы сможете моментально отправить им цену и время выезда.'}
                 </p>
               </div>
@@ -616,7 +718,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                               {t.fieldBudget}
                             </span>
                             <span className="text-xs font-bold text-sky-700">
-                              {req.budget}
+                              {formatDynamicBudget(req.budget, language)}
                             </span>
                           </div>
                         )}
@@ -631,11 +733,11 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
                         <span className="flex items-center gap-1">
                           <MapPin className="w-3.5 h-3.5 text-sky-600" />
-                          {req.city}
+                          {getCityDisplayName(req.cityId || req.city, language) || req.city}
                         </span>
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5 text-sky-600" />
-                          {req.date}
+                          {formatDynamicDate(req.date, language)}
                         </span>
                       </div>
 
@@ -654,6 +756,20 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                       <div className="pt-2 border-t border-slate-100">
                         {existingOffer ? (
                           <div className="space-y-2">
+                            {/* Kaspi Escrow Notification for Provider */}
+                            {(req.paymentStatus === 'held_in_escrow' || existingOffer.paymentStatus === 'held_in_escrow') && (
+                              <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-900 shadow-2xs">
+                                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                                <span>
+                                  {language === 'kz'
+                                    ? 'Төлем Kaspi кепілдік қорында бұғатталды. Жұмысқа сенімді кірісе аласыз.'
+                                    : language === 'tr'
+                                    ? 'Ödeme Kaspi havuzunda kilitlendi. İşe güvenle başlayabilirsiniz.'
+                                    : 'Оплата заблокирована в резерве Kaspi. Можете смело приступать к работе.'}
+                                </span>
+                              </div>
+                            )}
+
                             <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-bold flex items-center justify-between">
                               <div className="flex items-center gap-1.5">
                                 <CheckCircle className="w-4 h-4 text-emerald-600" />
@@ -749,7 +865,12 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               {/* Target request snippet */}
               <div className="p-2.5 bg-slate-50 rounded-xl text-xs text-slate-600">
                 <span className="font-bold text-slate-800 block">
-                  {selectedRequestForOffer.service} ({selectedRequestForOffer.city})
+                  {selectedRequestForOffer.service} (
+                  {getCityDisplayName(
+                    selectedRequestForOffer.cityId || selectedRequestForOffer.city,
+                    language
+                  ) || selectedRequestForOffer.city}
+                  )
                 </span>
                 <span className="italic line-clamp-1 mt-0.5 block">
                   «{selectedRequestForOffer.requestText}»

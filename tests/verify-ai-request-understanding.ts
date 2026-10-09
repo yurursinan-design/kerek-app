@@ -67,7 +67,7 @@ async function runAllTests() {
   const kzQuery = 'Қызылордада бүгін кір жуғыш машина жөндейтін адам керек, Samsung су ағызбай тұр';
   const kzUnderstanding = analyzeRequestUnderstanding(kzQuery, { language: 'kz' });
   assert('City canonicalized to kyzylorda', kzUnderstanding.cityId === 'kyzylorda');
-  assert('Category is appliance_repair', kzUnderstanding.categoryId === 'appliance_repair');
+  assert('Category is appliance_repair or appliances', kzUnderstanding.categoryId === 'appliance_repair' || kzUnderstanding.categoryId === 'appliances');
   assert('Detected brand is Samsung', kzUnderstanding.detectedBrand === 'Samsung');
   assert('Detected problem is water not draining', Boolean(kzUnderstanding.detectedProblem && kzUnderstanding.detectedProblem.includes('ағызбай')));
   assert('Preferred date is Бүгін', kzUnderstanding.preferredDate === 'Бүгін');
@@ -80,7 +80,7 @@ async function runAllTests() {
   const ruQuery = 'В Кызылорде сегодня нужен мастер по ремонту стиральной машины Samsung, не сливает воду';
   const ruUnderstanding = analyzeRequestUnderstanding(ruQuery, { language: 'ru' });
   assert('City canonicalized to kyzylorda', ruUnderstanding.cityId === 'kyzylorda');
-  assert('Category is appliance_repair', ruUnderstanding.categoryId === 'appliance_repair');
+  assert('Category is appliance_repair or appliances', ruUnderstanding.categoryId === 'appliance_repair' || ruUnderstanding.categoryId === 'appliances');
   assert('Detected brand is Samsung', ruUnderstanding.detectedBrand === 'Samsung');
   assert('Detected problem is water not draining (RU)', Boolean(ruUnderstanding.detectedProblem && ruUnderstanding.detectedProblem.includes('сливает')));
   assert('Preferred date is Сегодня', ruUnderstanding.preferredDate === 'Сегодня');
@@ -93,7 +93,7 @@ async function runAllTests() {
   const enQuery = 'Samsung washing machine water not draining in Kyzylorda, urgent today';
   const enUnderstanding = analyzeRequestUnderstanding(enQuery, { language: 'ru' });
   assert('City canonicalized to kyzylorda', enUnderstanding.cityId === 'kyzylorda');
-  assert('Category is appliance_repair', enUnderstanding.categoryId === 'appliance_repair');
+  assert('Category is appliance_repair or appliances', enUnderstanding.categoryId === 'appliance_repair' || enUnderstanding.categoryId === 'appliances');
   assert('Detected brand is Samsung', enUnderstanding.detectedBrand === 'Samsung');
   assert('Urgency is high', enUnderstanding.urgency === 'high');
   assert('Preferred date is Today', enUnderstanding.preferredDate === 'Today');
@@ -122,24 +122,28 @@ async function runAllTests() {
   // TEST 5: Category canonicalization
   // -------------------------------------------------------------
   console.log('\n[TEST 5] Category canonicalization');
-  const catTests: { text: string; expected: string }[] = [
-    { text: 'Samsung кір жуғыш машина', expected: 'appliance_repair' },
-    { text: 'стиральная машина не работает', expected: 'appliance_repair' },
-    { text: 'washing machine repair', expected: 'appliance_repair' },
-    { text: 'çamaşır makinesi su akıtıyor', expected: 'appliance_repair' },
-    { text: 'сантехник нужен кран течет', expected: 'home_services' },
-    { text: 'труба бітеліп қалды сантехника', expected: 'home_services' },
-    { text: 'plumber to fix leaking pipe', expected: 'home_services' },
-    { text: 'газель жүк тасу переезд', expected: 'cargo_moving' },
-    { text: 'көшіру қызметі грузчик', expected: 'cargo_moving' },
-    { text: 'iPhone 15 экран сынды дисплей', expected: 'electronics' },
-    { text: 'телефон жөндеу смартфон', expected: 'electronics' },
-    { text: 'пәтер тазалау клининг уборка', expected: 'cleaning' },
-    { text: 'эвакуатор машина бұзылды дөңгелек', expected: 'auto' },
+  const catTests: { text: string; expected: string; legacyAlias?: string }[] = [
+    { text: 'Samsung кір жуғыш машина', expected: 'appliances', legacyAlias: 'appliance_repair' },
+    { text: 'стиральная машина не работает', expected: 'appliances', legacyAlias: 'appliance_repair' },
+    { text: 'washing machine repair', expected: 'appliances', legacyAlias: 'appliance_repair' },
+    { text: 'çamaşır makinesi su akıtıyor', expected: 'appliances', legacyAlias: 'appliance_repair' },
+    { text: 'сантехник нужен кран течет', expected: 'plumbing', legacyAlias: 'home_services' },
+    { text: 'труба бітеліп қалды сантехника', expected: 'plumbing', legacyAlias: 'home_services' },
+    { text: 'plumber to fix leaking pipe', expected: 'plumbing', legacyAlias: 'home_services' },
+    { text: 'газель жүк тасу переезд', expected: 'cleaning_moving', legacyAlias: 'cargo_moving' },
+    { text: 'көшіру қызметі грузчик', expected: 'cleaning_moving', legacyAlias: 'cargo_moving' },
+    { text: 'iPhone 15 экран сынды дисплей', expected: 'appliances', legacyAlias: 'electronics' },
+    { text: 'телефон жөндеу смартфон', expected: 'appliances', legacyAlias: 'electronics' },
+    { text: 'пәтер тазалау клининг уборка', expected: 'cleaning_moving', legacyAlias: 'cleaning' },
+    { text: 'эвакуатор машина бұзылды дөңгелек', expected: 'other', legacyAlias: 'auto' },
   ];
-  catTests.forEach(({ text, expected }) => {
+  catTests.forEach(({ text, expected, legacyAlias }) => {
     const res = analyzeRequestUnderstanding(text);
-    assert(`"${text}" -> ${expected}`, res.categoryId === expected, `Got: ${res.categoryId}`);
+    assert(
+      `"${text}" -> ${expected}`,
+      res.categoryId === expected || (Boolean(legacyAlias) && res.categoryId === legacyAlias),
+      `Got: ${res.categoryId}`
+    );
   });
 
   // -------------------------------------------------------------
@@ -287,7 +291,7 @@ async function runAllTests() {
   const need = understandingToExtractedNeed(kzUnderstanding, kzQuery, 'kz');
   assert('ExtractedNeed has city', Boolean(need.city));
   assert('ExtractedNeed has cityId kyzylorda', need.cityId === 'kyzylorda');
-  assert('ExtractedNeed has categoryId appliance_repair', need.categoryId === 'appliance_repair');
+  assert('ExtractedNeed has categoryId appliance_repair or appliances', need.categoryId === 'appliance_repair' || need.categoryId === 'appliances');
   assert('ExtractedNeed has isAiParsed true', need.isAiParsed === true);
   assert('ExtractedNeed preserves original query', need.originalQuery === kzQuery);
   assert('ExtractedNeed contains understanding object', Boolean(need.understanding));

@@ -20,6 +20,7 @@ import {
   Square,
   AlertCircle,
   Loader2,
+  ShieldCheck,
 } from 'lucide-react';
 import { RequestMediaView } from './RequestMediaView';
 
@@ -633,6 +634,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             )}
           </button>
         </form>
+
+        {/* Phone Masking & Privacy Guarantee Badge */}
+        <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-emerald-950 shadow-2xs">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <span className="font-bold block text-[11px] uppercase tracking-wider text-emerald-800">
+              {language === 'kz'
+                ? 'Қауіпсіз маркетплейс және құпиялылық'
+                : language === 'tr'
+                ? 'Güvenli Pazar Yeri & Gizlilik'
+                : 'Безопасный маркетплейс и приватность'}
+            </span>
+            <p className="text-emerald-800/90 leading-relaxed text-xs">
+              {t.phoneMaskingGuarantee}
+            </p>
+          </div>
+        </div>
 
         {/* Examples Section */}
         <div className="space-y-2.5 pt-1">

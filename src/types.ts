@@ -1,4 +1,4 @@
-export type Language = 'kz' | 'ru';
+export type Language = 'kz' | 'ru' | 'tr';
 
 export type Urgency = 'high' | 'normal' | 'low';
 
@@ -165,6 +165,8 @@ export interface ServiceRequest {
   attachments?: RequestAttachment[];
   location?: RequestLocation;
   understanding?: RequestUnderstanding;
+  paymentStatus?: 'pending' | 'held_in_escrow' | 'released' | 'refunded';
+  escrowAmount?: number;
 }
 
 export type OfferPriceType = 'fixed' | 'from' | 'inspection';
@@ -184,6 +186,9 @@ export interface ProviderOffer {
   message: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   createdAt: string;
+  iinVerified?: boolean;
+  hasCertificate?: boolean;
+  paymentStatus?: 'pending' | 'held_in_escrow' | 'released' | 'refunded';
 }
 
 export interface Review {
@@ -218,10 +223,15 @@ export function formatOfferDisplayPrice(
     priceType === 'inspection' ||
     rawPrice === 'После осмотра' ||
     rawPrice === 'Қарап көрген соң' ||
+    rawPrice === 'Keşif sonrası' ||
     rawPrice.toLowerCase().includes('осмотр') ||
-    rawPrice.toLowerCase().includes('көрген соң')
+    rawPrice.toLowerCase().includes('көрген соң') ||
+    rawPrice.toLowerCase().includes('keşif') ||
+    rawPrice.toLowerCase().includes('kesif')
   ) {
-    return language === 'kz' ? 'Қарап көрген соң' : 'После осмотра';
+    if (language === 'kz') return 'Қарап көрген соң';
+    if (language === 'tr') return 'Keşif sonrası';
+    return 'После осмотра';
   }
 
   // Helper to extract numeric amount and format with standard spaces e.g. "10 000 ₸"
@@ -238,11 +248,15 @@ export function formatOfferDisplayPrice(
   if (
     priceType === 'from' ||
     rawPrice.toLowerCase().startsWith('от ') ||
-    rawPrice.toLowerCase().endsWith('бастап')
+    rawPrice.toLowerCase().endsWith('бастап') ||
+    rawPrice.toLowerCase().endsWith('başlayan') ||
+    rawPrice.toLowerCase().endsWith('baslayan')
   ) {
     const amount = extractFormattedAmount(rawPrice);
     if (language === 'kz') {
       return `${amount} бастап`;
+    } else if (language === 'tr') {
+      return `${amount}'den başlayan`;
     } else {
       return `от ${amount}`;
     }
@@ -255,6 +269,136 @@ export function formatOfferDisplayPrice(
 
   // 4. Fallback for legacy records without priceType
   return rawPrice;
+}
+
+/**
+ * Localizes common dynamic date and availability strings across KZ, RU, and TR:
+ * - 'Бүгін' / 'Сегодня' / 'Bugün' -> 'Bugün' (TR), 'Бүгін' (KZ), 'Сегодня' (RU)
+ * - 'Ертең' / 'Завтра' / 'Yarın' -> 'Yarın' (TR), 'Ертең' (KZ), 'Завтра' (RU)
+ * - 'Осы аптада' / 'На этой неделе' / 'Bu hafta' -> 'Bu hafta' (TR), 'Осы аптада' (KZ), 'На этой неделе' (RU)
+ * - If unmatched, returns the original string or formatted date.
+ */
+export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): string {
+  if (!dateStr) return '';
+  const clean = dateStr.trim();
+  const lower = clean.toLowerCase();
+
+  if (
+    lower === 'бүгін' ||
+    lower === 'сегодня' ||
+    lower === 'bugün' ||
+    lower === 'bugun'
+  ) {
+    if (lang === 'tr') return 'Bugün';
+    if (lang === 'kz') return 'Бүгін';
+    return 'Сегодня';
+  }
+
+  if (
+    lower.startsWith('бүгін') ||
+    lower.startsWith('сегодня') ||
+    lower.startsWith('bugün') ||
+    lower.startsWith('bugun')
+  ) {
+    const suffix = clean.replace(/^(бүгін|сегодня|bugün|bugun)[,\s]*/i, '');
+    if (lang === 'tr') return suffix ? `Bugün, ${suffix}` : 'Bugün';
+    if (lang === 'kz') return suffix ? `Бүгін, ${suffix}` : 'Бүгін';
+    return suffix ? `Сегодня, ${suffix}` : 'Сегодня';
+  }
+
+  if (
+    lower === 'ертең' ||
+    lower === 'завтра' ||
+    lower === 'ертен' ||
+    lower === 'yarın' ||
+    lower === 'yarin'
+  ) {
+    if (lang === 'tr') return 'Yarın';
+    if (lang === 'kz') return 'Ертең';
+    return 'Завтра';
+  }
+
+  if (
+    lower.startsWith('ертең') ||
+    lower.startsWith('завтра') ||
+    lower.startsWith('ертен') ||
+    lower.startsWith('yarın') ||
+    lower.startsWith('yarin')
+  ) {
+    const suffix = clean.replace(/^(ертең|завтра|ертен|yarın|yarin)[,\s]*/i, '');
+    if (lang === 'tr') return suffix ? `Yarın, ${suffix}` : 'Yarın';
+    if (lang === 'kz') return suffix ? `Ертең, ${suffix}` : 'Ертең';
+    return suffix ? `Завтра, ${suffix}` : 'Завтра';
+  }
+
+  if (
+    lower.includes('осы апта') ||
+    lower.includes('на этой недел') ||
+    lower.includes('bu hafta')
+  ) {
+    if (lang === 'tr') return 'Bu hafta';
+    if (lang === 'kz') return 'Осы аптада';
+    return 'На этой неделе';
+  }
+
+  return clean;
+}
+
+/**
+ * Localizes dynamic budget strings:
+ * - Negotiable: 'Келісімді' / 'Договорная' / 'Anlaşmalı' -> 'Anlaşmalı / Belirsiz' (TR), 'Келісімді' (KZ), 'Договорная' (RU)
+ * - Inspection: 'После осмотра' / 'Қарап көрген соң' / 'Keşif sonrası' -> 'Keşif sonrası' (TR), 'Қарап көрген соң' (KZ), 'После осмотра' (RU)
+ * - Preserves numeric values (e.g. '15 000 ₸', 'от 10 000 ₸', '10 000 ₸ бастап').
+ */
+export function formatDynamicBudget(budgetStr?: string, lang: Language = 'ru'): string {
+  if (!budgetStr) return '';
+  const clean = budgetStr.trim();
+  const lower = clean.toLowerCase();
+
+  // 1. Negotiable
+  if (
+    lower.includes('келісім') ||
+    lower.includes('келисим') ||
+    lower.includes('договорн') ||
+    lower.includes('anlaşma') ||
+    lower.includes('anlasma') ||
+    lower.includes('belirsiz')
+  ) {
+    if (lang === 'tr') return 'Anlaşmalı / Belirsiz';
+    if (lang === 'kz') return 'Келісімді';
+    return 'Договорная';
+  }
+
+  // 2. Inspection
+  if (
+    lower.includes('осмотр') ||
+    lower.includes('көрген соң') ||
+    lower.includes('корген сон') ||
+    lower.includes('keşif') ||
+    lower.includes('kesif')
+  ) {
+    if (lang === 'tr') return 'Keşif sonrası';
+    if (lang === 'kz') return 'Қарап көрген соң';
+    return 'После осмотра';
+  }
+
+  // 3. 'от ... ₸' or '... бастап' or '... başlayan'
+  if (
+    lower.startsWith('от ') ||
+    lower.endsWith('бастап') ||
+    lower.endsWith('başlayan') ||
+    lower.endsWith('baslayan')
+  ) {
+    const digitsOnly = clean.replace(/[^\d]/g, '');
+    if (digitsOnly.length > 0) {
+      const spaced = digitsOnly.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+      if (lang === 'tr') return `${spaced} ₸ başlayan`;
+      if (lang === 'kz') return `${spaced} ₸ бастап`;
+      return `от ${spaced} ₸`;
+    }
+  }
+
+  return clean;
 }
 
 export interface Provider {
@@ -275,6 +419,9 @@ export interface Provider {
   experienceYears?: number;
   availability?: string;
   verified: boolean;
+  iinVerified?: boolean;
+  hasCertificate?: boolean;
+  tradeLicense?: string;
   isActive?: boolean;
   isDemo?: boolean;
   createdAt?: string;
@@ -297,6 +444,8 @@ export interface DemoProvider {
   phone: string;
   whatsapp: string;
   verified: boolean;
+  iinVerified?: boolean;
+  hasCertificate?: boolean;
   addressSnippet: string;
   district?: string;
 }
@@ -650,11 +799,13 @@ export interface AppNotification {
   title: {
     kz: string;
     ru: string;
+    tr?: string;
   };
 
   body: {
     kz: string;
     ru: string;
+    tr?: string;
   };
 
   requestId?: string;

@@ -28,6 +28,7 @@ import {
   MapPin,
   Wrench,
   CheckCircle2,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface AppointmentSectionProps {
@@ -212,6 +213,52 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
     }
   };
 
+  // Handle Kaspi Escrow Release (Customer confirms work & releases payment to provider)
+  const handleReleaseEscrow = async () => {
+    setSubmitting(true);
+    setErrorMsg(null);
+    try {
+      // 1. If appointment exists and not yet completed, complete it
+      if (appointment && appointment.status !== 'COMPLETED') {
+        try {
+          await repository.completeAppointment(appointment.id);
+        } catch (apptErr) {
+          console.warn('[AppointmentSection] Note completing appointment during escrow release:', apptErr);
+        }
+      }
+
+      // 2. Update ServiceRequest: paymentStatus = 'released', status = 'COMPLETED'
+      await repository.updateRequest(request.id, {
+        status: 'COMPLETED',
+        paymentStatus: 'released',
+      });
+
+      // 3. Update ProviderOffer: paymentStatus = 'released'
+      const offerId = selectedOffer?.id || request.selectedOfferId;
+      if (offerId) {
+        try {
+          await repository.updateOffer(offerId, {
+            paymentStatus: 'released',
+          });
+        } catch (offerErr) {
+          console.warn('[AppointmentSection] Note updating offer paymentStatus:', offerErr);
+        }
+      }
+    } catch (err: any) {
+      console.error('[AppointmentSection] Release escrow error:', err);
+      setErrorMsg(
+        err?.message ||
+          (language === 'kz'
+            ? 'Төлемді аудару қатесі'
+            : language === 'tr'
+            ? 'Ödeme aktarılırken hata oluştu'
+            : 'Ошибка перевода оплаты')
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // Handle Provider Work Status Update
   const handleUpdateWorkStatus = async (targetStatus: WorkStatus) => {
     if (!appointment) return;
@@ -313,13 +360,44 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               {t.appointmentTitle}
             </h4>
             <p className="text-[10px] text-slate-500">
-              {language === 'kz' ? 'Тараптардың келісілген уақыты' : 'Согласованное время встречи'}
+              {language === 'kz'
+                ? 'Тараптардың келісілген уақыты'
+                : language === 'tr'
+                ? 'Karşılıklı mutabık kalınan randevu zamanı'
+                : 'Согласованное время встречи'}
             </p>
           </div>
         </div>
 
         {appointment && getStatusBadge(appointment.status)}
       </div>
+
+      {/* Kaspi Escrow Badges */}
+      {request.paymentStatus === 'held_in_escrow' && (
+        <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-900">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>
+            {language === 'kz'
+              ? 'Kaspi Қауіпсіз төлемі: Қаражат қорғалған'
+              : language === 'tr'
+              ? 'Kaspi Güvenli Havuz: Tutar güvence altında'
+              : 'Безопасная сделка Kaspi: Сумма под защитой'}
+          </span>
+        </div>
+      )}
+
+      {request.paymentStatus === 'released' && (
+        <div className="p-2.5 bg-teal-50 border border-teal-300 rounded-xl flex items-center gap-2 text-xs font-bold text-teal-900">
+          <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
+          <span>
+            {language === 'kz'
+              ? 'Төлем сәтті шеберге аударылды'
+              : language === 'tr'
+              ? 'Ödeme Başarıyla Ustaya Aktarıldı'
+              : 'Оплата успешно переведена мастеру'}
+          </span>
+        </div>
+      )}
 
       {errorMsg && (
         <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start gap-1.5">
@@ -428,7 +506,11 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   onClick={() => setIsFormOpen(false)}
                   className="min-h-[38px] px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold text-xs"
                 >
-                  {language === 'kz' ? 'Жабу' : 'Отмена'}
+                  {language === 'kz'
+                    ? 'Жабу'
+                    : language === 'tr'
+                    ? 'İptal'
+                    : 'Отмена'}
                 </button>
               </div>
             </form>
@@ -458,7 +540,11 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
 
             <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/50">
               <span className="text-slate-500">
-                {language === 'kz' ? 'Ұсынған' : 'Предложено'}:
+                {language === 'kz'
+                  ? 'Ұсынған'
+                  : language === 'tr'
+                  ? 'Öneren'
+                  : 'Предложено'}:
               </span>
               <span className="font-medium text-slate-700">
                 {appointment.proposedBy === 'customer'
@@ -660,7 +746,11 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   onClick={() => setIsRescheduleOpen(false)}
                   className="min-h-[34px] px-3 rounded-lg bg-white border border-slate-200 text-slate-600 text-xs"
                 >
-                  {language === 'kz' ? 'Жабу' : 'Отмена'}
+                  {language === 'kz'
+                    ? 'Жабу'
+                    : language === 'tr'
+                    ? 'İptal'
+                    : 'Отмена'}
                 </button>
               </div>
             </form>
@@ -697,8 +787,27 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                 </button>
               )}
 
+              {/* Release Escrow Button: Customer confirms work and releases funds to provider */}
+              {currentRole === 'customer' && request.paymentStatus === 'held_in_escrow' && (
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={handleReleaseEscrow}
+                  className="w-full min-h-[42px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <ShieldCheck className="w-4 h-4 text-emerald-100" />
+                  <span>
+                    {language === 'kz'
+                      ? 'Жұмысты растау және төлемді шеберге аудару'
+                      : language === 'tr'
+                      ? 'İşi Onayla ve Ödemeyi Ustaya Aktar'
+                      : 'Подтвердить работу и перевести оплату мастеру'}
+                  </span>
+                </button>
+              )}
+
               {/* Complete appointment button */}
-              {appointment.status === 'CONFIRMED' && (
+              {appointment.status === 'CONFIRMED' && request.paymentStatus !== 'held_in_escrow' && (
                 <button
                   type="button"
                   disabled={submitting}
@@ -752,16 +861,28 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
             <p className="text-xs text-slate-500">
               {language === 'kz'
                 ? 'Кездесуді шынымен тоқтатқыңыз келе ме?'
+                : language === 'tr'
+                ? 'Randevuyu gerçekten iptal etmek istiyor musunuz?'
                 : 'Вы действительно хотите отменить назначенную встречу?'}
             </p>
 
             <div>
               <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                {language === 'kz' ? 'Себебі (қалауыңыз бойынша)' : 'Причина (необязательно)'}
+                {language === 'kz'
+                  ? 'Себебі (қалауыңыз бойынша)'
+                  : language === 'tr'
+                  ? 'Neden (İsteğe bağlı)'
+                  : 'Причина (необязательно)'}
               </label>
               <input
                 type="text"
-                placeholder={language === 'kz' ? 'Мысалы: Басқа уақыт ыңғайлырақ' : 'Например: Изменились планы'}
+                placeholder={
+                  language === 'kz'
+                    ? 'Мысалы: Басқа уақыт ыңғайлырақ'
+                    : language === 'tr'
+                    ? 'Örn: Başka bir zaman daha uygun'
+                    : 'Например: Изменились планы'
+                }
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
                 className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800"
@@ -782,7 +903,11 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                 onClick={() => setIsCancelDialogOpen(false)}
                 className="min-h-[38px] px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs"
               >
-                {language === 'kz' ? 'Жоқ' : 'Назад'}
+                {language === 'kz'
+                  ? 'Жоқ'
+                  : language === 'tr'
+                  ? 'Vazgeç'
+                  : 'Назад'}
               </button>
             </div>
           </div>

@@ -130,6 +130,18 @@ export function matchProviders(request: ServiceRequest, providers: Provider[]): 
       score += 5;
     }
 
+    // 5. Risk Category Priority: In electrical and heating/gas/boiler, certified providers get priority
+    const isRiskCategory =
+      reqCatId === 'electrician' ||
+      reqCatId === 'heating_boiler' ||
+      normCat.includes('электр') ||
+      normCat.includes('жылыту') ||
+      normCat.includes('отопл') ||
+      normCat.includes('бойлер');
+    if (isRiskCategory && (provider.hasCertificate || provider.tradeLicense)) {
+      score += 15;
+    }
+
     return { provider, score };
   });
 

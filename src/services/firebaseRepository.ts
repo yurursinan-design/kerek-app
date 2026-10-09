@@ -236,6 +236,9 @@ export class FirebaseRepository implements Repository {
         : {}),
       availability: providerData.availability || providerData.workingHours || '09:00 - 20:00',
       verified: providerData.verified ?? false,
+      iinVerified: providerData.iinVerified ?? false,
+      hasCertificate: providerData.hasCertificate ?? false,
+      ...(providerData.tradeLicense ? { tradeLicense: providerData.tradeLicense } : {}),
       isDemo: false,
       createdAt: providerData.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -847,6 +850,8 @@ export class FirebaseRepository implements Repository {
       message: offerData.message || '',
       status: 'PENDING',
       createdAt: offerData.createdAt || new Date().toISOString(),
+      iinVerified: offerData.iinVerified ?? false,
+      hasCertificate: offerData.hasCertificate ?? false,
     };
 
     try {
@@ -1181,22 +1186,28 @@ export class FirebaseRepository implements Repository {
       const offerSnap = await getDoc(offerRef);
       if (offerSnap.exists()) {
         const existingOffer = offerSnap.data() as ProviderOffer;
-        if (existingOffer.status === 'ACCEPTED' || existingOffer.status === 'REJECTED') {
-          throw new Error(`Validation Error: Cannot update offer in status ${existingOffer.status}`);
-        }
-        if (existingOffer.requestId) {
-          const reqSnap = await getDoc(doc(firestore, 'requests', existingOffer.requestId));
-          if (reqSnap.exists()) {
-            const parentReq = reqSnap.data() as ServiceRequest;
-            const normStatus = normalizeRequestStatus(parentReq.status);
-            if (
-              normStatus === 'PROVIDER_SELECTED' ||
-              normStatus === 'COMPLETED' ||
-              normStatus === 'CANCELLED'
-            ) {
-              throw new Error(
-                `Validation Error: Cannot update offer because request is in status ${parentReq.status}`
-              );
+        const isPaymentStatusOnlyUpdate =
+          updates.paymentStatus !== undefined &&
+          Object.keys(updates).every((k) => k === 'paymentStatus' || k === 'updatedAt');
+
+        if (!isPaymentStatusOnlyUpdate) {
+          if (existingOffer.status === 'ACCEPTED' || existingOffer.status === 'REJECTED') {
+            throw new Error(`Validation Error: Cannot update offer in status ${existingOffer.status}`);
+          }
+          if (existingOffer.requestId) {
+            const reqSnap = await getDoc(doc(firestore, 'requests', existingOffer.requestId));
+            if (reqSnap.exists()) {
+              const parentReq = reqSnap.data() as ServiceRequest;
+              const normStatus = normalizeRequestStatus(parentReq.status);
+              if (
+                normStatus === 'PROVIDER_SELECTED' ||
+                normStatus === 'COMPLETED' ||
+                normStatus === 'CANCELLED'
+              ) {
+                throw new Error(
+                  `Validation Error: Cannot update offer because request is in status ${parentReq.status}`
+                );
+              }
             }
           }
         }

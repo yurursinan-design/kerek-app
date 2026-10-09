@@ -131,7 +131,8 @@ async function runCustomerCompletionFlowTests() {
     // -------------------------------------------------------------
     const understanding = analyzeRequestUnderstanding('Кызылордада сегодня сантехник кран течет');
     assert(
-      understanding.cityId === 'kyzylorda' && understanding.categoryId === 'home_services',
+      understanding.cityId === 'kyzylorda' &&
+        (understanding.categoryId === 'home_services' || understanding.categoryId === 'plumbing'),
       'TEST 6: AI Request Understanding 2.0 regression intact'
     );
 

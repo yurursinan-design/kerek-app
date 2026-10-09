@@ -110,13 +110,14 @@ export const ALL_CITIES_LIST = [
 ];
 
 export const CATEGORIES_LIST = [
-  { id: 'home_services', kz: 'Тұрмыстық қызметтер (Сантехник, Электрик)', ru: 'Бытовые услуги (Сантехник, Электрик)' },
-  { id: 'appliance_repair', kz: 'Тұрмыстық техника жөндеу', ru: 'Ремонт бытовой техники' },
-  { id: 'cargo_moving', kz: 'Жүк тасымалдау және көшу', ru: 'Грузоперевозки и переезд' },
-  { id: 'electronics', kz: 'Электроника және гаджеттер', ru: 'Электроника и покупка техники' },
-  { id: 'cleaning', kz: 'Тазалық қызметі (Клининг)', ru: 'Клининг и уборка' },
-  { id: 'auto', kz: 'Автокөмек және эвакуатор', ru: 'Автоуслуги и эвакуатор' },
-  { id: 'other', kz: 'Басқа қызметтер', ru: 'Другие услуги' },
+  { id: 'plumbing', kz: 'Сантехника және құбырлар', ru: 'Сантехника и канализация', tr: 'Su Tesisatı & Kanalizasyon' },
+  { id: 'electrician', kz: 'Электрик және тоқ желісі', ru: 'Электрика и монтаж', tr: 'Elektrik Tesisatı & Arıza' },
+  { id: 'heating_boiler', kz: 'Жылыту және қазандықтар', ru: 'Отопление и котлы', tr: 'Kombi, Şofben & Isıtma' },
+  { id: 'ac_ventilation', kz: 'Кондиционерлер мен желдету', ru: 'Кондиционеры и вентиляция', tr: 'Klima & Havalandırma' },
+  { id: 'appliances', kz: 'Тұрмыстық техника жөндеу', ru: 'Ремонт бытовой техники', tr: 'Beyaz Eşya Tamiri' },
+  { id: 'furniture_carpentry', kz: 'Жиһаз құрастыру', ru: 'Сборка мебели', tr: 'Mobilya Montajı & Marangozluk' },
+  { id: 'painting_finishing', kz: 'Бояу және жөндеу', ru: 'Малярные работы и ремонт', tr: 'Boya, Badana & Tadilat' },
+  { id: 'cleaning_moving', kz: 'Тазалау және көшу', ru: 'Уборка и переезд', tr: 'Temizlik & Taşıma' },
 ];
 
 export function analyzeRequestLocally(query: string, lang: Language): ExtractedNeed {
@@ -201,82 +202,133 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
   let detectedService = '';
 
   if (
-    /кір жуғыш|стирал|çamaşır|camasir|холодильник|тоңазытқыш|buzdolabı|бойлер|плита|кондиционер|пылесос|техника|tamir/i.test(
+    /котел|котёл|қазандық|отоплени|жылыту|аристон|байпасс|байпас|батарея|печь|печка|радиатор|тепло/i.test(
       normalized
     )
   ) {
     detectedCategory =
-      lang === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники';
+      lang === 'tr'
+        ? 'Kombi, Şofben & Isıtma'
+        : lang === 'kz'
+        ? 'Жылыту және қазандықтар'
+        : 'Отопление и котлы';
+    detectedService =
+      lang === 'tr'
+        ? 'Kombi ve ısıtma servisi'
+        : lang === 'kz'
+        ? 'Қазандық пен жылыту жүйесін жөндеу'
+        : 'Ремонт котла и системы отопления';
+  } else if (
+    /кондиционер|фреон|сплит|салқындатқыш|чистка кондиционера|заправка кондиционер/i.test(
+      normalized
+    )
+  ) {
+    detectedCategory =
+      lang === 'tr'
+        ? 'Klima & Havalandırma'
+        : lang === 'kz'
+        ? 'Кондиционерлер мен желдету'
+        : 'Кондиционеры и вентиляция';
+    detectedService =
+      lang === 'tr'
+        ? 'Klima bakımı ve gaz dolumu'
+        : lang === 'kz'
+        ? 'Кондиционер орнату және фреон құю'
+        : 'Чистка и заправка кондиционера';
+  } else if (
+    /сантехник|кран|труба|су ағ|құбыр|унитаз|смеситель|канализаци|раковин|засор|прочистка|tesisat/i.test(
+      normalized
+    )
+  ) {
+    detectedCategory =
+      lang === 'tr'
+        ? 'Su Tesisatı & Kanalizasyon'
+        : lang === 'kz'
+        ? 'Сантехника және құбырлар'
+        : 'Сантехника и канализация';
+    detectedService =
+      lang === 'tr'
+        ? 'Su tesisatı tamiri'
+        : lang === 'kz'
+        ? 'Сантехник қызметі'
+        : 'Услуги сантехника';
+  } else if (
+    /электрик|жарық|проводк|розетк|тоқ|люстр|свет|замыкание/i.test(
+      normalized
+    )
+  ) {
+    detectedCategory =
+      lang === 'tr'
+        ? 'Elektrik Tesisatı & Arıza'
+        : lang === 'kz'
+        ? 'Электрик және тоқ желісі'
+        : 'Электрика и монтаж';
+    detectedService =
+      lang === 'tr'
+        ? 'Elektrik arıza tamiri'
+        : lang === 'kz'
+        ? 'Электрик шебері'
+        : 'Услуги электрика';
+  } else if (
+    /кір жуғыш|стирал|çamaşır|camasir|холодильник|тоңазытқыш|buzdolabı|плита|пылесос|посудомойк/i.test(
+      normalized
+    )
+  ) {
+    detectedCategory =
+      lang === 'tr'
+        ? 'Beyaz Eşya Tamiri'
+        : lang === 'kz'
+        ? 'Тұрмыстық техника жөндеу'
+        : 'Ремонт бытовой техники';
     if (/кір жуғыш|стирал|çamaşır|camasir/i.test(normalized)) {
       const isSamsung = /samsung/i.test(normalized);
       const isLg = /lg/i.test(normalized);
       const isBosch = /bosch/i.test(normalized);
       const brand = isSamsung ? 'Samsung ' : isLg ? 'LG ' : isBosch ? 'Bosch ' : '';
       detectedService =
-        lang === 'kz'
+        lang === 'tr'
+          ? `${brand}Çamaşır makinesi tamiri`.trim()
+          : lang === 'kz'
           ? (brand ? `${brand}кір жуғыш машинасын жөндеу` : 'Кір жуғыш машина жөндеу')
           : (brand ? `Ремонт стиральной машины ${brand}`.trim() : 'Ремонт стиральных машин');
     } else if (/тоңазытқыш|холодильник|buzdolabı/i.test(normalized)) {
       detectedService =
-        lang === 'kz' ? 'Тоңазытқыш жөндеу' : 'Ремонт холодильника';
+        lang === 'tr' ? 'Buzdolabı tamiri' : lang === 'kz' ? 'Тоңазытқыш жөндеу' : 'Ремонт холодильника';
     } else {
       detectedService =
-        lang === 'kz' ? 'Тұрмыстық техника шебері' : 'Мастер по ремонту техники';
+        lang === 'tr' ? 'Beyaz eşya servisi' : lang === 'kz' ? 'Тұрмыстық техника шебері' : 'Мастер по ремонту техники';
     }
   } else if (
-    /сантехник|кран|труба|су ағ|құбыр|унитаз|смеситель|канализаци|раковин|батарея|tesisat/i.test(
+    /жиһаз|мебель|шкаф|стол|кровать|диван|сборка мебели|жиһаз құрастыру|плотник/i.test(
       normalized
     )
   ) {
     detectedCategory =
-      lang === 'kz' ? 'Тұрмыстық қызметтер' : 'Бытовые услуги';
+      lang === 'tr' ? 'Mobilya Montajı & Marangozluk' : lang === 'kz' ? 'Жиһаз құрастыру' : 'Сборка мебели';
     detectedService =
-      lang === 'kz' ? 'Сантехник қызметі' : 'Услуги сантехника';
+      lang === 'tr' ? 'Mobilya montajı' : lang === 'kz' ? 'Жиһаз құрастыру' : 'Сборка и ремонт мебели';
   } else if (
-    /электрик|жарық|проводк|розетк|тоқ|люстр|свет/i.test(normalized)
-  ) {
-    detectedCategory =
-      lang === 'kz' ? 'Тұрмыстық қызметтер' : 'Бытовые услуги';
-    detectedService =
-      lang === 'kz' ? 'Электрик шебері' : 'Услуги электрика';
-  } else if (
-    /переезд|көшу|көшіру|машина для переезда|газель|жүк тасу|грузоперевозк|жүк көлік|грузчик/i.test(
+    /маляр|покраска|бояу|штукатурк|шпатлевк|обои|пәтер жөндеу|ремонт квартир|кафель/i.test(
       normalized
     )
   ) {
     detectedCategory =
-      lang === 'kz' ? 'Жүк тасымалдау' : 'Грузоперевозки';
+      lang === 'tr' ? 'Boya, Badana & Tadilat' : lang === 'kz' ? 'Бояу және жөндеу' : 'Малярные работы и ремонт';
     detectedService =
-      lang === 'kz'
-        ? 'Көшуге арналған көлік (Газель)'
-        : 'Машина для переезда (Газель)';
+      lang === 'tr' ? 'Boya badana ve tadilat' : lang === 'kz' ? 'Пәтер жөндеу жұмыстары' : 'Ремонт квартир и отделка';
   } else if (
-    /телефон|смартфон|айфон|iphone|samsung|xiaomi|redmi|гаджет|ноутбук/i.test(
+    /переезд|көшу|көшіру|клининг|уборка|тазалау|газель|жүк тасу|грузоперевозк|грузчик/i.test(
       normalized
     )
   ) {
     detectedCategory =
-      lang === 'kz' ? 'Электроника және гаджеттер' : 'Электроника и гаджеты';
+      lang === 'tr' ? 'Temizlik & Taşıma' : lang === 'kz' ? 'Тазалау және көшу' : 'Уборка и переезд';
     detectedService =
-      lang === 'kz' ? 'Смартфон сатып алу' : 'Покупка смартфона';
-  } else if (
-    /тазалау|клининг|уборка|пәтер тазалау|кілем|мойка/i.test(normalized)
-  ) {
-    detectedCategory =
-      lang === 'kz' ? 'Тазалық қызметі' : 'Клининг и уборка';
-    detectedService =
-      lang === 'kz' ? 'Пәтер тазалау (клининг)' : 'Генеральная уборка квартиры';
-  } else if (
-    /эвакуатор|көлік бұзылды|авто|сто|шина|дөңгелек/i.test(normalized)
-  ) {
-    detectedCategory =
-      lang === 'kz' ? 'Автоқызметтер' : 'Автоуслуги';
-    detectedService =
-      lang === 'kz' ? 'Эвакуатор шақыру' : 'Вызов эвакуатора';
+      lang === 'tr' ? 'Ev taşıma ve temizlik' : lang === 'kz' ? 'Көшу және тазалау қызметі' : 'Переезд и клининг';
   } else {
     // Generic fallback
     detectedCategory =
-      lang === 'kz' ? 'Қызметтер мен тауарлар' : 'Услуги и товары';
+      lang === 'tr' ? 'Diğer Hizmetler' : lang === 'kz' ? 'Қызметтер мен тауарлар' : 'Услуги и товары';
     detectedService =
       query.length > 40 ? query.slice(0, 37) + '...' : query;
   }

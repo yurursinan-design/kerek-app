@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   DemoProvider,
   ExtractedNeed,
+  formatDynamicBudget,
+  formatDynamicDate,
   formatOfferDisplayPrice,
   Language,
   normalizeRequestStatus,
@@ -15,6 +17,7 @@ import { translations } from '../i18n/translations';
 import { getDemoProviders } from '../data/demoProviders';
 import { repository, checkClientRateLimit, getFriendlyErrorMessage, getCurrentUserId } from '../services';
 import { auth } from '../services/firebase';
+import { getCategoryDisplayName, getCityDisplayName } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { ReviewModal } from './ReviewModal';
 import { ChatScreen } from './ChatScreen';
@@ -37,6 +40,8 @@ import {
   XCircle,
   Inbox,
   Star,
+  ShieldCheck,
+  Award,
 } from 'lucide-react';
 
 interface ResultScreenProps {
@@ -433,41 +438,54 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
             <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-xs">
               <div className="space-y-0.5">
                 <span className="text-[10px] font-semibold text-slate-400 uppercase">
-                  {language === 'kz' ? 'Қала' : 'Город'}:
+                  {language === 'kz' ? 'Қала' : language === 'tr' ? 'Şehir' : 'Город'}:
                 </span>
                 <span className="font-semibold text-slate-800 flex items-center gap-1">
                   <MapPin className="w-3 h-3 text-sky-600" />
-                  {request.city}
+                  {getCityDisplayName(request.cityId || request.city, language) || request.city}
                 </span>
               </div>
 
               <div className="space-y-0.5">
                 <span className="text-[10px] font-semibold text-slate-400 uppercase">
-                  {language === 'kz' ? 'Бюджет' : 'Бюджет'}:
+                  {language === 'kz' ? 'Бюджет' : language === 'tr' ? 'Bütçe' : 'Бюджет'}:
                 </span>
                 <span className="font-semibold text-slate-800 flex items-center gap-1">
                   <Wallet className="w-3 h-3 text-sky-600" />
-                  {request.budget || '—'}
+                  {request.budget ? formatDynamicBudget(request.budget, language) : '—'}
                 </span>
               </div>
 
               <div className="space-y-0.5">
                 <span className="text-[10px] font-semibold text-slate-400 uppercase">
-                  {language === 'kz' ? 'Құрылған уақыты' : 'Дата создания'}:
+                  {language === 'kz'
+                    ? 'Құрылған уақыты'
+                    : language === 'tr'
+                    ? 'Oluşturulma Tarihi'
+                    : 'Дата создания'}:
                 </span>
                 <span className="font-medium text-slate-600 flex items-center gap-1">
                   <Calendar className="w-3 h-3 text-slate-400" />
-                  {formattedCreatedDate || request.date}
+                  {formatDynamicDate(formattedCreatedDate || request.date, language)}
                 </span>
               </div>
 
               <div className="space-y-0.5">
                 <span className="text-[10px] font-semibold text-slate-400 uppercase">
-                  {language === 'kz' ? 'Ұсыныстар саны' : 'Кол-во предложений'}:
+                  {language === 'kz'
+                    ? 'Ұсыныстар саны'
+                    : language === 'tr'
+                    ? 'Teklif Sayısı'
+                    : 'Кол-во предложений'}:
                 </span>
                 <span className="font-bold text-sky-700 flex items-center gap-1">
                   <Inbox className="w-3 h-3" />
-                  {offers.length} {language === 'kz' ? 'ұсыныс' : 'предл.'}
+                  {offers.length}{' '}
+                  {language === 'kz'
+                    ? 'ұсыныс'
+                    : language === 'tr'
+                    ? 'teklif'
+                    : 'предл.'}
                 </span>
               </div>
             </div>
@@ -487,6 +505,40 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Phone Masking & Privacy Guarantee Notice */}
+        <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-emerald-950 shadow-2xs">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <span className="font-bold block text-[11px] uppercase tracking-wider text-emerald-800">
+              {language === 'kz'
+                ? 'Қауіпсіз маркетплейс және құпиялылық'
+                : language === 'tr'
+                ? 'Güvenli Pazar Yeri & Gizlilik'
+                : 'Безопасный маркетплейс и приватность'}
+            </span>
+            <p className="text-emerald-800/90 leading-relaxed text-xs">
+              {t.phoneMaskingGuarantee}
+            </p>
+          </div>
+        </div>
+
+        {/* Risk Category Notice for technical/gas/electric works */}
+        {(need?.category?.toLowerCase().includes('электр') ||
+          need?.category?.toLowerCase().includes('жылыту') ||
+          need?.category?.toLowerCase().includes('отоплен') ||
+          need?.category?.toLowerCase().includes('бойлер') ||
+          need?.category?.toLowerCase().includes('electrician') ||
+          need?.category?.toLowerCase().includes('heating') ||
+          request?.category?.toLowerCase().includes('электр') ||
+          request?.category?.toLowerCase().includes('жылыту') ||
+          request?.category?.toLowerCase().includes('отоплен') ||
+          request?.category?.toLowerCase().includes('бойлер')) && (
+          <div className="p-3 bg-amber-50/80 border border-amber-200/90 rounded-2xl flex items-center gap-2.5 text-xs text-amber-900 shadow-2xs">
+            <Award className="w-4 h-4 text-amber-600 shrink-0" />
+            <span className="leading-snug">{t.riskCategoryNotice}</span>
           </div>
         )}
 
@@ -744,6 +796,24 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                               <span className="w-3 h-3 border-2 border-sky-600 border-t-transparent rounded-full animate-spin shrink-0" />
                             )}
                           </button>
+                          {offer.iinVerified && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full"
+                              title={t.iinVerifiedBadge}
+                            >
+                              <ShieldCheck className="w-3 h-3 text-sky-600 stroke-[2.5]" />
+                              <span>{t.iinVerifiedBadge}</span>
+                            </span>
+                          )}
+                          {offer.hasCertificate && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full"
+                              title={t.certifiedMasterBadge}
+                            >
+                              <Award className="w-3 h-3 text-purple-600 stroke-[2.5]" />
+                              <span>{t.certifiedMasterBadge}</span>
+                            </span>
+                          )}
                           {offer.isDemo && (
                             <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
                               ДЕМО
@@ -757,7 +827,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                         </div>
                         <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
                           <Clock className="w-3 h-3 text-slate-400" />
-                          <span>{offer.availability}</span>
+                          <span>{formatDynamicDate(offer.availability, language)}</span>
                         </div>
                       </div>
 

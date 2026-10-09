@@ -119,12 +119,12 @@ service cloud.firestore {
          (!('location' in incoming()) || (incoming().location is map && ('latitude' in incoming().location) && ('longitude' in incoming().location)))) ||
         // Provider updating status to OFFERS_RECEIVED when submitting an offer
         (isRegisteredProvider() &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
          incoming().status == 'OFFERS_RECEIVED' &&
          existing().status in ['OPEN', 'MATCHING', 'NEW', 'OFFERS_RECEIVED']) ||
         // Selected provider updating job status (in-progress, completed)
         (isRegisteredProvider() &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
          incoming().status in ['IN_PROGRESS', 'COMPLETED'] &&
          existing().status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'] &&
          existing().selectedOfferId is string &&
@@ -184,11 +184,11 @@ service cloud.firestore {
          incoming().id == existing().id &&
          existing().status == 'PENDING' &&
          incoming().status == 'PENDING') ||
-        // Customer accepting or rejecting an offer on their request
+        // Customer accepting or rejecting an offer, or updating paymentStatus (e.g. releasing escrow)
         (get(/databases/$(database)/documents/requests/$(existing().requestId)).data.customerId == request.auth.uid &&
-         existing().status == 'PENDING' &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
-         incoming().status in ['ACCEPTED', 'REJECTED'])
+         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'updatedAt']) &&
+         (incoming().status == existing().status || (existing().status == 'PENDING' && incoming().status in ['ACCEPTED', 'REJECTED'])) &&
+         (!('paymentStatus' in incoming()) || incoming().paymentStatus in ['pending', 'held_in_escrow', 'released', 'refunded']))
       );
       allow delete: if false;
     }
@@ -245,7 +245,7 @@ service cloud.firestore {
                     && conversationId == ('conv_' + incoming().requestId)
                     && (incoming().customerId == request.auth.uid || incoming().providerUserId == request.auth.uid || incoming().providerId == request.auth.uid)
                     && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
-                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED', 'PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']
                     && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status != 'CANCELLED'
                     && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == incoming().customerId
                     && incoming().status in ['ACTIVE', 'ARCHIVED'];
@@ -373,11 +373,13 @@ service cloud.firestore {
                     && appointmentId == ('appointment_' + incoming().requestId)
                     && incoming().id == appointmentId
                     && (
-                      (incoming().proposedBy == 'customer' && incoming().customerId == request.auth.uid) ||
-                      (incoming().proposedBy == 'provider' && (incoming().providerUserId == request.auth.uid || incoming().providerId == request.auth.uid))
+                      incoming().customerId == request.auth.uid ||
+                      incoming().providerUserId == request.auth.uid ||
+                      incoming().providerId == request.auth.uid
                     )
+                    && incoming().proposedBy in ['customer', 'provider']
                     && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
-                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED', 'PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']
                     && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status != 'CANCELLED'
                     && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == incoming().customerId
                     && incoming().status in ['PROPOSED', 'CONFIRMED']
@@ -399,8 +401,8 @@ service cloud.firestore {
                     && incoming().id == resource.data.id
                     && incoming().requestId == resource.data.requestId
                     && incoming().customerId == resource.data.customerId
-                    && incoming().providerId == resource.data.providerId
-                    && incoming().providerUserId == resource.data.providerUserId
+                    && (incoming().providerId == resource.data.providerId || resource.data.customerId == request.auth.uid)
+                    && (incoming().providerUserId == resource.data.providerUserId || resource.data.customerId == request.auth.uid)
                     && incoming().createdAt == resource.data.createdAt
                     && incoming().updatedAt is string
                     && incoming().scheduledAt is string && incoming().scheduledAt.size() >= 10 && incoming().scheduledAt.size() <= 40

@@ -579,7 +579,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   >
                     <option value={category}>{category}</option>
                     {CATEGORIES_LIST.map((cat) => {
-                      const catName = language === 'kz' ? cat.kz : cat.ru;
+                      const catName = language === 'tr' ? (cat.tr || cat.ru) : language === 'kz' ? cat.kz : cat.ru;
                       if (catName === category) return null;
                       return (
                         <option key={cat.id} value={catName}>

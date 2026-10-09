@@ -227,6 +227,9 @@ export class LocalRepository implements Repository {
           ? { experienceYears: providerData.experienceYears }
           : {}),
         verified: providerData.verified ?? false,
+        iinVerified: providerData.iinVerified ?? false,
+        hasCertificate: providerData.hasCertificate ?? false,
+        ...(providerData.tradeLicense ? { tradeLicense: providerData.tradeLicense } : {}),
         isDemo: false,
       };
 
@@ -595,6 +598,8 @@ export class LocalRepository implements Repository {
         message: offerData.message || '',
         status: 'PENDING',
         createdAt: new Date().toISOString(),
+        iinVerified: offerData.iinVerified ?? false,
+        hasCertificate: offerData.hasCertificate ?? false,
       };
 
       const allOffers = await this.getAllOffersRaw();
@@ -660,22 +665,28 @@ export class LocalRepository implements Repository {
       if (idx === -1) return null;
 
       const targetOffer = all[idx];
-      if (targetOffer.status === 'ACCEPTED' || targetOffer.status === 'REJECTED') {
-        throw new Error(`Validation Error: Cannot update offer in status ${targetOffer.status}`);
-      }
+      const isPaymentStatusOnlyUpdate =
+        updates.paymentStatus !== undefined &&
+        Object.keys(updates).every((k) => k === 'paymentStatus' || k === 'updatedAt');
 
-      if (targetOffer.requestId) {
-        const parentReq = await this.getRequest(targetOffer.requestId);
-        if (parentReq) {
-          const normStatus = normalizeRequestStatus(parentReq.status);
-          if (
-            normStatus === 'PROVIDER_SELECTED' ||
-            normStatus === 'COMPLETED' ||
-            normStatus === 'CANCELLED'
-          ) {
-            throw new Error(
-              `Validation Error: Cannot update offer because request is in status ${parentReq.status}`
-            );
+      if (!isPaymentStatusOnlyUpdate) {
+        if (targetOffer.status === 'ACCEPTED' || targetOffer.status === 'REJECTED') {
+          throw new Error(`Validation Error: Cannot update offer in status ${targetOffer.status}`);
+        }
+
+        if (targetOffer.requestId) {
+          const parentReq = await this.getRequest(targetOffer.requestId);
+          if (parentReq) {
+            const normStatus = normalizeRequestStatus(parentReq.status);
+            if (
+              normStatus === 'PROVIDER_SELECTED' ||
+              normStatus === 'COMPLETED' ||
+              normStatus === 'CANCELLED'
+            ) {
+              throw new Error(
+                `Validation Error: Cannot update offer because request is in status ${parentReq.status}`
+              );
+            }
           }
         }
       }
@@ -739,6 +750,34 @@ export class LocalRepository implements Repository {
         status: 'PROVIDER_SELECTED',
         selectedOfferId: cleanOfferId,
       });
+
+      // 3. Initialize conversation and appointment in local repository
+      try {
+        await this.getOrCreateConversation(cleanReqId);
+      } catch (convErr) {
+        console.warn('[LocalRepository] Note initializing conversation in acceptOffer:', convErr);
+      }
+
+      if (updatedOffer) {
+        try {
+          const apptId = getAppointmentId(cleanReqId);
+          const existingAppt = await this.getAppointment(apptId);
+          if (!existingAppt) {
+            await this.createAppointment({
+              requestId: cleanReqId,
+              customerId: updatedReq?.customerId || getCurrentUserId(),
+              providerId: updatedOffer.providerId,
+              providerUserId: updatedOffer.providerUserId || updatedOffer.providerId,
+              proposedBy: 'provider',
+              scheduledAt: updatedOffer.availability || new Date().toISOString(),
+              status: 'PROPOSED',
+              workStatus: 'NOT_STARTED',
+            });
+          }
+        } catch (apptErr) {
+          console.warn('[LocalRepository] Note initializing appointment in acceptOffer:', apptErr);
+        }
+      }
 
       return { request: updatedReq, offer: updatedOffer };
     } catch (e) {
@@ -811,6 +850,8 @@ export class LocalRepository implements Repository {
           message: tmpl.message,
           status: 'PENDING',
           createdAt: new Date().toISOString(),
+          iinVerified: provider.iinVerified ?? false,
+          hasCertificate: provider.hasCertificate ?? false,
         };
       });
 

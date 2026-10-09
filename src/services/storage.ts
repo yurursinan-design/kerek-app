@@ -31,6 +31,9 @@ export const INITIAL_DEMO_PROVIDERS: Provider[] = [
     workingHours: '09:00 - 20:00',
     description: 'Кызылордада 7 жылдан астам тәжірибесі бар мамандар. Түпнұсқа қосалқы бөлшектер.',
     verified: true,
+    iinVerified: true,
+    hasCertificate: true,
+    tradeLicense: 'KZ-TECH-2024-88',
     isDemo: true,
   },
   {
@@ -48,6 +51,7 @@ export const INITIAL_DEMO_PROVIDERS: Provider[] = [
     workingHours: '08:30 - 21:00',
     description: 'Выезд по всему городу Кызылорда и пригородам в день обращения.',
     verified: true,
+    iinVerified: true,
     isDemo: true,
   },
   {

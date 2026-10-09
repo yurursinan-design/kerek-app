@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Language, ServiceRequest } from '../types';
+import {
+  Language,
+  ServiceRequest,
+  formatDynamicBudget,
+  formatDynamicDate,
+} from '../types';
 import { translations } from '../i18n/translations';
 import { repository } from '../services';
+import { getCityDisplayName, getCategoryDisplayName } from '../services/taxonomy';
 import {
   ClipboardList,
   MapPin,
@@ -61,7 +67,11 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
               </h2>
               <p className="text-xs text-slate-500">
                 {requests.length}{' '}
-                {language === 'kz' ? 'өтініш тіркелген' : 'заявок в истории'}
+                {language === 'kz'
+                  ? 'өтініш тіркелген'
+                  : language === 'tr'
+                  ? 'talep geçmişte'
+                  : 'заявок в истории'}
               </p>
             </div>
           </div>
@@ -72,7 +82,13 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
             className="min-h-[40px] px-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors"
           >
             <PlusCircle className="w-4 h-4" />
-            <span>{language === 'kz' ? 'Жаңа өтініш' : 'Новая заявка'}</span>
+            <span>
+              {language === 'kz'
+                ? 'Жаңа өтініш'
+                : language === 'tr'
+                ? 'Yeni Talep'
+                : 'Новая заявка'}
+            </span>
           </button>
         </div>
 
@@ -89,6 +105,8 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
               <p className="text-xs text-slate-500 max-w-xs mx-auto mt-1">
                 {language === 'kz'
                   ? 'Өз қажеттілігіңізді жазыңыз, біз орындаушыларды тауып береміз.'
+                  : language === 'tr'
+                  ? 'İhtiyacınızı kendi kelimelerinizle yazın, en iyi ustaları bulalım.'
                   : 'Опишите своими словами, что вам нужно — мы найдем лучших исполнителей.'}
               </p>
             </div>
@@ -106,7 +124,11 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
               const offerCount = offersCountMap[req.id] || 0;
               const formattedDate = req.createdAt
                 ? new Date(req.createdAt).toLocaleDateString(
-                    language === 'kz' ? 'kk-KZ' : 'ru-RU',
+                    language === 'kz'
+                      ? 'kk-KZ'
+                      : language === 'tr'
+                      ? 'tr-TR'
+                      : 'ru-RU',
                     { day: 'numeric', month: 'short' }
                   )
                 : req.date;
@@ -163,21 +185,26 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
                     <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 font-medium pt-0.5">
                       <span className="flex items-center gap-1">
                         <MapPin className="w-3 h-3 text-slate-400" />
-                        {req.city}
+                        {getCityDisplayName(req.cityId || req.city, language) || req.city}
                       </span>
                       <span className="flex items-center gap-1">
                         <Calendar className="w-3 h-3 text-slate-400" />
-                        {formattedDate}
+                        {formatDynamicDate(formattedDate || req.date, language)}
                       </span>
                       {req.budget && (
                         <span className="flex items-center gap-1 text-sky-700 font-semibold">
                           <Wallet className="w-3 h-3" />
-                          {req.budget}
+                          {formatDynamicBudget(req.budget, language)}
                         </span>
                       )}
                       <span className="flex items-center gap-1 text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">
                         <Inbox className="w-3 h-3" />
-                        {offerCount} {language === 'kz' ? 'ұсыныс' : 'предл.'}
+                        {offerCount}{' '}
+                        {language === 'kz'
+                          ? 'ұсыныс'
+                          : language === 'tr'
+                          ? 'teklif'
+                          : 'предл.'}
                       </span>
                     </div>
                   </div>
