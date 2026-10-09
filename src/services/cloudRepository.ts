@@ -82,6 +82,14 @@ export class CloudRepository implements Repository {
     throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
   }
 
+  subscribeToRequests(
+    _filter: RequestFilter,
+    _onData: (requests: ServiceRequest[]) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    return () => {};
+  }
+
   async updateRequest(
     _requestId: string,
     _updates: Partial<ServiceRequest>

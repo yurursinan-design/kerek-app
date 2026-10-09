@@ -205,6 +205,7 @@ service cloud.firestore {
     // - List queries strictly scoped to current user as participant (preventing blanket discovery)
     match /conversations/{conversationId} {
       allow get: if isSignedIn() && isValidId(conversationId) && (
+        resource == null ||
         resource.data.customerId == request.auth.uid ||
         resource.data.providerUserId == request.auth.uid ||
         resource.data.providerId == request.auth.uid
@@ -336,7 +337,13 @@ service cloud.firestore {
     //     RESCHEDULED -> CONFIRMED, RESCHEDULED, CANCELLED
     // - Immutable keys: id, requestId, customerId, providerId, providerUserId, createdAt
     match /appointments/{appointmentId} {
-      allow get, list: if isSignedIn() && (
+      allow get: if isSignedIn() && isValidId(appointmentId) && (
+        resource == null ||
+        resource.data.customerId == request.auth.uid ||
+        resource.data.providerUserId == request.auth.uid ||
+        resource.data.providerId == request.auth.uid
+      );
+      allow list: if isSignedIn() && (
         resource.data.customerId == request.auth.uid ||
         resource.data.providerUserId == request.auth.uid ||
         resource.data.providerId == request.auth.uid

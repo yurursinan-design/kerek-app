@@ -22,6 +22,7 @@ export type AiParserErrorCode =
   | 'RATE_LIMITED'
   | 'FIREBASE_NOT_CONFIGURED'
   | 'UNAUTHENTICATED'
+  | 'TIMEOUT'
   | 'FUNCTION_ERROR'
   | 'NETWORK_ERROR'
   | 'UNKNOWN_ERROR';
@@ -122,29 +123,42 @@ export async function parseServiceRequest(text: string): Promise<AiParserRespons
       };
     }
 
-    // 5. Invoke Callable Cloud Function in the specified region (asia-south1)
+    // 5. Invoke Callable Cloud Function in the specified region (asia-south1) with 8s timeout
     const functions = getFunctions(app, 'asia-south1');
     const parseCallable = httpsCallable<{ text: string }, AiParsedRequestResult>(
       functions,
       'parseServiceRequest'
     );
 
-    const result = await parseCallable({ text: trimmed });
-    const payload = result.data;
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutTimer = setTimeout(() => {
+        reject(new Error('AI_PARSER_TIMEOUT'));
+      }, 8000);
+    });
 
-    // Reset rate limit cooldown only on successful request
-    resetClientRateLimit(RATE_LIMIT_ACTION);
+    try {
+      const callPromise = parseCallable({ text: trimmed });
+      const result = await Promise.race([callPromise, timeoutPromise]);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      const payload = result.data;
 
-    return {
-      success: true,
-      data: {
-        cityId: payload?.cityId ?? null,
-        categoryId: payload?.categoryId ?? null,
-        service: payload?.service ?? null,
-        urgency: payload?.urgency ?? null,
-        confidence: typeof payload?.confidence === 'number' ? payload.confidence : 0,
-      },
-    };
+      // Reset rate limit cooldown only on successful request
+      resetClientRateLimit(RATE_LIMIT_ACTION);
+
+      return {
+        success: true,
+        data: {
+          cityId: payload?.cityId ?? null,
+          categoryId: payload?.categoryId ?? null,
+          service: payload?.service ?? null,
+          urgency: payload?.urgency ?? null,
+          confidence: typeof payload?.confidence === 'number' ? payload.confidence : 0,
+        },
+      };
+    } finally {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+    }
   } catch (err: any) {
     console.warn('[aiRequestParser] Error invoking parseServiceRequest:', err);
 
@@ -152,7 +166,10 @@ export async function parseServiceRequest(text: string): Promise<AiParserRespons
     let message = 'Не удалось обработать запрос с помощью AI.';
 
     const rawCode = err?.code || '';
-    if (rawCode.includes('unauthenticated')) {
+    if (err?.message === 'AI_PARSER_TIMEOUT') {
+      code = 'TIMEOUT';
+      message = 'Превышено время ожидания ответа AI (8 сек). Выполняется локальный анализ.';
+    } else if (rawCode.includes('unauthenticated')) {
       code = 'UNAUTHENTICATED';
       message = 'Ошибка авторизации пользователя.';
     } else if (rawCode.includes('invalid-argument')) {

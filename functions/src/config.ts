@@ -2,7 +2,7 @@
  * Configuration for KEREK AI Request Parser Cloud Function
  */
 export const GEMINI_CONFIG = {
-  model: 'gemini-3.8-flash',
+  model: 'gemini-flash-latest',
   region: 'asia-south1',
   secretName: 'GEMINI_API_KEY',
   maxInputChars: 500,

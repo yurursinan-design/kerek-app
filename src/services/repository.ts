@@ -55,6 +55,11 @@ export interface Repository {
   createRequest(requestData: Partial<ServiceRequest>): Promise<ServiceRequest>;
   getRequest(requestId: string): Promise<ServiceRequest | null>;
   getRequests(filter?: RequestFilter): Promise<ServiceRequest[]>;
+  subscribeToRequests(
+    filter: RequestFilter,
+    onData: (requests: ServiceRequest[]) => void,
+    onError?: (error: any) => void
+  ): () => void;
   updateRequest(requestId: string, updates: Partial<ServiceRequest>): Promise<ServiceRequest | null>;
   updateRequestStatus(
     requestId: string,

@@ -504,8 +504,8 @@ export class LocalRepository implements Repository {
         if (targetCityId && (normalizeCityId(r.cityId || r.city) || r.cityId) !== targetCityId) {
           return false;
         }
-        // Category Filter (canonical categoryId check bridges KZ and RU)
-        if (targetCatId && !isCategoryMatch(r.categoryId, targetCatId)) {
+        // Category Filter (canonical categoryId check bridges KZ and RU, 'other' matches all)
+        if (targetCatId && r.categoryId !== 'other' && !isCategoryMatch(r.categoryId, targetCatId)) {
           return false;
         }
         return true;
@@ -514,6 +514,33 @@ export class LocalRepository implements Repository {
       logTechnicalError('LocalRepository.getRequests', e);
       return [];
     }
+  }
+
+  subscribeToRequests(
+    filter: RequestFilter,
+    onData: (requests: ServiceRequest[]) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    let active = true;
+    this.getRequests(filter).then((res) => {
+      if (active) onData(res);
+    });
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY_REQUESTS) {
+        this.getRequests(filter).then((res) => {
+          if (active) onData(res);
+        });
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', handleStorage);
+    }
+    return () => {
+      active = false;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('storage', handleStorage);
+      }
+    };
   }
 
   async updateRequest(

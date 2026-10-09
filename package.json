@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "for f in tests/verify-*.ts; do echo \"=== Running $f ===\" && tsx \"$f\" || exit 1; done"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

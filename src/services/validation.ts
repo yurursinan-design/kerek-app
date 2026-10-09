@@ -60,8 +60,15 @@ export function validateRequestData(
   }
 
   // 3. RequestText / Description / Service resolution
+  if (data.service && data.service.length > 150) {
+    data.service = data.service.slice(0, 147) + '...';
+  }
   const requestText = (data.requestText || data.description || '').trim();
-  const service = (data.service || requestText || resolvedCategory).trim();
+  let service = (data.service || requestText || resolvedCategory).trim();
+  if (service.length > 150) {
+    service = service.slice(0, 147) + '...';
+    data.service = service;
+  }
   const effectiveDescription = (data.description || data.requestText || service).trim();
 
   if (!service && !requestText && !effectiveDescription) {

@@ -41,16 +41,23 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 }) => {
   const t = translations[language];
 
-  // Confidence threshold: >= 70% qualifies for direct confirmation card
-  const isHighConfidence = Boolean((initialNeed.confidence ?? 0.95) >= 0.7);
+  // Confidence threshold: >= 70% qualifies for direct confirmation card only if city and category are recognized
+  const hasRecognizedCity = Boolean((initialNeed.city || '').trim() && normalizeCityId(initialNeed.city));
+  const hasRecognizedCategory = Boolean(
+    (initialNeed.category || '').trim() &&
+    normalizeCategoryId(initialNeed.category) &&
+    normalizeCategoryId(initialNeed.category) !== 'other'
+  );
+  const isHighConfidence = Boolean((initialNeed.confidence ?? 0.95) >= 0.7 && hasRecognizedCity && hasRecognizedCategory);
 
   // If high-confidence result, start in clean confirmation mode.
-  // If low confidence (<0.7), open manual editable form directly.
+  // If low confidence (<0.7) or missing city/category, open manual editable form directly.
   const [isEditingManual, setIsEditingManual] = useState<boolean>(!isHighConfidence);
+  const [formError, setFormError] = useState<string | null>(null);
 
   // Editable form state
-  const [city, setCity] = useState(initialNeed.city);
-  const [category, setCategory] = useState(initialNeed.category);
+  const [city, setCity] = useState(initialNeed.city || '');
+  const [category, setCategory] = useState(initialNeed.category || '');
   const [service, setService] = useState(initialNeed.service);
   const [date, setDate] = useState(initialNeed.date);
   const [budget, setBudget] = useState(initialNeed.budget);
@@ -69,15 +76,22 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
   // Synchronize state when initialNeed prop changes
   useEffect(() => {
-    setCity(initialNeed.city);
-    setCategory(initialNeed.category);
+    setCity(initialNeed.city || '');
+    setCategory(initialNeed.category || '');
     setService(initialNeed.service);
     setDate(initialNeed.date);
     setBudget(initialNeed.budget);
     setUrgency(initialNeed.urgency);
     setPendingAttachments(initialNeed.pendingAttachments || []);
     setLocation(initialNeed.location);
-    setIsEditingManual(!Boolean((initialNeed.confidence ?? 0.95) >= 0.7));
+    const hasCity = Boolean((initialNeed.city || '').trim() && normalizeCityId(initialNeed.city));
+    const hasCat = Boolean(
+      (initialNeed.category || '').trim() &&
+      normalizeCategoryId(initialNeed.category) &&
+      normalizeCategoryId(initialNeed.category) !== 'other'
+    );
+    setIsEditingManual(!Boolean((initialNeed.confidence ?? 0.95) >= 0.7 && hasCity && hasCat));
+    setFormError(null);
   }, [initialNeed]);
 
   const handleAddClarification = (e?: React.FormEvent) => {
@@ -92,12 +106,36 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
   // Invokes existing createRequest flow only upon explicit customer confirmation
   const handleProceed = () => {
-    const defaultCity = language === 'kz' ? 'Қызылорда' : 'Кызылорда';
-    const defaultCategory =
-      language === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники';
-    const finalCity = (city || '').trim() || initialNeed.city || defaultCity;
-    const finalCategory = (category || '').trim() || initialNeed.category || defaultCategory;
-    
+    const finalCity = (city || '').trim() || (initialNeed.city || '').trim();
+    const resolvedCityId = normalizeCityId(finalCity);
+    if (!finalCity || !resolvedCityId) {
+      setFormError(
+        language === 'kz'
+          ? 'Қаланы таңдау міндетті'
+          : language === 'tr'
+          ? 'Şehir seçimi zorunludur'
+          : 'Необходимо выбрать город'
+      );
+      setIsEditingManual(true);
+      return;
+    }
+
+    const finalCategory = (category || '').trim() || (initialNeed.category || '').trim();
+    const resolvedCategoryId = normalizeCategoryId(finalCategory);
+    if (!finalCategory || !resolvedCategoryId || resolvedCategoryId === 'other') {
+      setFormError(
+        language === 'kz'
+          ? 'Санатты таңдау міндетті'
+          : language === 'tr'
+          ? 'Kategori seçimi zorunludur'
+          : 'Необходимо выбрать категорию'
+      );
+      setIsEditingManual(true);
+      return;
+    }
+
+    setFormError(null);
+
     // Merge any user answered clarifications into finalService / description
     let finalService =
       (service || '').trim() ||
@@ -112,9 +150,9 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
     onContinue({
       ...initialNeed,
       city: finalCity,
-      cityId: normalizeCityId(finalCity),
+      cityId: resolvedCityId,
       category: finalCategory,
-      categoryId: normalizeCategoryId(finalCategory),
+      categoryId: resolvedCategoryId,
       service: finalService,
       date: (date || '').trim() || initialNeed.date || (language === 'kz' ? 'Бүгін' : 'Сегодня'),
       budget:
@@ -539,6 +577,14 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
               </div>
             )}
 
+            {/* Validation Error Banner */}
+            {formError && (
+              <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl flex items-center gap-2 text-xs text-rose-800 font-semibold animate-fadeIn">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{formError}</span>
+              </div>
+            )}
+
             {/* Editable Form */}
             <form onSubmit={handleSubmit} className="space-y-3.5">
               {/* 1. Город / Қала */}
@@ -546,13 +592,22 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <label className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
                   <MapPin className="w-3.5 h-3.5 text-sky-600" />
                   <span>{t.fieldCity}</span>
+                  <span className="text-rose-500 font-bold">*</span>
                 </label>
                 <div className="relative">
                   <select
                     value={city}
-                    onChange={(e) => setCity(e.target.value)}
-                    className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
+                    onChange={(e) => {
+                      setCity(e.target.value);
+                      setFormError(null);
+                    }}
+                    className={`w-full h-11 px-3 bg-slate-50 border rounded-lg text-sm font-semibold text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white ${
+                      !city ? 'border-amber-400 bg-amber-50/40' : 'border-slate-200'
+                    }`}
                   >
+                    <option value="">
+                      {language === 'kz' ? '-- Қаланы таңдаңыз --' : language === 'tr' ? '-- Şehir seçiniz --' : '-- Выберите город --'}
+                    </option>
                     {ALL_CITIES_LIST.map((c) => {
                       const cityName = language === 'kz' ? c.kz : c.ru;
                       return (
@@ -570,17 +625,24 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <label className="text-xs font-semibold text-slate-500 flex items-center gap-1.5">
                   <Tag className="w-3.5 h-3.5 text-sky-600" />
                   <span>{t.fieldCategory}</span>
+                  <span className="text-rose-500 font-bold">*</span>
                 </label>
                 <div className="space-y-2">
                   <select
                     value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
+                    onChange={(e) => {
+                      setCategory(e.target.value);
+                      setFormError(null);
+                    }}
+                    className={`w-full h-11 px-3 bg-slate-50 border rounded-lg text-sm font-medium text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white ${
+                      !category ? 'border-amber-400 bg-amber-50/40' : 'border-slate-200'
+                    }`}
                   >
-                    <option value={category}>{category}</option>
+                    <option value="">
+                      {language === 'kz' ? '-- Санатты таңдаңыз --' : language === 'tr' ? '-- Kategori seçiniz --' : '-- Выберите категорию --'}
+                    </option>
                     {CATEGORIES_LIST.map((cat) => {
                       const catName = language === 'tr' ? (cat.tr || cat.ru) : language === 'kz' ? cat.kz : cat.ru;
-                      if (catName === category) return null;
                       return (
                         <option key={cat.id} value={catName}>
                           {catName}

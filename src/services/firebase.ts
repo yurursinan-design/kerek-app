@@ -16,30 +16,77 @@ const getEnvVar = (viteVal: string | undefined, nodeVal: string | undefined): st
   return undefined;
 };
 
+// Read fallback configuration from root firebase-applet-config.json if present
+let fileConfig: Record<string, any> = {};
+try {
+  const configs = import.meta.glob(
+    ['/firebase-applet-config.json', '../*.json', '../../firebase-applet-config.json'],
+    { eager: true }
+  ) as Record<string, any>;
+  for (const [key, value] of Object.entries(configs)) {
+    if (key.endsWith('firebase-applet-config.json') && value) {
+      fileConfig = ((value as any).default || value) as Record<string, any>;
+      break;
+    }
+  }
+} catch {
+  fileConfig = {};
+}
+const rootConfig = fileConfig.firebaseConfig || fileConfig;
+
+const getEnvOrFile = (envVal: string | undefined, fieldKey: string): string | undefined => {
+  if (envVal && typeof envVal === 'string' && envVal.trim().length > 0) {
+    return envVal.trim();
+  }
+  const fileVal = rootConfig[fieldKey];
+  if (fileVal && typeof fileVal === 'string' && fileVal.trim().length > 0) {
+    return fileVal.trim();
+  }
+  return undefined;
+};
+
 const firebaseConfig = {
-  apiKey: getEnvVar(
-    typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_API_KEY : undefined,
-    typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_API_KEY : undefined
+  apiKey: getEnvOrFile(
+    getEnvVar(
+      typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_API_KEY : undefined,
+      typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_API_KEY : undefined
+    ),
+    'apiKey'
   ),
-  authDomain: getEnvVar(
-    typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_AUTH_DOMAIN : undefined,
-    typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_AUTH_DOMAIN : undefined
+  authDomain: getEnvOrFile(
+    getEnvVar(
+      typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_AUTH_DOMAIN : undefined,
+      typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_AUTH_DOMAIN : undefined
+    ),
+    'authDomain'
   ),
-  projectId: getEnvVar(
-    typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_PROJECT_ID : undefined,
-    typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_PROJECT_ID : undefined
+  projectId: getEnvOrFile(
+    getEnvVar(
+      typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_PROJECT_ID : undefined,
+      typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_PROJECT_ID : undefined
+    ),
+    'projectId'
   ),
-  storageBucket: getEnvVar(
-    typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_STORAGE_BUCKET : undefined,
-    typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_STORAGE_BUCKET : undefined
+  storageBucket: getEnvOrFile(
+    getEnvVar(
+      typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_STORAGE_BUCKET : undefined,
+      typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_STORAGE_BUCKET : undefined
+    ),
+    'storageBucket'
   ),
-  messagingSenderId: getEnvVar(
-    typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_MESSAGING_SENDER_ID : undefined,
-    typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_MESSAGING_SENDER_ID : undefined
+  messagingSenderId: getEnvOrFile(
+    getEnvVar(
+      typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_MESSAGING_SENDER_ID : undefined,
+      typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_MESSAGING_SENDER_ID : undefined
+    ),
+    'messagingSenderId'
   ),
-  appId: getEnvVar(
-    typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_APP_ID : undefined,
-    typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_APP_ID : undefined
+  appId: getEnvOrFile(
+    getEnvVar(
+      typeof import.meta !== 'undefined' ? import.meta.env?.VITE_FIREBASE_APP_ID : undefined,
+      typeof process !== 'undefined' ? process.env?.VITE_FIREBASE_APP_ID : undefined
+    ),
+    'appId'
   ),
 };
 

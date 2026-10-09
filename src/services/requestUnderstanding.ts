@@ -734,15 +734,20 @@ export function understandingToExtractedNeed(
       ? 'low'
       : 'normal';
 
-  const defaultCity = lang === 'kz' ? 'Қызылорда' : 'Кызылорда';
-  const defaultCategory =
-    lang === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники';
+  const rawCatId = understanding.categoryId ? normalizeCategoryId(understanding.categoryId) : '';
+  const isUncertainCategory = !rawCatId || rawCatId === 'other';
+  const categoryId = isUncertainCategory ? '' : rawCatId;
+  const category = isUncertainCategory ? '' : (understanding.category || getCategoryDisplayName(categoryId, lang));
+
+  const rawCityId = understanding.cityId ? normalizeCityId(understanding.cityId) : '';
+  const cityId = rawCityId || '';
+  const city = understanding.city || (cityId ? getCityDisplayName(cityId, lang) : '');
 
   return {
-    city: understanding.city || defaultCity,
-    cityId: understanding.cityId || 'kyzylorda',
-    category: understanding.category || defaultCategory,
-    categoryId: normalizeCategoryId(understanding.categoryId) || 'appliances',
+    city,
+    cityId,
+    category,
+    categoryId,
     service: understanding.service || originalQuery || 'Қызмет',
     date: understanding.preferredDate || (lang === 'kz' ? 'Бүгін' : 'Сегодня'),
     budget: lang === 'kz' ? 'Келісімді' : 'Договорная',

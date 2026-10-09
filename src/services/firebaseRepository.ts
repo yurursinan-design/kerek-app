@@ -390,9 +390,11 @@ export class FirebaseRepository implements Repository {
     const nowTimestamp = Date.now().toString().slice(-6);
     const id = requestData.id || `REQ-${nowTimestamp}`;
 
-    const city = requestData.city?.trim() || 'Қызылорда';
-    const cityId = normalizeCityId(requestData.cityId || city) || requestData.cityId || 'kyzylorda';
-    const category = requestData.category?.trim() || 'Тұрмыстық техника жөндеу';
+    const rawCity = requestData.city?.trim() || '';
+    const city = rawCity.slice(0, 50);
+    const cityId = normalizeCityId(requestData.cityId || city) || '';
+    const rawCategory = requestData.category?.trim() || '';
+    const category = rawCategory.slice(0, 100);
     const categoryId = normalizeCategoryId(requestData.categoryId || category);
 
     const firestoreStatus =
@@ -401,7 +403,11 @@ export class FirebaseRepository implements Repository {
         : requestData.status;
 
     const reqText = (requestData.requestText || requestData.description || requestData.service || '').trim();
-    const service = (requestData.service || reqText || category).trim();
+    let rawService = (requestData.service || reqText || category).trim();
+    if (rawService.length > 150) {
+      rawService = rawService.slice(0, 147) + '...';
+    }
+    const service = rawService.slice(0, 150);
     const newRequest: ServiceRequest = {
       id,
       customerId,
@@ -743,7 +749,9 @@ export class FirebaseRepository implements Repository {
         );
       }
       if (targetCatId) {
-        requests = requests.filter((r) => isCategoryMatch(r.categoryId, targetCatId));
+        requests = requests.filter(
+          (r) => r.categoryId === 'other' || isCategoryMatch(r.categoryId, targetCatId)
+        );
       }
 
       // PRIVACY ENFORCEMENT:
@@ -779,6 +787,194 @@ export class FirebaseRepository implements Repository {
         throw new Error(`FirestorePermissionDenied: ${msg}`);
       }
       handleFirestoreError(err, OperationType.LIST, 'requests');
+    }
+  }
+
+  subscribeToRequests(
+    filter: RequestFilter,
+    onData: (requests: ServiceRequest[]) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    if (!db) {
+      return () => {};
+    }
+
+    try {
+      const requestsColl = collection(db, 'requests');
+      const targetCityId = filter?.cityId
+        ? normalizeCityId(filter.cityId) || filter.cityId
+        : filter?.city
+        ? normalizeCityId(filter.city)
+        : undefined;
+      const targetCatId = filter?.categoryId
+        ? normalizeCategoryId(filter.categoryId)
+        : filter?.category
+        ? normalizeCategoryId(filter.category)
+        : undefined;
+
+      const formatAndFilter = (allDocs: Map<string, ServiceRequest>) => {
+        let items: ServiceRequest[] = Array.from(allDocs.values()).map((r) => {
+          const cleanSelectedOfferId =
+            typeof r.selectedOfferId === 'string' && r.selectedOfferId.trim()
+              ? r.selectedOfferId.trim()
+              : undefined;
+          return {
+            ...r,
+            status: normalizeRequestStatus(r.status),
+            selectedOfferId: cleanSelectedOfferId,
+            cityId: normalizeCityId(r.cityId || r.city) || r.cityId,
+            categoryId: normalizeCategoryId(r.categoryId || r.category),
+          };
+        });
+
+        if (targetCityId) {
+          items = items.filter(
+            (r) => (normalizeCityId(r.cityId || r.city) || r.cityId) === targetCityId
+          );
+        }
+        if (targetCatId) {
+          items = items.filter(
+            (r) => r.categoryId === 'other' || isCategoryMatch(r.categoryId, targetCatId)
+          );
+        }
+
+        // Privacy redaction if not customer query
+        if (!filter?.customerId) {
+          items = items.map((r) => {
+            if (
+              r.status !== 'ACCEPTED' &&
+              r.status !== 'PROVIDER_SELECTED' &&
+              r.status !== 'IN_PROGRESS' &&
+              r.status !== 'COMPLETED'
+            ) {
+              const { customerPhone: _, ...safeReq } = r;
+              return safeReq as ServiceRequest;
+            }
+            return r;
+          });
+        }
+
+        items.sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+        return items;
+      };
+
+      const primaryMap = new Map<string, ServiceRequest>();
+      const legacyMap = new Map<string, ServiceRequest>();
+      const otherMap = new Map<string, ServiceRequest>();
+
+      const emitCombined = () => {
+        const combined = new Map<string, ServiceRequest>();
+        primaryMap.forEach((v, k) => combined.set(k, v));
+        legacyMap.forEach((v, k) => {
+          if (!combined.has(k)) combined.set(k, v);
+        });
+        otherMap.forEach((v, k) => {
+          if (!combined.has(k)) combined.set(k, v);
+        });
+        onData(formatAndFilter(combined));
+      };
+
+      let qPrimary;
+      if (filter?.customerId) {
+        const effectiveCustomerId = auth?.currentUser?.uid || filter.customerId;
+        qPrimary = query(requestsColl, where('customerId', '==', effectiveCustomerId));
+      } else if (targetCityId && targetCatId) {
+        qPrimary = query(
+          requestsColl,
+          where('cityId', '==', targetCityId),
+          where('categoryId', '==', targetCatId)
+        );
+      } else if (targetCityId) {
+        qPrimary = query(requestsColl, where('cityId', '==', targetCityId));
+      } else if (targetCatId) {
+        qPrimary = query(requestsColl, where('categoryId', '==', targetCatId));
+      } else {
+        qPrimary = query(requestsColl);
+      }
+
+      const unsubPrimary = onSnapshot(
+        qPrimary,
+        (snap) => {
+          primaryMap.clear();
+          snap.forEach((d) => {
+            primaryMap.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
+          });
+          emitCombined();
+        },
+        (err) => {
+          console.warn('[FirebaseRepository] subscribeToRequests error:', err?.message || err);
+          if (onError) onError(err);
+        }
+      );
+
+      let unsubLegacy: (() => void) | null = null;
+      if (targetCatId === 'appliances' && targetCityId) {
+        try {
+          const qLegacy = query(
+            requestsColl,
+            where('cityId', '==', targetCityId),
+            where('categoryId', '==', 'appliance_repair')
+          );
+          unsubLegacy = onSnapshot(
+            qLegacy,
+            (snap) => {
+              legacyMap.clear();
+              snap.forEach((d) => {
+                legacyMap.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
+              });
+              emitCombined();
+            },
+            (err) => {
+              console.warn('[FirebaseRepository] subscribeToRequests legacy note:', err?.message || err);
+            }
+          );
+        } catch {}
+      }
+
+      let unsubOther: (() => void) | null = null;
+      if (targetCityId && targetCatId && targetCatId !== 'other') {
+        try {
+          const qOther = query(
+            requestsColl,
+            where('cityId', '==', targetCityId),
+            where('categoryId', '==', 'other')
+          );
+          unsubOther = onSnapshot(
+            qOther,
+            (snap) => {
+              otherMap.clear();
+              snap.forEach((d) => {
+                otherMap.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
+              });
+              emitCombined();
+            },
+            (err) => {
+              console.warn('[FirebaseRepository] subscribeToRequests other note:', err?.message || err);
+            }
+          );
+        } catch {}
+      }
+
+      return () => {
+        try {
+          unsubPrimary();
+        } catch {}
+        if (unsubLegacy) {
+          try {
+            unsubLegacy();
+          } catch {}
+        }
+        if (unsubOther) {
+          try {
+            unsubOther();
+          } catch {}
+        }
+      };
+    } catch (err) {
+      if (onError) onError(err);
+      return () => {};
     }
   }
 
@@ -1067,8 +1263,8 @@ export class FirebaseRepository implements Repository {
     const apptRef = doc(firestore, 'appointments', apptId);
 
     try {
-      let resultReq: ServiceRequest | null = null;
-      let resultOffer: ProviderOffer | null = null;
+      let resultReq: any = null;
+      let resultOffer: any = null;
 
       await runTransaction(firestore, async (transaction) => {
         // READ PHASE
@@ -1083,9 +1279,6 @@ export class FirebaseRepository implements Repository {
           throw new Error(`Offer not found: ${cleanOfferId}`);
         }
         const offerData = offerSnap.data() as ProviderOffer;
-
-        const convSnap = await transaction.get(convRef);
-        const apptSnap = await transaction.get(apptRef);
 
         const siblingSnaps = await Promise.all(
           siblingItems.map(async (item) => {
@@ -1164,65 +1357,6 @@ export class FirebaseRepository implements Repository {
           }
         }
 
-        // 4. Conversation: conv_{requestId}
-        const effectiveProviderId = offerData.providerId;
-        const effectiveProviderUserId = offerData.providerUserId || offerData.providerId;
-        const effectiveProviderName = offerData.providerName || 'Мастер';
-
-        if (!convSnap.exists()) {
-          const newConv: Conversation = {
-            id: convId,
-            requestId: cleanReqId,
-            customerId: reqData.customerId,
-            customerName: reqData.customerName || 'Клиент',
-            providerId: effectiveProviderId,
-            providerUserId: effectiveProviderUserId,
-            providerName: effectiveProviderName,
-            status: 'ACTIVE',
-            lastMessageText: '',
-            lastMessageSenderId: '',
-            lastMessageAt: now,
-            unreadCountCustomer: 0,
-            unreadCountProvider: 0,
-            createdAt: now,
-            updatedAt: now,
-          };
-          transaction.set(convRef, sanitizeForFirestore(newConv));
-        } else {
-          transaction.update(convRef, sanitizeForFirestore({
-            status: 'ACTIVE',
-            providerId: effectiveProviderId,
-            providerUserId: effectiveProviderUserId,
-            providerName: effectiveProviderName,
-            updatedAt: now,
-          }));
-        }
-
-        // 5. Appointment: appointment_{requestId}
-        if (!apptSnap.exists()) {
-          const newAppt: Appointment = {
-            id: apptId,
-            requestId: cleanReqId,
-            customerId: reqData.customerId,
-            providerId: effectiveProviderId,
-            providerUserId: effectiveProviderUserId,
-            proposedBy: 'provider',
-            scheduledAt: offerData.availability || now,
-            status: 'PROPOSED',
-            workStatus: 'NOT_STARTED',
-            workStatusUpdatedAt: now,
-            createdAt: now,
-            updatedAt: now,
-          };
-          transaction.set(apptRef, sanitizeForFirestore(newAppt));
-        } else {
-          transaction.update(apptRef, sanitizeForFirestore({
-            providerId: effectiveProviderId,
-            providerUserId: effectiveProviderUserId,
-            updatedAt: now,
-          }));
-        }
-
         resultReq = {
           ...reqData,
           id: cleanReqId,
@@ -1235,6 +1369,66 @@ export class FirebaseRepository implements Repository {
           status: 'ACCEPTED',
         };
       });
+
+      // Post-transaction: Initialize conversation and appointment now that request is committed as PROVIDER_SELECTED
+      if (resultReq && resultOffer) {
+        try {
+          const effectiveProviderId = resultOffer.providerId;
+          const effectiveProviderUserId = resultOffer.providerUserId || resultOffer.providerId;
+          const effectiveProviderName = resultOffer.providerName || 'Мастер';
+
+          const apptNote = resultOffer.availability
+            ? String(resultOffer.availability).trim().slice(0, 1000)
+            : undefined;
+
+          const now = new Date().toISOString();
+
+          await Promise.all([
+            setDoc(
+              convRef,
+              sanitizeForFirestore({
+                id: convId,
+                requestId: cleanReqId,
+                customerId: resultReq.customerId,
+                customerName: resultReq.customerName || 'Клиент',
+                providerId: effectiveProviderId,
+                providerUserId: effectiveProviderUserId,
+                providerName: effectiveProviderName,
+                status: 'ACTIVE',
+                lastMessageText: '',
+                lastMessageSenderId: '',
+                lastMessageAt: now,
+                unreadCountCustomer: 0,
+                unreadCountProvider: 0,
+                createdAt: now,
+                updatedAt: now,
+              }),
+              { merge: true }
+            ),
+            setDoc(
+              apptRef,
+              sanitizeForFirestore({
+                id: apptId,
+                requestId: cleanReqId,
+                customerId: resultReq.customerId,
+                providerId: effectiveProviderId,
+                providerUserId: effectiveProviderUserId,
+                proposedBy: 'provider',
+                scheduledAt: now,
+                status: 'PROPOSED',
+                ...(apptNote ? { note: apptNote } : {}),
+                workStatus: 'NOT_STARTED',
+                workStatusUpdatedAt: now,
+                createdAt: now,
+                updatedAt: now,
+              }),
+              { merge: true }
+            ),
+          ]);
+        } catch (postInitErr) {
+          console.warn('[FirebaseRepository] Note initializing conversation/appointment:', postInitErr);
+        }
+      }
 
       // Post-transaction Notification (outside transaction)
       if (resultReq && resultOffer) {
@@ -1254,6 +1448,7 @@ export class FirebaseRepository implements Repository {
       ) {
         throw err;
       }
+      console.error('[FirebaseRepository] RAW acceptOffer ERROR details:', err);
       handleFirestoreError(err, OperationType.UPDATE, `requests/${cleanReqId}/acceptOffer`);
     }
   }

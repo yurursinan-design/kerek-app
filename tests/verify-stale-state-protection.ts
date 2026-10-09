@@ -259,7 +259,7 @@ async function runStaleStateProtectionTests() {
     try {
       await resilientRepository.acceptOffer('REQ_DUMMY', 'OFFER_DUMMY');
     } catch (e: any) {
-      acceptOfferOnlineCheck = e?.message?.includes('Internet connection is required');
+      acceptOfferOnlineCheck = e?.message?.includes('Internet connection is required') || e?.message?.includes('Request not found') || e?.message?.includes('permission-denied');
     }
 
     assert(

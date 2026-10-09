@@ -165,8 +165,7 @@ export class ResilientRepository implements Repository {
 
   // =================== Requests ===================
   async createRequest(requestData: Partial<ServiceRequest>): Promise<ServiceRequest> {
-    const currentUid = auth?.currentUser?.uid || getCurrentUserId();
-    if (this.firebaseRepo.isAvailable()) {
+    if (isFirebaseConfigured()) {
       try {
         const cloudReq = await this.firebaseRepo.createRequest(requestData);
         try {
@@ -176,23 +175,12 @@ export class ResilientRepository implements Repository {
         }
         return cloudReq;
       } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.includes('Duplicate') ||
-          err?.message?.startsWith('Unauthorized:')
-        ) {
-          throw err;
-        }
-        console.warn(
-          `[KEREK Firebase Fallback] Operation "createRequest" on Cloud Firestore fell back to LocalRepository:`,
-          err?.message || err
-        );
-        logTechnicalError(`ResilientRepository.createRequest (Firebase fallback to Local)`, err?.message || err);
-        const localReq = await this.localRepo.createRequest(requestData);
-        offlineQueueService.enqueueMutation('createRequest', requestData, currentUid);
-        return localReq;
+        logTechnicalError('ResilientRepository.createRequest (Cloud Error)', err?.message || err);
+        throw err;
       }
     }
+
+    const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     const localReq = await this.localRepo.createRequest(requestData);
     offlineQueueService.enqueueMutation('createRequest', requestData, currentUid);
     return localReq;
@@ -295,6 +283,17 @@ export class ResilientRepository implements Repository {
     return await this.localRepo.getRequests(filter);
   }
 
+  subscribeToRequests(
+    filter: RequestFilter,
+    onData: (requests: ServiceRequest[]) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    if (isFirebaseConfigured() && this.firebaseRepo.isAvailable()) {
+      return this.firebaseRepo.subscribeToRequests(filter, onData, onError);
+    }
+    return this.localRepo.subscribeToRequests(filter, onData, onError);
+  }
+
   async updateRequest(
     requestId: string,
     updates: Partial<ServiceRequest>
@@ -362,8 +361,7 @@ export class ResilientRepository implements Repository {
 
   // =================== Offers ===================
   async createOffer(offerData: Partial<ProviderOffer>): Promise<ProviderOffer> {
-    const currentUid = auth?.currentUser?.uid || getCurrentUserId();
-    if (this.firebaseRepo.isAvailable()) {
+    if (isFirebaseConfigured()) {
       try {
         const cloudOffer = await this.firebaseRepo.createOffer(offerData);
         try {
@@ -373,28 +371,12 @@ export class ResilientRepository implements Repository {
         }
         return cloudOffer;
       } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.includes('Duplicate') ||
-          err?.message?.startsWith('Unauthorized:')
-        ) {
-          throw err;
-        }
-        console.warn(
-          `[KEREK Firebase Fallback] Operation "createOffer" on Cloud Firestore fell back to LocalRepository:`,
-          err?.message || err
-        );
-        logTechnicalError(`ResilientRepository.createOffer (Firebase fallback to Local)`, err?.message || err);
-        const localOffer = await this.localRepo.createOffer(offerData);
-        offlineQueueService.enqueueMutation('createOffer', offerData, currentUid);
-        if (localOffer.requestId) {
-          this.getRequest(localOffer.requestId).then((req) => {
-            if (req) notificationService.notifyNewOffer(req, localOffer).catch(() => {});
-          }).catch(() => {});
-        }
-        return localOffer;
+        logTechnicalError('ResilientRepository.createOffer (Cloud Error)', err?.message || err);
+        throw err;
       }
     }
+
+    const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     const localOffer = await this.localRepo.createOffer(offerData);
     offlineQueueService.enqueueMutation('createOffer', offerData, currentUid);
     if (localOffer.requestId) {
@@ -468,7 +450,7 @@ export class ResilientRepository implements Repository {
     requestId: string,
     offerId: string
   ): Promise<{ request: ServiceRequest | null; offer: ProviderOffer | null }> {
-    if (this.firebaseRepo.isAvailable()) {
+    if (isFirebaseConfigured()) {
       try {
         const result = await this.firebaseRepo.acceptOffer(requestId, offerId);
         if (result && result.request) {
@@ -483,20 +465,12 @@ export class ResilientRepository implements Repository {
         }
         return result;
       } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.startsWith('Unauthorized:') ||
-          err?.message?.includes('Request has already been accepted') ||
-          err?.message?.includes('no longer pending')
-        ) {
-          throw err;
-        }
-        console.warn('[ResilientRepository] acceptOffer cloud execution failed:', err?.message || err);
-        throw new Error('Internet connection is required to accept an offer.');
+        logTechnicalError('ResilientRepository.acceptOffer (Cloud Error)', err?.message || err);
+        throw err;
       }
     }
 
-    throw new Error('Internet connection is required to accept an offer.');
+    return await this.localRepo.acceptOffer(requestId, offerId);
   }
 
   // =================== Reviews ===================
@@ -940,11 +914,14 @@ export class ResilientRepository implements Repository {
 
   // =================== Appointments ===================
   async getAppointment(requestId: string): Promise<Appointment | null> {
-    return this.executeWithFallback(
-      'getAppointment',
-      () => this.firebaseRepo.getAppointment(requestId),
-      () => this.localRepo.getAppointment(requestId)
-    );
+    let cloudAppt: Appointment | null = null;
+    if (this.firebaseRepo.isAvailable()) {
+      try {
+        cloudAppt = await this.firebaseRepo.getAppointment(requestId);
+      } catch {}
+    }
+    const localAppt = await this.localRepo.getAppointment(requestId);
+    return cloudAppt || localAppt;
   }
 
   async createAppointment(

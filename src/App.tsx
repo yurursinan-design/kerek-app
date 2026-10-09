@@ -30,6 +30,7 @@ import {
   analyzeRequestUnderstanding,
   understandingToExtractedNeed,
   RequestUnderstandingContext,
+  offlineQueueService,
 } from './services';
 import {
   normalizeCategoryId,
@@ -48,6 +49,18 @@ export default function App() {
   const [customerRequests, setCustomerRequests] = useState<ServiceRequest[]>([]);
   const [hasProviderProfile, setHasProviderProfile] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
+  const [hasFatalFailedMutations, setHasFatalFailedMutations] = useState(false);
+
+  // Monitor offline queue for fatal failed requests
+  useEffect(() => {
+    const unsubscribe = offlineQueueService.subscribeToQueueChange((queue) => {
+      const hasFatal = queue.some(
+        (m) => m.status === 'FAILED_FATAL' || m.status === 'FAILED_PERMANENT'
+      );
+      setHasFatalFailedMutations(hasFatal);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // In-App Notifications State
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -394,6 +407,13 @@ export default function App() {
     <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-start sm:py-4">
       {/* Mobile Shell Container */}
       <div className="w-full max-w-md bg-white sm:rounded-3xl sm:shadow-xl sm:border sm:border-slate-200/80 min-h-screen sm:min-h-[780px] flex flex-col justify-between overflow-hidden relative">
+        {/* Unconfigured Firebase Local Mode Banner */}
+        {!isFirebaseConfigured() && (
+          <div className="sticky top-0 z-50 w-full bg-amber-500 text-slate-950 font-bold text-xs py-1.5 px-4 text-center shadow-xs">
+            Yerel mod: veriler sadece bu cihazda
+          </div>
+        )}
+
         {/* Top Header */}
         <Header
           currentScreen={activeTab !== 'home' ? 'results' : currentScreen}
@@ -415,6 +435,22 @@ export default function App() {
           onClick={handleNotificationClick}
           onDismiss={() => setActiveToastNotification(null)}
         />
+
+        {/* Fatal Offline Mutation Warning */}
+        {hasFatalFailedMutations && (
+          <div className="mx-4 mt-3 p-3 bg-rose-50 border border-rose-300 rounded-2xl flex items-center justify-between text-xs text-rose-900 animate-fadeIn">
+            <span className="font-semibold">⚠️ Talep gönderilemedi, tekrar dene</span>
+            <button
+              type="button"
+              onClick={() => {
+                offlineQueueService.processQueue().catch(() => {});
+              }}
+              className="ml-2 px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-medium text-[11px] transition-colors"
+            >
+              {language === 'kz' ? 'Қайта көру' : language === 'tr' ? 'Tekrar dene' : 'Повторить'}
+            </button>
+          </div>
+        )}
 
         {/* Global Error Banner if repository operation fails */}
         {appError && (

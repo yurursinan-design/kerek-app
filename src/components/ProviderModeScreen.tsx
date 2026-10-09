@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   formatDynamicBudget,
   formatDynamicDate,
@@ -137,6 +137,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [debugError, setDebugError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string>('');
+  const requestsUnsubscribeRef = useRef<(() => void) | null>(null);
 
   const handlePriceAmountChange = (val: string) => {
     const digitsOnly = val.replace(/[^\d]/g, '');
@@ -182,23 +183,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
           setDescription(myProv.description);
         }
 
-        // REQUEST SECURITY: Provider should only see requests matching their provider profile!
-        // City and category match (canonical cityId & categoryId bridge languages)
-        let matchingRequests: ServiceRequest[] = [];
-        try {
-          matchingRequests = await repository.getRequests({
-            city: myProv.city,
-            cityId: myProv.cityId ? (normalizeCityId(myProv.cityId) || myProv.cityId) : normalizeCityId(myProv.city),
-            category: myProv.category,
-            categoryId: myProv.categoryId ? normalizeCategoryId(myProv.categoryId) : normalizeCategoryId(myProv.category),
-          });
-          setDebugError(null);
-          setDebugInfo('✅ ' + matchingRequests.length + ' talep bulundu');
-        } catch (err: any) {
-          const errMsg = 'FIRESTORE HATA: ' + (err?.code || '') + ' - ' + (err?.message || String(err));
-          setDebugError(errMsg);
-        }
-
         // Load existing offers sent by this provider
         const myOffers = await repository.getOffers({
           providerId: myProv.id,
@@ -209,49 +193,79 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
           offersMap[o.requestId] = o;
         });
 
-        // Ensure all requests that this provider has submitted offers for are included!
-        const offeredReqIds = Object.keys(offersMap);
-        const existingReqIds = new Set(matchingRequests.map((r) => r.id));
-        const missingReqPromises = offeredReqIds
-          .filter((id) => !existingReqIds.has(id))
-          .map(async (id) => {
-            const fetched = await repository.getRequest(id);
-            if (fetched) return fetched;
-            // Fallback shell from existing offer if getRequest returns null (e.g. permission-denied fallback)
-            const off = offersMap[id];
-            if (off) {
-              const fallbackReq: ServiceRequest = {
-                id,
-                customerId: '',
-                customerName: language === 'kz' ? 'Клиент' : 'Клиент',
-                requestText: off.message || (language === 'kz' ? 'Өтініш' : 'Заявка клиента'),
-                service: language === 'kz' ? 'Тапсырыс' : 'Услуга',
-                city: myProv.city,
-                cityId: myProv.cityId,
-                category: myProv.category,
-                categoryId: myProv.categoryId,
-                date: language === 'kz' ? 'Бүгін' : 'Сегодня',
-                budget: off.price,
-                urgency: 'normal',
-                status: off.status === 'ACCEPTED' ? 'PROVIDER_SELECTED' : 'OPEN',
-                createdAt: off.createdAt || new Date().toISOString(),
-                selectedOfferId: off.status === 'ACCEPTED' ? off.id : undefined,
-              };
-              return fallbackReq;
-            }
-            return null;
-          });
-
-        const missingReqs = (await Promise.all(missingReqPromises)).filter(
-          (r): r is ServiceRequest => r !== null
-        );
-
-        const combinedRequests = [...matchingRequests, ...missingReqs];
-
         if (isMounted) {
-          setRequests(combinedRequests);
           setSentOffersMap(offersMap);
         }
+
+        // Clean up previous subscription if any
+        if (requestsUnsubscribeRef.current) {
+          requestsUnsubscribeRef.current();
+          requestsUnsubscribeRef.current = null;
+        }
+
+        const filter = {
+          city: myProv.city,
+          cityId: myProv.cityId ? (normalizeCityId(myProv.cityId) || myProv.cityId) : normalizeCityId(myProv.city),
+          category: myProv.category,
+          categoryId: myProv.categoryId ? normalizeCategoryId(myProv.categoryId) : normalizeCategoryId(myProv.category),
+        };
+
+        const unsub = repository.subscribeToRequests(
+          filter,
+          async (matchingRequests) => {
+            if (!isMounted) return;
+            setDebugError(null);
+            setDebugInfo('✅ ' + matchingRequests.length + ' talep bulundu');
+
+            // Ensure all requests that this provider has submitted offers for are included!
+            const offeredReqIds = Object.keys(offersMap);
+            const existingReqIds = new Set(matchingRequests.map((r) => r.id));
+            const missingReqPromises = offeredReqIds
+              .filter((id) => !existingReqIds.has(id))
+              .map(async (id) => {
+                const fetched = await repository.getRequest(id);
+                if (fetched) return fetched;
+                const off = offersMap[id];
+                if (off) {
+                  const fallbackReq: ServiceRequest = {
+                    id,
+                    customerId: '',
+                    customerName: language === 'kz' ? 'Клиент' : 'Клиент',
+                    requestText: off.message || (language === 'kz' ? 'Өтініш' : 'Заявка клиента'),
+                    service: language === 'kz' ? 'Тапсырыс' : 'Услуга',
+                    city: myProv.city,
+                    cityId: myProv.cityId,
+                    category: myProv.category,
+                    categoryId: myProv.categoryId,
+                    date: language === 'kz' ? 'Бүгін' : 'Сегодня',
+                    budget: off.price,
+                    urgency: 'normal',
+                    status: off.status === 'ACCEPTED' ? 'PROVIDER_SELECTED' : 'OPEN',
+                    createdAt: off.createdAt || new Date().toISOString(),
+                    selectedOfferId: off.status === 'ACCEPTED' ? off.id : undefined,
+                  };
+                  return fallbackReq;
+                }
+                return null;
+              });
+
+            const missingReqs = (await Promise.all(missingReqPromises)).filter(
+              (r): r is ServiceRequest => r !== null
+            );
+
+            const combinedRequests = [...matchingRequests, ...missingReqs];
+            if (isMounted) {
+              setRequests(combinedRequests);
+            }
+          },
+          (err: any) => {
+            if (!isMounted) return;
+            const errMsg = 'FIRESTORE HATA: ' + (err?.code || '') + ' - ' + (err?.message || String(err));
+            setDebugError(errMsg);
+          }
+        );
+
+        requestsUnsubscribeRef.current = unsub;
 
         try {
           const revs = await repository.getReviews({ providerId: myProv.id });
@@ -268,6 +282,10 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
 
     return () => {
       isMounted = false;
+      if (requestsUnsubscribeRef.current) {
+        requestsUnsubscribeRef.current();
+        requestsUnsubscribeRef.current = null;
+      }
     };
   }, []);
 
@@ -321,22 +339,31 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         onProfileCreated();
       }
 
-      // Refresh matching requests for this updated profile, preserving any previously offered requests
-      const matchingRequests = await repository.getRequests({
+      // Refresh matching requests subscription for this updated profile
+      if (requestsUnsubscribeRef.current) {
+        requestsUnsubscribeRef.current();
+        requestsUnsubscribeRef.current = null;
+      }
+      const newFilter = {
         city: savedProvider.city,
         cityId: savedProvider.cityId ? (normalizeCityId(savedProvider.cityId) || savedProvider.cityId) : cId,
         category: savedProvider.category,
         categoryId: savedProvider.categoryId ? normalizeCategoryId(savedProvider.categoryId) : catId,
-      });
-      setRequests((prev) => {
-        const existingOffered = prev.filter((r) => sentOffersMap[r.id]);
-        const map = new Map<string, ServiceRequest>();
-        matchingRequests.forEach((r) => map.set(r.id, r));
-        existingOffered.forEach((r) => {
-          if (!map.has(r.id)) map.set(r.id, r);
-        });
-        return Array.from(map.values());
-      });
+      };
+      requestsUnsubscribeRef.current = repository.subscribeToRequests(
+        newFilter,
+        (matchingRequests) => {
+          setRequests((prev) => {
+            const existingOffered = prev.filter((r) => sentOffersMap[r.id]);
+            const map = new Map<string, ServiceRequest>();
+            matchingRequests.forEach((r) => map.set(r.id, r));
+            existingOffered.forEach((r) => {
+              if (!map.has(r.id)) map.set(r.id, r);
+            });
+            return Array.from(map.values());
+          });
+        }
+      );
     } catch (err) {
       setErrorMessage(getFriendlyErrorMessage(err, language));
       setTimeout(() => setErrorMessage(null), 4000);
@@ -533,7 +560,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         });
         return false;
       }
-      if (rCatId !== pCatId && !isCategoryMatch(rCatId, pCatId)) {
+      const isCatMatched = rCatId === 'other' || rCatId === pCatId || isCategoryMatch(rCatId, pCatId);
+      if (!isCatMatched) {
         console.log(`[visibleRequests] ❌ ${r.id} elendi | Sebep: kategori uyuşmazlığı`, {
           '1. id': r.id,
           '2. talep': { cityId: rCityId, categoryId: rCatId },
