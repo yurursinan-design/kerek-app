@@ -306,10 +306,10 @@ export const translations = {
     understandingSummaryTitle: 'Өтінішіңізді келесідей түсіндік:',
 
     // Escrow & Payments
-    escrowPending: 'Төлем күтілуде',
-    escrowHeld: 'Қаражат қорғалған',
-    escrowReleased: 'Төлем аударылды',
-    kaspiEscrowBadge: 'Kaspi қауіпсіз төлемі',
+    escrowPending: 'Келісім күтілуде',
+    escrowHeld: 'Тапсырыс расталды',
+    escrowReleased: 'Жұмыс аяқталды',
+    kaspiEscrowBadge: 'KEREK қауіпсіз мәмілесі',
 
     // General
     closeButton: 'Жабу',
@@ -621,10 +621,10 @@ export const translations = {
     understandingSummaryTitle: 'Мы поняли вашу заявку так:',
 
     // Escrow & Payments
-    escrowPending: 'Ожидается оплата',
-    escrowHeld: 'Средства защищены',
-    escrowReleased: 'Оплата переведена',
-    kaspiEscrowBadge: 'Безопасная сделка Kaspi',
+    escrowPending: 'Ожидается подтверждение',
+    escrowHeld: 'Заказ подтвержден',
+    escrowReleased: 'Работа завершена',
+    kaspiEscrowBadge: 'Безопасная сделка KEREK',
 
     // General
     closeButton: 'Понятно',
@@ -937,10 +937,10 @@ export const translations = {
     understandingSummaryTitle: 'Talebinizi aşağıdaki gibi anladık:',
 
     // Escrow & Payments
-    escrowPending: 'Ödeme Bekleniyor',
-    escrowHeld: 'Güvenli Havuzda',
-    escrowReleased: 'Ödeme Aktarıldı',
-    kaspiEscrowBadge: 'Kaspi Güvenli Ödeme',
+    escrowPending: 'Anlaşma Bekleniyor',
+    escrowHeld: 'Sipariş Onaylandı',
+    escrowReleased: 'İş Tamamlandı',
+    kaspiEscrowBadge: 'KEREK Güvenli İşlem',
 
     // General
     closeButton: 'Anladım',

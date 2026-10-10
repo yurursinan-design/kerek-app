@@ -1078,6 +1078,43 @@ export class ResilientRepository implements Repository {
     return appt;
   }
 
+  async confirmCustomerCompletion(
+    requestId: string,
+    appointmentId?: string
+  ): Promise<{ request: ServiceRequest; appointment?: Appointment }> {
+    const currentUid = auth?.currentUser?.uid || getCurrentUserId();
+    if (this.firebaseRepo.isAvailable()) {
+      try {
+        const result = await this.firebaseRepo.confirmCustomerCompletion(requestId, appointmentId);
+        try {
+          if (result.appointment) {
+            await this.localRepo.updateAppointment(result.appointment.id, result.appointment);
+          }
+          await this.localRepo.updateRequestStatus(requestId, 'COMPLETED');
+        } catch {}
+        return result;
+      } catch (err: any) {
+        if (
+          err?.message?.startsWith('Validation Error:') ||
+          err?.message?.startsWith('Unauthorized:')
+        ) {
+          throw err;
+        }
+        console.warn('[ResilientRepository] confirmCustomerCompletion cloud note, falling back to local:', err?.message || err);
+        const localResult = await this.localRepo.confirmCustomerCompletion(requestId, appointmentId);
+        if (appointmentId) {
+          offlineQueueService.enqueueMutation('completeAppointment', { appointmentId }, currentUid);
+        }
+        return localResult;
+      }
+    }
+    const localResult = await this.localRepo.confirmCustomerCompletion(requestId, appointmentId);
+    if (appointmentId) {
+      offlineQueueService.enqueueMutation('completeAppointment', { appointmentId }, currentUid);
+    }
+    return localResult;
+  }
+
   async updateWorkStatus(
     appointmentId: string,
     workStatus: WorkStatus,

@@ -19,7 +19,7 @@ async function runTest() {
   console.log('=== VERIFYING REQ-675871 IN PROVIDER MODE ===');
   localStorage.clear();
   await ensureFirebaseAuth();
-  const uid = auth.currentUser!.uid;
+  const uid = auth?.currentUser?.uid || 'anon-test-uid';
   const testReqId = 'REQ-675871-' + Date.now();
 
   // 1. Customer creates request

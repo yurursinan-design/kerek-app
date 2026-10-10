@@ -2224,9 +2224,8 @@ export class FirebaseRepository implements Repository {
 
   async getNotifications(userId: string, limitCount = 50): Promise<AppNotification[]> {
     if (!db) return [];
-    await ensureFirebaseAuth();
-
-    const cleanUid = (userId || '').trim();
+    const authUid = await ensureFirebaseAuth();
+    const cleanUid = (authUid || auth?.currentUser?.uid || userId || '').trim();
     if (!cleanUid) return [];
 
     try {
@@ -2268,9 +2267,8 @@ export class FirebaseRepository implements Repository {
 
   async markAllNotificationsAsRead(userId: string): Promise<void> {
     if (!db) return;
-    await ensureFirebaseAuth();
-
-    const cleanUid = (userId || '').trim();
+    const authUid = await ensureFirebaseAuth();
+    const cleanUid = (authUid || auth?.currentUser?.uid || userId || '').trim();
     if (!cleanUid) return;
 
     try {
@@ -2307,7 +2305,7 @@ export class FirebaseRepository implements Repository {
       return () => {};
     }
 
-    const cleanUid = (userId || '').trim();
+    const cleanUid = (auth?.currentUser?.uid || userId || '').trim();
     if (!cleanUid) {
       return () => {};
     }
@@ -2513,6 +2511,100 @@ export class FirebaseRepository implements Repository {
         ...existingAppt,
         ...apptUpdates,
       } as Appointment;
+    });
+  }
+
+  async confirmCustomerCompletion(
+    requestId: string,
+    appointmentId?: string
+  ): Promise<{ request: ServiceRequest; appointment?: Appointment }> {
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const cleanReqId = (requestId || '').trim();
+    if (!cleanReqId) {
+      throw new Error('Validation Error: requestId is required');
+    }
+    const currentUid = auth?.currentUser?.uid || getCurrentUserId();
+    if (!currentUid) {
+      throw new Error('Unauthorized: Authentication required');
+    }
+
+    return await runTransaction(firestore, async (transaction) => {
+      const reqRef = doc(firestore, 'requests', cleanReqId);
+      const reqSnap = await transaction.get(reqRef);
+      if (!reqSnap.exists()) {
+        throw new Error(`Request not found: ${cleanReqId}`);
+      }
+      const existingReq = reqSnap.data() as ServiceRequest;
+
+      // Verify customer authorization
+      if (existingReq.customerId !== currentUid) {
+        throw new Error('Unauthorized: Only the customer who created the request can confirm completion');
+      }
+
+      // Read appointment if specified or deterministic appointment ID
+      const cleanApptId = (appointmentId || '').trim();
+      const apptDocId = cleanApptId
+        ? (cleanApptId.startsWith('appointment_') ? cleanApptId : getAppointmentId(cleanApptId))
+        : getAppointmentId(cleanReqId);
+
+      const apptRef = doc(firestore, 'appointments', apptDocId);
+      const apptSnap = await transaction.get(apptRef);
+
+      let updatedAppt: Appointment | undefined = undefined;
+
+      if (apptSnap.exists()) {
+        const existingAppt = apptSnap.data() as Appointment;
+
+        // Strict verification: Appointment must belong to BOTH this customer AND this request
+        const isMatchingOwnerAndRequest =
+          existingAppt.customerId === currentUid && existingAppt.requestId === cleanReqId;
+
+        if (cleanApptId && !isMatchingOwnerAndRequest) {
+          throw new Error('Unauthorized: Appointment does not belong to this request or customer');
+        }
+
+        if (isMatchingOwnerAndRequest) {
+          // Appointment can ONLY transition to COMPLETED if it was in CONFIRMED or COMPLETED status.
+          // Unconfirmed appointments (PROPOSED, RESCHEDULED) cannot be marked COMPLETED per security rules.
+          if (existingAppt.status === 'CONFIRMED' || existingAppt.status === 'COMPLETED') {
+            const now = new Date().toISOString();
+            const apptUpdates: Partial<Appointment> = {
+              status: 'COMPLETED',
+              workStatus: 'WORK_COMPLETED',
+              workStatusUpdatedAt: now,
+              updatedAt: now,
+            };
+            transaction.update(apptRef, sanitizeForFirestore(apptUpdates));
+            updatedAppt = {
+              ...existingAppt,
+              ...apptUpdates,
+            };
+          } else {
+            // Unconfirmed proposal/reschedule remains unconfirmed - not falsely marked COMPLETED
+            updatedAppt = existingAppt;
+          }
+        }
+      } else if (cleanApptId && cleanApptId !== getAppointmentId(cleanReqId)) {
+        throw new Error(`Appointment not found: ${cleanApptId}`);
+      }
+
+      const now = new Date().toISOString();
+      if (existingReq.status !== 'COMPLETED') {
+        transaction.update(reqRef, {
+          status: 'COMPLETED',
+          updatedAt: now,
+        });
+      }
+
+      return {
+        request: {
+          ...existingReq,
+          status: 'COMPLETED',
+          updatedAt: now,
+        },
+        appointment: updatedAppt,
+      };
     });
   }
 

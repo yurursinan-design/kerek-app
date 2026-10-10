@@ -2,7 +2,7 @@ import { Repository } from './repository';
 import { resilientRepository, ResilientRepository } from './resilientRepository';
 import { firebaseRepository, FirebaseRepository } from './firebaseRepository';
 import { localRepository, getCurrentUserId, generateUUID } from './localRepository';
-import { isFirebaseConfigured, ensureFirebaseAuth, runFirebaseDiagnostics, getLatestDiagnosticReport } from './firebase';
+import { auth, isFirebaseConfigured, ensureFirebaseAuth, runFirebaseDiagnostics, getLatestDiagnosticReport } from './firebase';
 
 // Single data access layer for all UI components.
 // ResilientRepository automatically delegates to cloud when configured,
@@ -10,7 +10,7 @@ import { isFirebaseConfigured, ensureFirebaseAuth, runFirebaseDiagnostics, getLa
 export const repository: Repository = resilientRepository;
 
 // Export repositories
-export { localRepository, firebaseRepository, resilientRepository, isFirebaseConfigured, ensureFirebaseAuth, runFirebaseDiagnostics, getLatestDiagnosticReport };
+export { auth, localRepository, firebaseRepository, resilientRepository, isFirebaseConfigured, ensureFirebaseAuth, runFirebaseDiagnostics, getLatestDiagnosticReport };
 export type { ResilientRepository, FirebaseRepository };
 
 // User Identification

@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { repository } from '../services';
+import { auth } from '../services/firebase';
 
 interface NotificationBellProps {
   notifications: AppNotification[];
@@ -58,9 +59,10 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
   };
 
   const handleMarkAllRead = async () => {
-    if (!currentUserId) return;
+    const effectiveUid = auth?.currentUser?.uid || currentUserId;
+    if (!effectiveUid) return;
     try {
-      await repository.markAllNotificationsAsRead(currentUserId);
+      await repository.markAllNotificationsAsRead(effectiveUid);
     } catch (err) {
       console.warn('[NotificationBell] Mark all read error:', err);
     }

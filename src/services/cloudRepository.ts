@@ -265,6 +265,13 @@ export class CloudRepository implements Repository {
     throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
   }
 
+  async confirmCustomerCompletion(
+    _requestId: string,
+    _appointmentId?: string
+  ): Promise<{ request: ServiceRequest; appointment?: Appointment }> {
+    throw new Error('CloudRepository is not configured yet. Fallback to LocalRepository.');
+  }
+
   async updateWorkStatus(
     _appointmentId: string,
     _workStatus: WorkStatus,

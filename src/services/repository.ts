@@ -129,6 +129,10 @@ export interface Repository {
   confirmAppointment(appointmentId: string, confirmedByRole: 'customer' | 'provider'): Promise<Appointment>;
   rescheduleAppointment(appointmentId: string, scheduledAt: string, proposedBy: 'customer' | 'provider', note?: string): Promise<Appointment>;
   completeAppointment(appointmentId: string): Promise<Appointment>;
+  confirmCustomerCompletion(
+    requestId: string,
+    appointmentId?: string
+  ): Promise<{ request: ServiceRequest; appointment?: Appointment }>;
   updateWorkStatus(
     appointmentId: string,
     workStatus: WorkStatus,

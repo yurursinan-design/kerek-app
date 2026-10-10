@@ -896,16 +896,16 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                       <div className="pt-2 border-t border-slate-100">
                         {existingOffer ? (
                           <div className="space-y-2">
-                            {/* Kaspi Escrow Notification for Provider */}
+                            {/* Order Confirmation Notification for Provider */}
                             {(req.paymentStatus === 'held_in_escrow' || existingOffer.paymentStatus === 'held_in_escrow') && (
                               <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-900 shadow-2xs">
                                 <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
                                 <span>
                                   {language === 'kz'
-                                    ? 'Төлем Kaspi кепілдік қорында бұғатталды. Жұмысқа сенімді кірісе аласыз.'
+                                    ? 'Тапсырыс расталды. Жұмысқа сенімді кірісе аласыз.'
                                     : language === 'tr'
-                                    ? 'Ödeme Kaspi havuzunda kilitlendi. İşe güvenle başlayabilirsiniz.'
-                                    : 'Оплата заблокирована в резерве Kaspi. Можете смело приступать к работе.'}
+                                    ? 'Sipariş onaylandı. İşe güvenle başlayabilirsiniz.'
+                                    : 'Заказ подтвержден. Можете смело приступать к работе.'}
                                 </span>
                               </div>
                             )}

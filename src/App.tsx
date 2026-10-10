@@ -18,6 +18,7 @@ import { ProviderModeScreen } from './components/ProviderModeScreen';
 import { InAppToast } from './components/InAppToast';
 import { analyzeRequestLocally } from './services/analyzer';
 import {
+  auth,
   repository,
   getCurrentUserId,
   checkClientRateLimit,
@@ -424,7 +425,7 @@ export default function App() {
           onDataImported={refreshData}
           notifications={notifications}
           unreadCount={unreadCount}
-          currentUserId={getCurrentUserId()}
+          currentUserId={auth?.currentUser?.uid || getCurrentUserId()}
           onSelectNotification={handleNotificationClick}
         />
 

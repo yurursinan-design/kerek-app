@@ -1791,6 +1791,44 @@ export class LocalRepository implements Repository {
     return updatedAppt;
   }
 
+  async confirmCustomerCompletion(
+    requestId: string,
+    appointmentId?: string
+  ): Promise<{ request: ServiceRequest; appointment?: Appointment }> {
+    const existingReq = await this.getRequest(requestId);
+    if (!existingReq) {
+      throw new Error(`Request not found: ${requestId}`);
+    }
+    const cleanApptId = (appointmentId || '').trim();
+    const apptId = cleanApptId || existingReq.id;
+    const existingAppt = await this.getAppointment(apptId);
+    let updatedAppt: Appointment | undefined = undefined;
+
+    if (existingAppt) {
+      const isMatching =
+        existingAppt.customerId === existingReq.customerId && existingAppt.requestId === requestId;
+      if (cleanApptId && !isMatching) {
+        throw new Error('Unauthorized: Appointment does not belong to this request or customer');
+      }
+      if (isMatching) {
+        if (existingAppt.status === 'CONFIRMED' || existingAppt.status === 'COMPLETED') {
+          updatedAppt = await this.updateAppointment(existingAppt.id, {
+            status: 'COMPLETED',
+            workStatus: 'WORK_COMPLETED',
+            workStatusUpdatedAt: new Date().toISOString(),
+          });
+        } else {
+          updatedAppt = existingAppt;
+        }
+      }
+    } else if (cleanApptId && cleanApptId !== existingReq.id) {
+      throw new Error(`Appointment not found: ${cleanApptId}`);
+    }
+
+    const updatedReq = await this.updateRequestStatus(requestId, 'COMPLETED');
+    return { request: updatedReq || existingReq, appointment: updatedAppt };
+  }
+
   async updateWorkStatus(
     appointmentId: string,
     workStatus: WorkStatus,

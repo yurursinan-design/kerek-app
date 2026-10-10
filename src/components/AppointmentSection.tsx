@@ -213,46 +213,29 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
     }
   };
 
-  // Handle Kaspi Escrow Release (Customer confirms work & releases payment to provider)
-  const handleReleaseEscrow = async () => {
+  // Customer confirms job completion atomically
+  const handleConfirmCompletion = async () => {
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      // 1. If appointment exists and not yet completed, complete it
-      if (appointment && appointment.status !== 'COMPLETED') {
-        try {
-          await repository.completeAppointment(appointment.id);
-        } catch (apptErr) {
-          console.warn('[AppointmentSection] Note completing appointment during escrow release:', apptErr);
-        }
-      }
-
-      // 2. Update ServiceRequest: paymentStatus = 'released', status = 'COMPLETED'
-      await repository.updateRequest(request.id, {
-        status: 'COMPLETED',
-        paymentStatus: 'released',
-      });
-
-      // 3. Update ProviderOffer: paymentStatus = 'released'
-      const offerId = selectedOffer?.id || request.selectedOfferId;
-      if (offerId) {
-        try {
-          await repository.updateOffer(offerId, {
-            paymentStatus: 'released',
-          });
-        } catch (offerErr) {
-          console.warn('[AppointmentSection] Note updating offer paymentStatus:', offerErr);
-        }
+      if (repository.confirmCustomerCompletion) {
+        await repository.confirmCustomerCompletion(request.id, appointment?.id);
+      } else if (appointment) {
+        await repository.completeAppointment(appointment.id);
+      } else {
+        await repository.updateRequest(request.id, {
+          status: 'COMPLETED',
+        });
       }
     } catch (err: any) {
-      console.error('[AppointmentSection] Release escrow error:', err);
+      console.error('[AppointmentSection] Confirm completion error:', err);
       setErrorMsg(
         err?.message ||
           (language === 'kz'
-            ? 'Төлемді аудару қатесі'
+            ? 'Жұмысты аяқтау қатесі'
             : language === 'tr'
-            ? 'Ödeme aktarılırken hata oluştu'
-            : 'Ошибка перевода оплаты')
+            ? 'İş tamamlanırken bir hata oluştu'
+            : 'Ошибка завершения работы')
       );
     } finally {
       setSubmitting(false);
@@ -317,8 +300,10 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
   };
 
   const isProposedByMe = appointment?.proposedBy === currentRole;
+  const isRequestCompleted = request.status === 'COMPLETED';
   const isAwaitingMyConfirmation =
     appointment &&
+    !isRequestCompleted &&
     !isProposedByMe &&
     (appointment.status === 'PROPOSED' || appointment.status === 'RESCHEDULED');
 
@@ -372,29 +357,29 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
         {appointment && getStatusBadge(appointment.status)}
       </div>
 
-      {/* Kaspi Escrow Badges */}
-      {request.paymentStatus === 'held_in_escrow' && (
+      {/* Order Status Badges */}
+      {request.paymentStatus === 'held_in_escrow' && request.status !== 'COMPLETED' && (
         <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-900">
           <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>
             {language === 'kz'
-              ? 'Kaspi Қауіпсіз төлемі: Қаражат қорғалған'
+              ? 'Тапсырыс келісілді: Сенімді мәміле'
               : language === 'tr'
-              ? 'Kaspi Güvenli Havuz: Tutar güvence altında'
-              : 'Безопасная сделка Kaspi: Сумма под защитой'}
+              ? 'Sipariş Onaylandı: Güvenli İşlem'
+              : 'Заказ подтвержден: Безопасная сделка'}
           </span>
         </div>
       )}
 
-      {request.paymentStatus === 'released' && (
+      {(request.status === 'COMPLETED' || request.paymentStatus === 'released') && (
         <div className="p-2.5 bg-teal-50 border border-teal-300 rounded-xl flex items-center gap-2 text-xs font-bold text-teal-900">
           <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
           <span>
             {language === 'kz'
-              ? 'Төлем сәтті шеберге аударылды'
+              ? 'Жұмыс сәтті аяқталды'
               : language === 'tr'
-              ? 'Ödeme Başarıyla Ustaya Aktarıldı'
-              : 'Оплата успешно переведена мастеру'}
+              ? 'İş Başarıyla Tamamlandı'
+              : 'Работа успешно завершена'}
           </span>
         </div>
       )}
@@ -421,99 +406,101 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
             </div>
           )}
 
-          {!isFormOpen ? (
-            <button
-              type="button"
-              onClick={() => setIsFormOpen(true)}
-              className="w-full min-h-[40px] px-3 rounded-xl bg-sky-50 hover:bg-sky-100 active:scale-[0.99] text-sky-800 font-bold text-xs flex items-center justify-center gap-2 transition-all border border-sky-200 cursor-pointer"
-            >
-              <Calendar className="w-3.5 h-3.5" />
-              <span>{t.appointmentCreateBtn}</span>
-            </button>
-          ) : (
-            /* Creation Form */
-            <form onSubmit={handleCreate} className="space-y-3 pt-2 border-t border-slate-100">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                    {t.appointmentDateLabel}
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={dateStr}
-                    onChange={(e) => setDateStr(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  />
+          {!isRequestCompleted && (
+            !isFormOpen ? (
+              <button
+                type="button"
+                onClick={() => setIsFormOpen(true)}
+                className="w-full min-h-[40px] px-3 rounded-xl bg-sky-50 hover:bg-sky-100 active:scale-[0.99] text-sky-800 font-bold text-xs flex items-center justify-center gap-2 transition-all border border-sky-200 cursor-pointer"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>{t.appointmentCreateBtn}</span>
+              </button>
+            ) : (
+              /* Creation Form */
+              <form onSubmit={handleCreate} className="space-y-3 pt-2 border-t border-slate-100">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                      {t.appointmentDateLabel}
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={dateStr}
+                      onChange={(e) => setDateStr(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                      {t.appointmentTimeLabel}
+                    </label>
+                    <input
+                      type="time"
+                      required
+                      value={timeStr}
+                      onChange={(e) => setTimeStr(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                    {t.appointmentTimeLabel}
-                  </label>
-                  <input
-                    type="time"
-                    required
-                    value={timeStr}
-                    onChange={(e) => setTimeStr(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  />
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                    {t.appointmentDurationLabel}
-                  </label>
-                  <select
-                    value={durationMinutes}
-                    onChange={(e) => setDurationMinutes(Number(e.target.value))}
-                    className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 bg-white"
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                      {t.appointmentDurationLabel}
+                    </label>
+                    <select
+                      value={durationMinutes}
+                      onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                      className="w-full px-2 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 bg-white"
+                    >
+                      <option value={30}>30 мин</option>
+                      <option value={60}>1 час (60 мин)</option>
+                      <option value={90}>1.5 часа (90 мин)</option>
+                      <option value={120}>2 часа (120 мин)</option>
+                      <option value={180}>3 часа (180 мин)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
+                      {t.appointmentNoteLabel}
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={1000}
+                      placeholder={t.appointmentNotePlaceholder}
+                      value={noteStr}
+                      onChange={(e) => setNoteStr(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="flex-1 min-h-[38px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50"
                   >
-                    <option value={30}>30 мин</option>
-                    <option value={60}>1 час (60 мин)</option>
-                    <option value={90}>1.5 часа (90 мин)</option>
-                    <option value={120}>2 часа (120 мин)</option>
-                    <option value={180}>3 часа (180 мин)</option>
-                  </select>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{submitting ? '...' : t.appointmentSubmitBtn}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsFormOpen(false)}
+                    className="min-h-[38px] px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold text-xs"
+                  >
+                    {language === 'kz'
+                      ? 'Жабу'
+                      : language === 'tr'
+                      ? 'İptal'
+                      : 'Отмена'}
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
-                    {t.appointmentNoteLabel}
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={1000}
-                    placeholder={t.appointmentNotePlaceholder}
-                    value={noteStr}
-                    onChange={(e) => setNoteStr(e.target.value)}
-                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex-1 min-h-[38px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{submitting ? '...' : t.appointmentSubmitBtn}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsFormOpen(false)}
-                  className="min-h-[38px] px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold text-xs"
-                >
-                  {language === 'kz'
-                    ? 'Жабу'
-                    : language === 'tr'
-                    ? 'İptal'
-                    : 'Отмена'}
-                </button>
-              </div>
-            </form>
+              </form>
+            )
           )}
         </div>
       ) : (
@@ -640,6 +627,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
 
               {/* Provider Action Buttons: Only assigned provider can execute valid next transition */}
               {isAssignedProvider &&
+                !isRequestCompleted &&
                 appointment.workStatus !== 'CANCELLED' &&
                 appointment.workStatus !== 'WORK_COMPLETED' && (
                   <div className="pt-2 border-t border-slate-200/70 flex flex-wrap gap-2">
@@ -680,7 +668,32 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
             </div>
           )}
 
-          {(appointment.status === 'PROPOSED' || appointment.status === 'RESCHEDULED') &&
+          {/* If request completed while appointment remained in PROPOSED or RESCHEDULED state */}
+          {isRequestCompleted &&
+            (appointment.status === 'PROPOSED' || appointment.status === 'RESCHEDULED') && (
+              <div className="p-3 bg-slate-100 rounded-xl text-xs text-slate-700 font-medium flex items-start gap-2 border border-slate-200">
+                <Clock className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-bold text-slate-800">
+                    {language === 'kz'
+                      ? 'Кездесу күту күйінде қалды'
+                      : language === 'tr'
+                      ? 'Randevu beklemede kaldı'
+                      : 'Встреча осталась в ожидании'}
+                  </p>
+                  <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
+                    {language === 'kz'
+                      ? 'Тапсырыс аяқталғандықтан, бұл кездесу ұсынысы бекітілмей күту күйінде қалды және оған әрекет жасау талап етілмейді.'
+                      : language === 'tr'
+                      ? 'İş tamamlandığı için bu randevu önerisi onaylanmadan beklemede kaldı ve artık işlem gerektirmez.'
+                      : 'Так как заказ уже завершен, это предложение о встрече осталось без подтверждения и более не требует действий.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
+          {!isRequestCompleted &&
+            (appointment.status === 'PROPOSED' || appointment.status === 'RESCHEDULED') &&
             isProposedByMe && (
               <div className="p-2.5 bg-amber-50 rounded-xl text-xs text-amber-800 font-medium flex items-center gap-1.5 border border-amber-200">
                 <Clock className="w-4 h-4 text-amber-600 shrink-0" />
@@ -689,7 +702,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
             )}
 
           {/* Reschedule inline form */}
-          {isRescheduleOpen && (
+          {isRescheduleOpen && !isRequestCompleted && (
             <form onSubmit={handleReschedule} className="p-3 bg-sky-50 rounded-xl border border-sky-200 space-y-2.5 animate-fadeIn">
               <h5 className="text-xs font-bold text-sky-950 flex items-center gap-1">
                 <RotateCcw className="w-3.5 h-3.5" />
@@ -757,7 +770,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
           )}
 
           {/* Action buttons */}
-          {!isRescheduleOpen && (
+          {!isRescheduleOpen && !isRequestCompleted && (
             <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-100">
               {/* If awaiting MY confirmation */}
               {isAwaitingMyConfirmation && (
@@ -787,27 +800,30 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                 </button>
               )}
 
-              {/* Release Escrow Button: Customer confirms work and releases funds to provider */}
-              {currentRole === 'customer' && request.paymentStatus === 'held_in_escrow' && (
+              {/* Customer confirms work completion */}
+              {currentRole === 'customer' &&
+                (request.status === 'PROVIDER_SELECTED' ||
+                  request.status === 'ACCEPTED' ||
+                  request.status === 'IN_PROGRESS') && (
                 <button
                   type="button"
                   disabled={submitting}
-                  onClick={handleReleaseEscrow}
+                  onClick={handleConfirmCompletion}
                   className="w-full min-h-[42px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50"
                 >
-                  <ShieldCheck className="w-4 h-4 text-emerald-100" />
+                  <CheckCircle2 className="w-4 h-4 text-emerald-100" />
                   <span>
                     {language === 'kz'
-                      ? 'Жұмысты растау және төлемді шеберге аудару'
+                      ? 'Жұмыстың аяқталғанын растау'
                       : language === 'tr'
-                      ? 'İşi Onayla ve Ödemeyi Ustaya Aktar'
-                      : 'Подтвердить работу и перевести оплату мастеру'}
+                      ? 'İşin Tamamlandığını Onayla'
+                      : 'Подтвердить завершение работы'}
                   </span>
                 </button>
               )}
 
-              {/* Complete appointment button */}
-              {appointment.status === 'CONFIRMED' && request.paymentStatus !== 'held_in_escrow' && (
+              {/* Complete appointment button for provider */}
+              {currentRole === 'provider' && appointment.status === 'CONFIRMED' && (
                 <button
                   type="button"
                   disabled={submitting}
@@ -838,7 +854,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       )}
 
       {/* Cancel reason dialog */}
-      {isCancelDialogOpen && (
+      {isCancelDialogOpen && !isRequestCompleted && (
         <div
           role="dialog"
           aria-modal="true"
