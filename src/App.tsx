@@ -40,8 +40,24 @@ import {
   getCityDisplayName,
 } from './services/taxonomy';
 
+const LANGUAGE_KEY = 'kerek_language_v1';
+
 export default function App() {
-  const [language, setLanguage] = useState<Language>('kz');
+  const [language, setLanguage] = useState<Language>(() => {
+    try {
+      const saved = localStorage.getItem(LANGUAGE_KEY);
+      if (saved === 'kz' || saved === 'ru' || saved === 'tr') return saved;
+    } catch {}
+    return 'kz';
+  });
+
+  // Remember the chosen language across visits and expose it to the browser (screen readers, translation)
+  useEffect(() => {
+    try {
+      localStorage.setItem(LANGUAGE_KEY, language);
+    } catch {}
+    document.documentElement.lang = language === 'kz' ? 'kk' : language;
+  }, [language]);
   const [activeTab, setActiveTab] = useState<MainTab>('home');
   const [currentScreen, setCurrentScreen] = useState<'home' | 'interpretation' | 'results'>('home');
   const [extractedNeed, setExtractedNeed] = useState<ExtractedNeed | null>(null);
@@ -329,6 +345,28 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Phone/browser back button: while the user is away from the start screen, keep one history
+  // entry so "back" steps back inside the app instead of leaving it.
+  const isAtRoot = activeTab === 'home' && currentScreen === 'home';
+  const handleBackRef = useRef(handleBack);
+  handleBackRef.current = handleBack;
+
+  useEffect(() => {
+    const ownsEntry = Boolean(window.history.state && window.history.state.kerekNav);
+    if (!isAtRoot && !ownsEntry) {
+      window.history.pushState({ kerekNav: true }, '');
+    } else if (isAtRoot && ownsEntry) {
+      // Returned to the start screen via an in-app button: drop the extra entry
+      window.history.back();
+    }
+  }, [isAtRoot, activeTab, currentScreen]);
+
+  useEffect(() => {
+    const onPopState = () => handleBackRef.current();
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
   const handleHomeClick = () => {
     setActiveTab('home');
     setCurrentScreen('home');
@@ -414,7 +452,11 @@ export default function App() {
         {/* Unconfigured Firebase Local Mode Banner */}
         {!isFirebaseConfigured() && (
           <div className="sticky top-0 z-50 w-full bg-amber-500 text-slate-950 font-bold text-xs py-1.5 px-4 text-center shadow-xs">
-            Yerel mod: veriler sadece bu cihazda
+            {language === 'kz'
+              ? 'Жергілікті режим: деректер тек осы құрылғыда сақталады'
+              : language === 'tr'
+              ? 'Yerel mod: veriler sadece bu cihazda'
+              : 'Локальный режим: данные хранятся только на этом устройстве'}
           </div>
         )}
 
@@ -443,7 +485,14 @@ export default function App() {
         {/* Fatal Offline Mutation Warning */}
         {hasFatalFailedMutations && (
           <div className="mx-4 mt-3 p-3 bg-rose-50 border border-rose-300 rounded-2xl flex items-center justify-between text-xs text-rose-900 animate-fadeIn">
-            <span className="font-semibold">⚠️ Talep gönderilemedi, tekrar dene</span>
+            <span className="font-semibold">
+              ⚠️{' '}
+              {language === 'kz'
+                ? 'Кейбір өзгерістер жіберілмеді. Қайталап көріңіз.'
+                : language === 'tr'
+                ? 'Bazı değişiklikler gönderilemedi. Tekrar deneyin.'
+                : 'Некоторые изменения не отправлены. Повторите попытку.'}
+            </span>
             <button
               type="button"
               onClick={() => {

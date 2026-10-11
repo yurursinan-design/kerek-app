@@ -53,32 +53,24 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
   const [city, setCity] = useState(
     initialProvider?.city || (language === 'kz' ? 'Қызылорда' : 'Кызылорда')
   );
-  const [district, setDistrict] = useState(initialProvider?.district || 'Орталық');
+  // Profile fields start empty (placeholders show examples): pre-filled text would publish claims the provider never made
+  const [district, setDistrict] = useState(initialProvider?.district || '');
   const [category, setCategory] = useState(
     initialProvider?.category ||
       (language === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники')
   );
-  const [services, setServices] = useState(
-    initialProvider?.services || (language === 'kz' ? 'Кір жуғыш машина, бойлер жөндеу' : 'Ремонт стиральных машин, бойлеров')
-  );
+  const [services, setServices] = useState(initialProvider?.services || '');
 
   const [experienceYears, setExperienceYears] = useState(
     initialProvider?.experienceYears !== undefined && initialProvider.experienceYears !== null
       ? String(initialProvider.experienceYears)
-      : '5'
+      : ''
   );
   const [workingHours, setWorkingHours] = useState(
     initialProvider?.workingHours || '09:00 - 20:00'
   );
-  const [priceRange, setPriceRange] = useState(
-    initialProvider?.priceRange || (language === 'kz' ? '8 000 ₸ бастап' : 'от 8 000 ₸')
-  );
-  const [description, setDescription] = useState(
-    initialProvider?.description ||
-      (language === 'kz'
-        ? 'Тәжірибелі маманмын. Сапалы әрі жылдам жөндеп беремін, кепілдік бар.'
-        : 'Опытный мастер. Качественно и оперативно выполню работу, предоставлю гарантию.')
-  );
+  const [priceRange, setPriceRange] = useState(initialProvider?.priceRange || '');
+  const [description, setDescription] = useState(initialProvider?.description || '');
   const [tradeLicense, setTradeLicense] = useState(initialProvider?.tradeLicense || '');
 
   // Constructed Preview Provider

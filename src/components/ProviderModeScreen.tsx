@@ -120,7 +120,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [selectedRequestForOffer, setSelectedRequestForOffer] =
     useState<ServiceRequest | null>(null);
   const [offerPriceType, setOfferPriceType] = useState<OfferPriceType>('fixed');
-  const [offerPriceAmount, setOfferPriceAmount] = useState('15 000');
+  const [offerPriceAmount, setOfferPriceAmount] = useState('');
   const [offerTime, setOfferTime] = useState(
     language === 'kz'
       ? 'Бүгін, 40 минут ішінде'
@@ -381,13 +381,10 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const handleOpenOfferModal = (req: ServiceRequest) => {
     setSelectedRequestForOffer(req);
     setOfferPriceType('fixed');
-    setOfferPriceAmount('15 000');
-    setOfferTime(language === 'kz' ? 'Бүгін, 40 минут ішінде' : 'Сегодня, в течение 40 минут');
-    setOfferMessage(
-      language === 'kz'
-        ? 'Құралдарым дайын, келіп сапалы жөндеп беремін.'
-        : 'Готов подъехать со своим инструментом, дам гарантию на работу.'
-    );
+    // Start empty (the inputs show examples as placeholders): every offer is written by the provider
+    setOfferPriceAmount('');
+    setOfferTime('');
+    setOfferMessage('');
   };
 
   // Provider clicks "Не могу"
@@ -442,7 +439,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         }
         const spaced = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
         if (offerPriceType === 'from') {
-          finalPrice = `от ${spaced} ₸`;
+          finalPrice =
+            language === 'kz' ? `${spaced} ₸ бастап` : language === 'tr' ? `${spaced} ₸'den başlayan` : `от ${spaced} ₸`;
         } else {
           finalPrice = `${spaced} ₸`;
         }
