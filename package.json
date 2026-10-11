@@ -10,7 +10,8 @@
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "for f in tests/verify-*.ts; do echo \"=== Running $f ===\" && tsx \"$f\" || exit 1; done"
+    "test": "for f in tests/verify-*.ts; do echo \"=== Running $f ===\" && tsx \"$f\" || exit 1; done",
+    "test:rules": "firebase emulators:exec --only firestore \"tsx tests/firestore-rules.spec.ts\""
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -25,6 +26,7 @@
     "vite": "^8.3.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

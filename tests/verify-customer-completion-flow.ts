@@ -9,7 +9,7 @@
  * 6. System Regressions: AI Understanding 2.0, Matching Phase 5.1, Server-side Discovery Phase 5.2
  */
 
-import { localRepository } from '../src/services/localRepository';
+import { localRepository, setCurrentUserId } from '../src/services/localRepository';
 import { firebaseRepository } from '../src/services/firebaseRepository';
 import { matchProviders } from '../src/services/matchingService';
 import { analyzeRequestUnderstanding } from '../src/services/requestUnderstanding';
@@ -67,6 +67,10 @@ async function runCustomerCompletionFlowTests() {
       message: 'Сделаю',
       status: 'ACCEPTED',
     });
+    await localRepository.updateRequest(req1Id, {
+      selectedOfferId: offer1Id,
+      status: 'IN_PROGRESS',
+    });
     if (typeof globalThis.localStorage !== 'undefined') {
       globalThis.localStorage.setItem('kerek_user_id', customerId);
     }
@@ -116,6 +120,7 @@ async function runCustomerCompletionFlowTests() {
     // -------------------------------------------------------------
     // TEST 4: Review submission linked to COMPLETED request and provider
     // -------------------------------------------------------------
+    setCurrentUserId(customerId);
     const createdReview = await localRepository.createReview({
       id: req1Id,
       requestId: req1Id,
