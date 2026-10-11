@@ -230,7 +230,8 @@ service cloud.firestore {
             'iinVerified', 'hasCertificate', 'updatedAt'
           ])
         ) ||
-        // Customer accepting or rejecting an offer, or updating paymentStatus (e.g. releasing escrow)
+        // Customer accepting or rejecting an offer (status transition: PENDING -> ACCEPTED / REJECTED)
+        // paymentStatus cannot be set or modified by client directly; it is managed exclusively by backend escrow webhook (kaspiEscrowWebhook)
         (
           get(/databases/$(database)/documents/requests/$(existing().requestId)).data.customerId == request.auth.uid &&
           incoming().id == existing().id &&
@@ -238,9 +239,10 @@ service cloud.firestore {
           incoming().providerUserId == existing().providerUserId &&
           (!('providerId' in existing()) || incoming().providerId == existing().providerId) &&
           (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) &&
-          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'updatedAt']) &&
-          (incoming().status == existing().status || (existing().status == 'PENDING' && incoming().status in ['ACCEPTED', 'REJECTED'])) &&
-          (!('paymentStatus' in incoming()) || incoming().paymentStatus in ['pending', 'held_in_escrow', 'released', 'refunded'])
+          (!('paymentStatus' in incoming()) || (('paymentStatus' in existing()) && incoming().paymentStatus == existing().paymentStatus)) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+          existing().status == 'PENDING' &&
+          incoming().status in ['ACCEPTED', 'REJECTED']
         )
       );
       allow delete: if false;

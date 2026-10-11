@@ -237,6 +237,26 @@ async function runTestSuite() {
       );
     });
 
+    // Request Privacy & Field Security Tests
+    await test('Marketplace query / read returns open listing without sensitive contact information', async () => {
+      const master1Db = testEnv.authenticatedContext('prov_master1').firestore();
+      const reqSnap = await getDoc(doc(master1Db, 'requests', 'req_alice_01'));
+      // Provider can read the public request document to make an offer
+      await assertSucceeds(getDoc(doc(master1Db, 'requests', 'req_alice_01')));
+      const data = reqSnap.data();
+      // Ensure private contact info (customer phone) is NEVER in requests collection
+      if (data && 'customerPhone' in data && data.customerPhone) {
+        throw new Error('Privacy breach: customerPhone found in public request document');
+      }
+    });
+
+    await test('Unrelated user or unselected provider cannot access private customer contact in requestContacts', async () => {
+      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      await assertFails(getDoc(doc(bobDb, 'requestContacts', 'req_alice_01')));
+      await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_alice_01')));
+    });
+
     // =========================================================================
     // SECTION 5: Offers Creation & Security (/offers/{offerId})
     // =========================================================================
@@ -438,22 +458,36 @@ async function runTestSuite() {
       );
     });
 
-    await test('Customer cannot set invalid paymentStatus value on offer', async () => {
+    await test('Customer cannot tamper with paymentStatus (cannot set held_in_escrow, released, or refunded)', async () => {
       const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      // Test setting held_in_escrow directly by customer
       await assertFails(
         updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), {
-          paymentStatus: 'unauthorized_bypass_status',
+          paymentStatus: 'held_in_escrow',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+      // Test setting released directly by customer
+      await assertFails(
+        updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), {
+          paymentStatus: 'released',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+      // Test setting refunded directly by customer
+      await assertFails(
+        updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), {
+          paymentStatus: 'refunded',
           updatedAt: new Date().toISOString(),
         })
       );
     });
 
-    await test('Customer owning the request can accept offer (status -> ACCEPTED)', async () => {
+    await test('Customer owning the request can accept offer (status -> ACCEPTED) without modifying paymentStatus', async () => {
       const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
       await assertSucceeds(
         updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), {
           status: 'ACCEPTED',
-          paymentStatus: 'held_in_escrow',
           updatedAt: new Date().toISOString(),
         })
       );
