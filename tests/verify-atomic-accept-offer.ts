@@ -8,7 +8,8 @@ import { localRepository } from '../src/services/localRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
 import { firebaseRepository } from '../src/services/firebaseRepository';
 import { offlineQueueService } from '../src/services/offlineQueueService';
-import { auth } from '../src/services/firebase';
+import { auth, db, ensureFirebaseAuth } from '../src/services/firebase';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { getConversationId, getAppointmentId } from '../src/types';
 
 let passed = 0;
@@ -268,6 +269,89 @@ async function runAcceptOfferFixTests() {
     );
   } catch (e: any) {
     assert(false, `TEST 7: ${e.message}`);
+  }
+
+  // -------------------------------------------------------------
+  // TEST 8: Real firebaseRepository.acceptOffer() parallel concurrent transaction execution
+  // -------------------------------------------------------------
+  try {
+    firebaseRepository.isAvailable = () => true;
+    if (typeof process !== 'undefined' && process.env?.FIRESTORE_EMULATOR_HOST && db) {
+      const emuReqId = `REQ-EMU-CONCURRENT-${Date.now()}`;
+      const offerAId = `OFFER-EMU-A-${Date.now()}`;
+      const offerBId = `OFFER-EMU-B-${Date.now()}`;
+
+      const currentUid = (await ensureFirebaseAuth()) || 'cust-emu-uid';
+
+      await setDoc(doc(db, 'requests', emuReqId), {
+        id: emuReqId,
+        customerId: currentUid,
+        customerName: 'Aigerim',
+        city: 'Almaty',
+        category: 'appliances',
+        service: 'Repair',
+        status: 'OPEN',
+        createdAt: new Date().toISOString(),
+      });
+
+      await setDoc(doc(db, 'offers', offerAId), {
+        id: offerAId,
+        requestId: emuReqId,
+        providerId: 'prov-emu-1',
+        providerUserId: 'prov-emu-1',
+        providerName: 'Master Arman',
+        price: '10 000 ₸',
+        availability: 'Today',
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      });
+
+      await setDoc(doc(db, 'offers', offerBId), {
+        id: offerBId,
+        requestId: emuReqId,
+        providerId: 'prov-emu-2',
+        providerUserId: 'prov-emu-2',
+        providerName: 'Master Berik',
+        price: '12 000 ₸',
+        availability: 'Today',
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      });
+
+      const pA = firebaseRepository.acceptOffer(emuReqId, offerAId);
+      const pB = firebaseRepository.acceptOffer(emuReqId, offerBId);
+
+      const results = await Promise.allSettled([pA, pB]);
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      const finalReqSnap = await getDoc(doc(db, 'requests', emuReqId));
+      const finalOfferASnap = await getDoc(doc(db, 'offers', offerAId));
+      const finalOfferBSnap = await getDoc(doc(db, 'offers', offerBId));
+
+      const finalReq = finalReqSnap.data();
+      const finalOfferA = finalOfferASnap.data();
+      const finalOfferB = finalOfferBSnap.data();
+
+      const winningOfferId = finalReq?.selectedOfferId;
+      const isConsistent =
+        fulfilled.length === 1 &&
+        rejected.length === 1 &&
+        finalReq?.status === 'PROVIDER_SELECTED' &&
+        (winningOfferId === offerAId || winningOfferId === offerBId) &&
+        (winningOfferId === offerAId
+          ? finalOfferA?.status === 'ACCEPTED' && finalOfferB?.status === 'REJECTED'
+          : finalOfferB?.status === 'ACCEPTED' && finalOfferA?.status === 'REJECTED');
+
+      assert(
+        isConsistent,
+        'TEST 8: Real firebaseRepository.acceptOffer() parallel concurrent transaction execution'
+      );
+    } else {
+      assert(true, 'TEST 8: Real cloud Firestore concurrent test skipped in standalone unit mode (runs in npm run test:rules under Firestore Emulator)');
+    }
+  } catch (e: any) {
+    assert(false, `TEST 8: ${e.message}`);
   }
 
   // Restore orig functions

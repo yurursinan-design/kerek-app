@@ -1,8 +1,8 @@
 import assert from 'node:assert';
-import { db, auth, app, ensureFirebaseAuth } from '../src/services/firebase';
-import { initializeApp, deleteApp } from 'firebase/app';
-import { getAuth, signInAnonymously } from 'firebase/auth';
-import { getFirestore, doc, getDoc, getDocs, collection, setDoc, deleteDoc } from 'firebase/firestore';
+import { db, auth, app, ensureFirebaseAuth, createSecondaryFirebaseApp } from '../src/services/firebase';
+import { deleteApp } from 'firebase/app';
+import { signInAnonymously } from 'firebase/auth';
+import { doc, getDoc, getDocs, collection, setDoc, deleteDoc } from 'firebase/firestore';
 
 // Mock minimal localStorage required by Firebase Auth Node.js environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -27,19 +27,21 @@ async function runMessagingSecurityTests() {
   console.log('✓ [Client 1 - Customer] Authenticated. UID:', customerUid);
 
   // 2. Authenticate Secondary User (Provider)
-  const providerApp = initializeApp(app!.options, `provider-app-${Date.now()}`);
-  const providerAuth = getAuth(providerApp);
+  const provClient = createSecondaryFirebaseApp(`provider-app-${Date.now()}`)!;
+  const providerApp = provClient.app;
+  const providerAuth = provClient.auth;
   const providerCred = await signInAnonymously(providerAuth);
   const providerUid = providerCred.user.uid;
-  const providerDb = getFirestore(providerApp);
+  const providerDb = provClient.db;
   console.log('✓ [Client 2 - Provider] Authenticated. UID:', providerUid);
 
   // 3. Authenticate Tertiary User (Unrelated 3rd Party)
-  const unrelatedApp = initializeApp(app!.options, `unrelated-app-${Date.now()}`);
-  const unrelatedAuth = getAuth(unrelatedApp);
+  const unrelClient = createSecondaryFirebaseApp(`unrelated-app-${Date.now()}`)!;
+  const unrelatedApp = unrelClient.app;
+  const unrelatedAuth = unrelClient.auth;
   const unrelatedCred = await signInAnonymously(unrelatedAuth);
   const unrelatedUid = unrelatedCred.user.uid;
-  const unrelatedDb = getFirestore(unrelatedApp);
+  const unrelatedDb = unrelClient.db;
   console.log('✓ [Client 3 - Unrelated User] Authenticated. UID:', unrelatedUid);
 
   assert(customerUid !== providerUid && providerUid !== unrelatedUid, 'Test UIDs must be distinct');

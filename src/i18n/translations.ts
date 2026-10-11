@@ -311,6 +311,10 @@ export const translations = {
     escrowReleased: 'Жұмыс аяқталды',
     kaspiEscrowBadge: 'KEREK қауіпсіз мәмілесі',
 
+    // Anonymous Session Notice
+    sessionNoticeTitle: 'Құрылғыдағы сессия туралы мәлімет',
+    sessionNoticeDesc: 'Сіздің тапсырыстарыңыз осы құрылғы мен браузерге бекітілген. Браузер деректерін тазалаған жағдайда тарихқа қолжетімділік жаңартылуы мүмкін. Келесі кезеңде телефон арқылы тұрақты тіркелу қосылады.',
+
     // General
     closeButton: 'Жабу',
   },
@@ -625,6 +629,10 @@ export const translations = {
     escrowHeld: 'Заказ подтвержден',
     escrowReleased: 'Работа завершена',
     kaspiEscrowBadge: 'Безопасная сделка KEREK',
+
+    // Anonymous Session Notice
+    sessionNoticeTitle: 'Информация о сессии на устройстве',
+    sessionNoticeDesc: 'Ваши заказы и отклики привязаны к текущему браузеру. При очистке данных браузера доступ к истории может обновиться. В следующем обновлении будет добавлен постоянный вход по номеру телефона.',
 
     // General
     closeButton: 'Понятно',
@@ -941,6 +949,10 @@ export const translations = {
     escrowHeld: 'Sipariş Onaylandı',
     escrowReleased: 'İş Tamamlandı',
     kaspiEscrowBadge: 'KEREK Güvenli İşlem',
+
+    // Anonymous Session Notice
+    sessionNoticeTitle: 'Cihazdaki oturum hakkında bilgi',
+    sessionNoticeDesc: 'Talepleriniz ve teklifleriniz bu tarayıcıya bağlıdır. Tarayıcı verilerini temizlediğinizde geçmişe erişim yenilenebilir. Yakında telefonla kalıcı giriş eklenecektir.',
 
     // General
     closeButton: 'Anladım',

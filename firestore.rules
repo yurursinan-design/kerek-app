@@ -387,7 +387,7 @@ service cloud.firestore {
                     && incoming().recipientUserId is string && isValidId(incoming().recipientUserId)
                     && incoming().recipientRole in ['customer', 'provider']
                     && incoming().type in [
-                      'CUSTOMER_NEW_OFFER', 'CUSTOMER_OFFER_ACCEPTED', 'CUSTOMER_NEW_MESSAGE',
+                      'NEW_REQUEST', 'CUSTOMER_NEW_OFFER', 'CUSTOMER_OFFER_ACCEPTED', 'CUSTOMER_NEW_MESSAGE',
                       'CUSTOMER_NEW_ATTACHMENT', 'CUSTOMER_WORK_COMPLETED', 'CUSTOMER_REVIEW_REQUIRED',
                       'CUSTOMER_APPOINTMENT_CREATED', 'CUSTOMER_APPOINTMENT_UPDATED', 'CUSTOMER_APPOINTMENT_CANCELLED',
                       'CUSTOMER_PROVIDER_ON_THE_WAY', 'CUSTOMER_PROVIDER_ARRIVED', 'CUSTOMER_WORK_STARTED',
@@ -398,9 +398,10 @@ service cloud.firestore {
                     && incoming().isRead == false
                     && (!('readAt' in incoming()) || incoming().readAt == null)
                     && incoming().createdAt is string && incoming().createdAt.size() >= 10 && incoming().createdAt.size() <= 40
-                    && incoming().targetScreen in ['request_detail', 'chat', 'offers_list', 'review_modal']
+                    && incoming().targetScreen in ['request_detail', 'request_details', 'chat', 'offers_list', 'review_modal']
                     && ('requestId' in incoming()) && incoming().requestId is string && isValidId(incoming().requestId)
                     && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
+                    && (!('offerId' in incoming()) || (incoming().offerId is string && isValidId(incoming().offerId) && exists(/databases/$(database)/documents/offers/$(incoming().offerId)) && get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.requestId == incoming().requestId))
                     && (
                       // 1. Legitimate Customer Self-Notification (e.g. accepted offer confirmation or work completion review prompt)
                       (

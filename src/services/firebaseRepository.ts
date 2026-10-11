@@ -12,6 +12,7 @@ import {
   orderBy,
   limit,
   onSnapshot,
+  type Firestore,
 } from 'firebase/firestore';
 import {
   ref as storageRef,
@@ -1231,10 +1232,11 @@ export class FirebaseRepository implements Repository {
    */
   async acceptOffer(
     requestId: string,
-    offerId: string
+    offerId: string,
+    customDb?: Firestore
   ): Promise<{ request: ServiceRequest | null; offer: ProviderOffer | null }> {
     await ensureFirebaseAuth();
-    const firestore = this.ensureDb();
+    const firestore = customDb || this.ensureDb();
     const cleanReqId = (requestId || '').trim();
     const cleanOfferId = (offerId || '').trim();
 

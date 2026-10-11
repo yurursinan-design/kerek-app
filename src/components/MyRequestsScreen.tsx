@@ -16,6 +16,7 @@ import {
   ChevronRight,
   PlusCircle,
   Inbox,
+  Info,
 } from 'lucide-react';
 
 interface MyRequestsScreenProps {
@@ -90,6 +91,19 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
                 : 'Новая заявка'}
             </span>
           </button>
+        </div>
+
+        {/* Anonymous Session Notice Banner */}
+        <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-slate-600 shadow-2xs">
+          <Info className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <p className="font-bold text-slate-800 text-[11px] leading-tight">
+              {t.sessionNoticeTitle}
+            </p>
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              {t.sessionNoticeDesc}
+            </p>
+          </div>
         </div>
 
         {/* Requests List */}

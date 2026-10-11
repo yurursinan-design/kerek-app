@@ -764,6 +764,7 @@ export function getAppointmentId(requestId: string): string {
 // =================== Notification Models ===================
 
 export type NotificationEventType =
+  | 'NEW_REQUEST'
   | 'CUSTOMER_NEW_OFFER'
   | 'CUSTOMER_OFFER_ACCEPTED'
   | 'CUSTOMER_NEW_MESSAGE'
@@ -788,6 +789,7 @@ export type NotificationEventType =
 
 export type NotificationTargetScreen =
   | 'request_detail'
+  | 'request_details'
   | 'chat'
   | 'offers_list'
   | 'review_modal';

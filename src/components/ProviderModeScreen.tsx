@@ -4,6 +4,7 @@ import {
   formatDynamicDate,
   formatOfferDisplayPrice,
   Language,
+  normalizeRequestStatus,
   OfferPriceType,
   Provider,
   ProviderOffer,
@@ -43,6 +44,7 @@ import {
   MessageSquare,
   ShieldCheck,
   Award,
+  Info,
 } from 'lucide-react';
 
 interface ProviderModeScreenProps {
@@ -133,6 +135,10 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       ? 'Takımlarım hazır, gelip kaliteli şekilde tamir ederim.'
       : 'Готов подъехать со своим инструментом, дам гарантию на работу.'
   );
+  // Tab state & Action loading
+  const [activeTab, setActiveTab] = useState<'new' | 'offers' | 'active'>('new');
+  const [actionLoadingReqId, setActionLoadingReqId] = useState<string | null>(null);
+
   const [notification, setNotification] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [debugError, setDebugError] = useState<string | null>(null);
@@ -507,80 +513,116 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     `[ProviderMode] visibleRequests değerlendiriliyor | Toplam talep: ${requests.length} | Usta cityId: "${pCityId}", categoryId: "${pCatId}"`
   );
 
-  const visibleRequests = requests.filter((r) => {
+  // Status action handlers for "İşe Başla" and "İşi Tamamla"
+  const handleStartWork = async (requestId: string) => {
+    if (!checkClientRateLimit(`start_work_${requestId}`, 800)) return;
+    setActionLoadingReqId(requestId);
+    try {
+      const updated = await repository.updateRequestStatus(requestId, 'IN_PROGRESS');
+      if (updated) {
+        setRequests((prev) =>
+          prev.map((r) => (r.id === requestId ? { ...r, status: 'IN_PROGRESS' } : r))
+        );
+        setNotification(
+          language === 'kz'
+            ? 'Жұмыс басталды'
+            : language === 'tr'
+            ? 'İş başlatıldı'
+            : 'Работа начата'
+        );
+        setTimeout(() => setNotification(null), 3500);
+      }
+    } catch (err) {
+      setErrorMessage(getFriendlyErrorMessage(err, language));
+      setTimeout(() => setErrorMessage(null), 4000);
+    } finally {
+      setActionLoadingReqId(null);
+    }
+  };
+
+  const handleCompleteWork = async (requestId: string) => {
+    if (!checkClientRateLimit(`complete_work_${requestId}`, 800)) return;
+    setActionLoadingReqId(requestId);
+    try {
+      const updated = await repository.updateRequestStatus(requestId, 'COMPLETED');
+      if (updated) {
+        setRequests((prev) =>
+          prev.map((r) => (r.id === requestId ? { ...r, status: 'COMPLETED' } : r))
+        );
+        setNotification(
+          language === 'kz'
+            ? 'Жұмыс сәтті аяқталды'
+            : language === 'tr'
+            ? 'İş başarıyla tamamlandı'
+            : 'Работа успешно завершена'
+        );
+        setTimeout(() => setNotification(null), 3500);
+      }
+    } catch (err) {
+      setErrorMessage(getFriendlyErrorMessage(err, language));
+      setTimeout(() => setErrorMessage(null), 4000);
+    } finally {
+      setActionLoadingReqId(null);
+    }
+  };
+
+  // 1. Tab: New Requests ("Yeni Talepler")
+  const newRequests = requests.filter((r) => {
+    const offer = sentOffersMap[r.id];
+    if (offer) return false; // Already submitted an offer
+    if (dismissedReqIds.includes(r.id) || r.status === 'CANCELLED') return false;
+
+    const selfReq = isSelfRequest(r, provider, isAnonymousSession);
+    if (selfReq) return false;
+
+    const norm = normalizeRequestStatus(r.status);
+    if (norm !== 'OPEN') return false;
+
     const rCityId = normalizeCityId(r.cityId || r.city) || r.cityId || 'belirtilmemiş';
     const rCatId = normalizeCategoryId(r.categoryId || r.category) || 'belirtilmemiş';
-    const selfReq = isSelfRequest(r, provider, isAnonymousSession);
 
-    // 1. Dismissed / İptal Kontrolü
-    if (dismissedReqIds.includes(r.id) || r.status === 'CANCELLED') {
-      console.log(`[visibleRequests] ❌ ${r.id} elendi | Sebep: dismissed`, {
-        '1. id': r.id,
-        '2. talep': { cityId: rCityId, categoryId: rCatId },
-        '3. usta': { cityId: pCityId, categoryId: pCatId },
-        '4. isSelfRequest': selfReq,
-        '5. elenme_sebebi': 'dismissed',
-      });
-      return false;
-    }
-
-    // Önceden teklif verilmişse daima göster
-    if (sentOffersMap[r.id]) {
-      console.log(`[visibleRequests] ⭕ ${r.id} gösterildi | Sebep: daha önce teklif verilmiş`, {
-        '1. id': r.id,
-        '2. talep': { cityId: rCityId, categoryId: rCatId },
-        '3. usta': { cityId: pCityId, categoryId: pCatId },
-        '4. isSelfRequest': selfReq,
-        '5. durum': 'teklif_verilmis',
-      });
-      return true;
-    }
-
-    // 2. isSelfRequest Kontrolü
-    if (selfReq) {
-      console.log(`[visibleRequests] ❌ ${r.id} elendi | Sebep: isSelfRequest`, {
-        '1. id': r.id,
-        '2. talep': { cityId: rCityId, categoryId: rCatId },
-        '3. usta': { cityId: pCityId, categoryId: pCatId },
-        '4. isSelfRequest': true,
-        '5. elenme_sebebi': 'isSelfRequest',
-      });
-      return false;
-    }
-
-    // 3. Şehir ve Kategori Uyuşmazlığı Kontrolü
     if (pCityId && pCatId) {
-      if (rCityId !== pCityId) {
-        console.log(`[visibleRequests] ❌ ${r.id} elendi | Sebep: şehir uyuşmazlığı`, {
-          '1. id': r.id,
-          '2. talep': { cityId: rCityId, categoryId: rCatId },
-          '3. usta': { cityId: pCityId, categoryId: pCatId },
-          '4. isSelfRequest': selfReq,
-          '5. elenme_sebebi': 'şehir uyuşmazlığı',
-        });
-        return false;
-      }
+      if (rCityId !== pCityId) return false;
       const isCatMatched = rCatId === 'other' || rCatId === pCatId || isCategoryMatch(rCatId, pCatId);
-      if (!isCatMatched) {
-        console.log(`[visibleRequests] ❌ ${r.id} elendi | Sebep: kategori uyuşmazlığı`, {
-          '1. id': r.id,
-          '2. talep': { cityId: rCityId, categoryId: rCatId },
-          '3. usta': { cityId: pCityId, categoryId: pCatId },
-          '4. isSelfRequest': selfReq,
-          '5. elenme_sebebi': 'kategori uyuşmazlığı',
-        });
-        return false;
-      }
+      if (!isCatMatched) return false;
     }
-
-    console.log(`[visibleRequests] ✅ ${r.id} GÖRÜNÜR (Eşleşti)`, {
-      '1. id': r.id,
-      '2. talep': { cityId: rCityId, categoryId: rCatId },
-      '3. usta': { cityId: pCityId, categoryId: pCatId },
-      '4. isSelfRequest': selfReq,
-      '5. durum': 'görünür',
-    });
     return true;
+  });
+
+  // 2. Tab: My Offers ("Tekliflerim")
+  const myOffersRequests = requests.filter((r) => {
+    const offer = sentOffersMap[r.id];
+    if (!offer) return false;
+    if (r.status === 'CANCELLED') return false;
+
+    const norm = normalizeRequestStatus(r.status);
+    if (
+      offer.status === 'ACCEPTED' ||
+      r.selectedOfferId === offer.id ||
+      norm === 'PROVIDER_SELECTED' ||
+      norm === 'IN_PROGRESS' ||
+      norm === 'COMPLETED'
+    ) {
+      return false;
+    }
+    return true;
+  });
+
+  // 3. Tab: Active Jobs ("Aktif İşlerim")
+  const activeJobRequests = requests.filter((r) => {
+    const offer = sentOffersMap[r.id];
+    if (!offer) return false;
+    if (r.status === 'CANCELLED') return false;
+
+    const norm = normalizeRequestStatus(r.status);
+    if (norm === 'COMPLETED') return false;
+
+    return (
+      offer.status === 'ACCEPTED' ||
+      r.selectedOfferId === offer.id ||
+      norm === 'PROVIDER_SELECTED' ||
+      norm === 'IN_PROGRESS'
+    );
   });
 
   if (activeChatRequestId) {
@@ -788,51 +830,117 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               </div>
             )}
 
-            {/* "Новые заявки" Header */}
-            <div className="flex items-center justify-between pt-1">
-              <div>
-                <h3 className="text-lg font-extrabold text-slate-900 tracking-tight font-display">
-                  {t.newRequestsHeader}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  {visibleRequests.length}{' '}
-                  {language === 'kz'
-                    ? 'сәйкес өтініш табылды'
-                    : language === 'tr'
-                    ? 'uygun talep bulundu'
-                    : 'подходящих заявок'}
+            {/* Anonymous Session Notice Banner */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-slate-600 shadow-2xs">
+              <Info className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <p className="font-bold text-slate-800 text-[11px] leading-tight">
+                  {t.sessionNoticeTitle}
+                </p>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  {t.sessionNoticeDesc}
                 </p>
               </div>
             </div>
 
-            {/* Requests Feed - Spec:
-                Show: Request ID, Service, City, Date, Budget, Urgency, Customer request text.
-                Do NOT expose customer's phone number yet. */}
-            {visibleRequests.length === 0 ? (
-              <div className="p-8 bg-white rounded-3xl border border-dashed border-slate-300 text-center space-y-3">
-                <Clock className="w-10 h-10 text-slate-400 mx-auto" />
-                <h4 className="text-sm font-bold text-slate-800">
-                  {t.noMatchingRequests}
-                </h4>
-                <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                  {language === 'kz'
-                    ? 'Сіздің қалаңыз бен санатыңызға сәйкес клиент сұраныс берген бойда, осы жерде ұсыныс жасау түймесі шығады.'
-                    : language === 'tr'
-                    ? 'Şehrinizde ve kategorinizde yeni bir talep açıldığında burada anında fiyat ve varış süresi teklifi gönderebilirsiniz.'
-                    : 'Когда клиенты оформят заявку в вашем городе и категории, вы сможете моментально отправить им цену и время выезда.'}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {visibleRequests.map((req) => {
-                  const existingOffer = sentOffersMap[req.id];
+            {/* Provider Tabs Navigation */}
+            <div className="flex items-center p-1 bg-slate-100 rounded-2xl gap-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab('new')}
+                className={`flex-1 py-2.5 px-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  activeTab === 'new'
+                    ? 'bg-white text-sky-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Briefcase className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">
+                  {language === 'kz' ? 'Жаңа өтініштер' : language === 'tr' ? 'Yeni Talepler' : 'Новые заявки'}
+                </span>
+                {newRequests.length > 0 && (
+                  <span
+                    className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                      activeTab === 'new' ? 'bg-sky-100 text-sky-800' : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {newRequests.length}
+                  </span>
+                )}
+              </button>
 
-                  return (
+              <button
+                type="button"
+                onClick={() => setActiveTab('offers')}
+                className={`flex-1 py-2.5 px-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  activeTab === 'offers'
+                    ? 'bg-white text-sky-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Send className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">
+                  {language === 'kz' ? 'Ұсыныстарым' : language === 'tr' ? 'Tekliflerim' : 'Мои предложения'}
+                </span>
+                {myOffersRequests.length > 0 && (
+                  <span
+                    className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                      activeTab === 'offers' ? 'bg-sky-100 text-sky-800' : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {myOffersRequests.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('active')}
+                className={`flex-1 py-2.5 px-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  activeTab === 'active'
+                    ? 'bg-white text-emerald-800 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                <span className="truncate">
+                  {language === 'kz' ? 'Белсенді жұмыстар' : language === 'tr' ? 'Aktif İşlerim' : 'Активные заказы'}
+                </span>
+                {activeJobRequests.length > 0 && (
+                  <span
+                    className={`ml-0.5 px-1.5 py-0.2 rounded-full text-[10px] font-extrabold ${
+                      activeTab === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {activeJobRequests.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* TAB 1: Yeni Talepler */}
+            {activeTab === 'new' && (
+              <div className="space-y-3">
+                {newRequests.length === 0 ? (
+                  <div className="p-8 bg-white rounded-3xl border border-dashed border-slate-300 text-center space-y-3">
+                    <Clock className="w-10 h-10 text-slate-400 mx-auto" />
+                    <h4 className="text-sm font-bold text-slate-800">
+                      {t.noMatchingRequests}
+                    </h4>
+                    <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                      {language === 'kz'
+                        ? 'Сіздің қалаңыз бен санатыңызға сәйкес клиент сұраныс берген бойда, осы жерде ұсыныс жасау түймесі шығады.'
+                        : language === 'tr'
+                        ? 'Şehrinizde ve kategorinizde yeni bir talep açıldığında burada anında fiyat ve varış süresi teklifi gönderebilirsiniz.'
+                        : 'Когда клиенты оформят заявку в вашем городе и категории, вы сможете моментально отправить им цену и время выезда.'}
+                    </p>
+                  </div>
+                ) : (
+                  newRequests.map((req) => (
                     <div
                       key={req.id}
                       className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs space-y-3"
                     >
-                      {/* Spec: Request ID, Urgency, Service */}
                       <div className="flex items-start justify-between gap-2">
                         <div>
                           <div className="flex items-center gap-1.5">
@@ -851,7 +959,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                           </h4>
                         </div>
 
-                        {/* Spec: Budget */}
                         {req.budget && (
                           <div className="text-right">
                             <span className="text-xs text-slate-400 block">
@@ -864,12 +971,10 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         )}
                       </div>
 
-                      {/* Spec: Customer Request Text (Private: customer phone NOT exposed) */}
                       <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-700 italic">
                         «{req.requestText}»
                       </div>
 
-                      {/* Spec: City, Date */}
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
                         <span className="flex items-center gap-1">
                           <MapPin className="w-3.5 h-3.5 text-sky-600" />
@@ -881,7 +986,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         </span>
                       </div>
 
-                      {/* Request 2.0 Media Attachments & Location for Provider */}
                       {Boolean(req.attachments?.length || req.location) && (
                         <div className="pt-1 border-t border-slate-100">
                           <RequestMediaView
@@ -892,83 +996,311 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         </div>
                       )}
 
-                      {/* Provider Actions: "Могу выполнить" & "Не могу" */}
-                      <div className="pt-2 border-t border-slate-100">
-                        {existingOffer ? (
-                          <div className="space-y-2">
-                            {/* Order Confirmation Notification for Provider */}
-                            {(req.paymentStatus === 'held_in_escrow' || existingOffer.paymentStatus === 'held_in_escrow') && (
-                              <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-900 shadow-2xs">
-                                <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                                <span>
-                                  {language === 'kz'
-                                    ? 'Тапсырыс расталды. Жұмысқа сенімді кірісе аласыз.'
-                                    : language === 'tr'
-                                    ? 'Sipariş onaylandı. İşe güvenle başlayabilirsiniz.'
-                                    : 'Заказ подтвержден. Можете смело приступать к работе.'}
-                                </span>
-                              </div>
-                            )}
+                      <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenOfferModal(req)}
+                          className="min-h-[44px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>{t.btnCanFulfill}</span>
+                        </button>
 
-                            <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-bold flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => handleDismissRequest(req.id)}
+                          className="min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-[0.98] text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <ThumbsDown className="w-3.5 h-3.5 text-slate-500" />
+                          <span>{t.btnCannotFulfill}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* TAB 2: Tekliflerim */}
+            {activeTab === 'offers' && (
+              <div className="space-y-3">
+                {myOffersRequests.length === 0 ? (
+                  <div className="p-8 bg-white rounded-3xl border border-dashed border-slate-300 text-center space-y-3">
+                    <Send className="w-10 h-10 text-slate-400 mx-auto" />
+                    <h4 className="text-sm font-bold text-slate-800">
+                      {language === 'kz'
+                        ? 'Жіберілген ұсыныстар жоқ'
+                        : language === 'tr'
+                        ? 'Henüz teklif gönderilmedi'
+                        : 'Нет отправленных предложений'}
+                    </h4>
+                    <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                      {language === 'kz'
+                        ? '«Жаңа өтініштер» бөліміндегі сұраныстарға ұсыныс жіберіңіз.'
+                        : language === 'tr'
+                        ? 'Yeni taleplere teklif gönderdiğinizde teklifleriniz burada listelenecektir.'
+                        : 'Когда вы отправляете предложения на новые заявки, они будут отображаться здесь.'}
+                    </p>
+                  </div>
+                ) : (
+                  myOffersRequests.map((req) => {
+                    const existingOffer = sentOffersMap[req.id];
+                    return (
+                      <div
+                        key={req.id}
+                        className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs space-y-3"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px] font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                                {req.id}
+                              </span>
+                              {req.urgency === 'high' && (
+                                <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                  <Flame className="w-3 h-3 text-amber-600" />
+                                  {t.urgencyHigh}
+                                </span>
+                              )}
+                            </div>
+                            <h4 className="text-sm font-bold text-slate-900 mt-1">
+                              {req.service}
+                            </h4>
+                          </div>
+
+                          {req.budget && (
+                            <div className="text-right">
+                              <span className="text-xs text-slate-400 block">
+                                {t.fieldBudget}
+                              </span>
+                              <span className="text-xs font-bold text-sky-700">
+                                {formatDynamicBudget(req.budget, language)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-700 italic">
+                          «{req.requestText}»
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
+                          <span className="flex items-center gap-1">
+                            <MapPin className="w-3.5 h-3.5 text-sky-600" />
+                            {getCityDisplayName(req.cityId || req.city, language) || req.city}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5 text-sky-600" />
+                            {formatDynamicDate(req.date, language)}
+                          </span>
+                        </div>
+
+                        {existingOffer && (
+                          <div className="pt-2 border-t border-slate-100 space-y-2">
+                            <div className="p-2.5 bg-sky-50 text-sky-900 rounded-xl text-xs font-bold flex items-center justify-between border border-sky-200">
                               <div className="flex items-center gap-1.5">
-                                <CheckCircle className="w-4 h-4 text-emerald-600" />
+                                <CheckCircle className="w-4 h-4 text-sky-600" />
                                 <span>{t.alreadySentOffer}</span>
                               </div>
-                              <span className="font-mono text-emerald-900 font-bold">
+                              <span className="font-mono text-sky-950 font-extrabold">
                                 {formatOfferDisplayPrice(existingOffer, language)}
                               </span>
                             </div>
 
-                            {(existingOffer.status === 'ACCEPTED' ||
-                              req.selectedOfferId === existingOffer.id ||
-                              req.status === 'PROVIDER_SELECTED' ||
-                              req.status === 'IN_PROGRESS' ||
-                              req.status === 'COMPLETED') && (
-                              <div className="space-y-2">
-                                <button
-                                  type="button"
-                                  onClick={() => setActiveChatRequestId(req.id)}
-                                  className="w-full min-h-[42px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
-                                >
-                                  <MessageSquare className="w-4 h-4" />
-                                  <span>{t.chatWithCustomerBtn}</span>
-                                </button>
-
-                                <AppointmentSection
-                                  request={req}
-                                  selectedOffer={existingOffer}
-                                  currentRole="provider"
-                                  language={language}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenOfferModal(req)}
-                              className="min-h-[44px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all"
-                            >
-                              <Send className="w-3.5 h-3.5" />
-                              <span>{t.btnCanFulfill}</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleDismissRequest(req.id)}
-                              className="min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-[0.98] text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-all"
-                            >
-                              <ThumbsDown className="w-3.5 h-3.5 text-slate-500" />
-                              <span>{t.btnCannotFulfill}</span>
-                            </button>
+                            <div className="text-[11px] text-slate-500 text-center font-medium bg-slate-50 p-2 rounded-lg">
+                              {existingOffer.status === 'REJECTED'
+                                ? (language === 'kz' ? 'Клиент басқа маманды таңдады' : language === 'tr' ? 'Müşteri başka usta seçti' : 'Клиент выбрал другого мастера')
+                                : (language === 'kz' ? 'Клиент қарастыруда...' : language === 'tr' ? 'Müşteri değerlendiriyor...' : 'Ожидает ответа клиента...')}
+                            </div>
                           </div>
                         )}
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
+              </div>
+            )}
+
+            {/* TAB 3: Aktif İşlerim */}
+            {activeTab === 'active' && (
+              <div className="space-y-3">
+                {activeJobRequests.length === 0 ? (
+                  <div className="p-8 bg-white rounded-3xl border border-dashed border-slate-300 text-center space-y-3">
+                    <CheckCircle className="w-10 h-10 text-slate-400 mx-auto" />
+                    <h4 className="text-sm font-bold text-slate-800">
+                      {language === 'kz'
+                        ? 'Белсенді жұмыстар жоқ'
+                        : language === 'tr'
+                        ? 'Aktif iş bulunmuyor'
+                        : 'Нет активных заказов'}
+                    </h4>
+                    <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                      {language === 'kz'
+                        ? 'Клиент сіздің ұсынысыңызды қабылдағанда, тапсырыс осы жерге түседі және жұмыс күйін өзгерте аласыз.'
+                        : language === 'tr'
+                        ? 'Müşteri teklifinizi kabul ettiğinde aktif işleriniz burada görünecek ve iş durumunu güncelleyebileceksiniz.'
+                        : 'Когда клиент примет ваше предложение, заказ появится здесь, и вы сможете обновлять статус работы.'}
+                    </p>
+                  </div>
+                ) : (
+                  activeJobRequests.map((req) => {
+                    const existingOffer = sentOffersMap[req.id];
+                    const normStatus = normalizeRequestStatus(req.status);
+
+                    return (
+                      <div
+                        key={req.id}
+                        className="bg-white rounded-2xl border border-emerald-200 p-4 shadow-2xs space-y-3 relative overflow-hidden"
+                      >
+                        {/* Status Header Badge */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                            {req.id}
+                          </span>
+                          <span
+                            className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
+                              normStatus === 'IN_PROGRESS'
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                            }`}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                            {normStatus === 'IN_PROGRESS'
+                              ? (language === 'kz' ? 'Жұмыс орындалуда' : language === 'tr' ? 'İş Devam Ediyor' : 'Выполняется')
+                              : (language === 'kz' ? 'Тапсырыс қабылданды' : language === 'tr' ? 'Sipariş Kabul Edildi' : 'Заказ принят')}
+                          </span>
+                        </div>
+
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-900">
+                              {req.service}
+                            </h4>
+                          </div>
+
+                          {req.budget && (
+                            <div className="text-right">
+                              <span className="text-xs text-slate-400 block">
+                                {t.fieldBudget}
+                              </span>
+                              <span className="text-xs font-bold text-sky-700">
+                                {formatDynamicBudget(req.budget, language)}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-700 italic">
+                          «{req.requestText}»
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
+                          <span className="flex items-center gap-1">
+                            <MapPin className="w-3.5 h-3.5 text-sky-600" />
+                            {getCityDisplayName(req.cityId || req.city, language) || req.city}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5 text-sky-600" />
+                            {formatDynamicDate(req.date, language)}
+                          </span>
+                        </div>
+
+                        {Boolean(req.attachments?.length || req.location) && (
+                          <div className="pt-1 border-t border-slate-100">
+                            <RequestMediaView
+                              attachments={req.attachments}
+                              location={req.location}
+                              language={language}
+                            />
+                          </div>
+                        )}
+
+                        {/* Order / Escrow Confirmation */}
+                        {(req.paymentStatus === 'held_in_escrow' || existingOffer?.paymentStatus === 'held_in_escrow') && (
+                          <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-900 shadow-2xs">
+                            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span>
+                              {language === 'kz'
+                                ? 'Тапсырыс расталды. Жұмысқа сенімді кірісе аласыз.'
+                                : language === 'tr'
+                                ? 'Sipariş onaylandı. İşe güvenle başlayabilirsiniz.'
+                                : 'Заказ подтвержден. Можете смело приступать к работе.'}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Agreed Price */}
+                        {existingOffer && (
+                          <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-bold flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <CheckCircle className="w-4 h-4 text-emerald-600" />
+                              <span>{t.alreadySentOffer}</span>
+                            </div>
+                            <span className="font-mono text-emerald-900 font-bold">
+                              {formatOfferDisplayPrice(existingOffer, language)}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Communication & Appointments */}
+                        <div className="space-y-2 pt-1 border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => setActiveChatRequestId(req.id)}
+                            className="w-full min-h-[42px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                            <span>{t.chatWithCustomerBtn}</span>
+                          </button>
+
+                          {existingOffer && (
+                            <AppointmentSection
+                              request={req}
+                              selectedOffer={existingOffer}
+                              currentRole="provider"
+                              language={language}
+                            />
+                          )}
+                        </div>
+
+                        {/* JOB STATUS ACTION BUTTONS */}
+                        <div className="pt-2 border-t border-slate-200">
+                          {normStatus === 'PROVIDER_SELECTED' && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartWork(req.id)}
+                              disabled={actionLoadingReqId === req.id}
+                              className="w-full min-h-[46px] rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <Flame className="w-4 h-4" />
+                              <span>
+                                {actionLoadingReqId === req.id
+                                  ? (language === 'kz' ? 'Жүктелуде...' : language === 'tr' ? 'Yükleniyor...' : 'Загрузка...')
+                                  : (language === 'kz' ? 'Жұмысты бастау' : language === 'tr' ? 'İşe Başla' : 'Начать работу')}
+                              </span>
+                            </button>
+                          )}
+
+                          {normStatus === 'IN_PROGRESS' && (
+                            <button
+                              type="button"
+                              onClick={() => handleCompleteWork(req.id)}
+                              disabled={actionLoadingReqId === req.id}
+                              className="w-full min-h-[46px] rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-50"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                              <span>
+                                {actionLoadingReqId === req.id
+                                  ? (language === 'kz' ? 'Жүктелуде...' : language === 'tr' ? 'Yükleniyor...' : 'Загрузка...')
+                                  : (language === 'kz' ? 'Жұмысты аяқтау' : language === 'tr' ? 'İşi Tamamla' : 'Завершить работу')}
+                              </span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             )}
           </div>

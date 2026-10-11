@@ -1,8 +1,8 @@
 import assert from 'node:assert';
-import { db, auth, app, ensureFirebaseAuth } from '../src/services/firebase';
-import { initializeApp, deleteApp } from 'firebase/app';
-import { getAuth, signInAnonymously } from 'firebase/auth';
-import { getFirestore, doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { db, auth, app, ensureFirebaseAuth, createSecondaryFirebaseApp } from '../src/services/firebase';
+import { deleteApp } from 'firebase/app';
+import { signInAnonymously } from 'firebase/auth';
+import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 
 // Mock minimal localStorage for Node environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -25,18 +25,20 @@ async function runSecurityAudit() {
   const customerUid = auth?.currentUser?.uid!;
   console.log('✓ [Client 1 - Customer] UID:', customerUid);
 
-  const selectedProvApp = initializeApp(app!.options, `prov-selected-${Date.now()}`);
-  const selectedProvAuth = getAuth(selectedProvApp);
+  const selectedProvClient = createSecondaryFirebaseApp(`prov-selected-${Date.now()}`)!;
+  const selectedProvApp = selectedProvClient.app;
+  const selectedProvAuth = selectedProvClient.auth;
   const selectedProvCred = await signInAnonymously(selectedProvAuth);
   const selectedProvUid = selectedProvCred.user.uid;
-  const selectedProvDb = getFirestore(selectedProvApp);
+  const selectedProvDb = selectedProvClient.db;
   console.log('✓ [Client 2 - Selected Provider] UID:', selectedProvUid);
 
-  const attackerProvApp = initializeApp(app!.options, `prov-attacker-${Date.now()}`);
-  const attackerProvAuth = getAuth(attackerProvApp);
+  const attackerProvClient = createSecondaryFirebaseApp(`prov-attacker-${Date.now()}`)!;
+  const attackerProvApp = attackerProvClient.app;
+  const attackerProvAuth = attackerProvClient.auth;
   const attackerProvCred = await signInAnonymously(attackerProvAuth);
   const attackerProvUid = attackerProvCred.user.uid;
-  const attackerProvDb = getFirestore(attackerProvApp);
+  const attackerProvDb = attackerProvClient.db;
   console.log('✓ [Client 3 - Unselected / Attacker Provider] UID:', attackerProvUid);
 
   const now = new Date().toISOString();

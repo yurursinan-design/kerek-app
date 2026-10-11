@@ -1,6 +1,6 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth, signInAnonymously, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { getFirestore, Firestore, doc, getDoc, setDoc, getDocFromServer } from 'firebase/firestore';
+import { getAuth, Auth, signInAnonymously, onAuthStateChanged, connectAuthEmulator, User as FirebaseUser } from 'firebase/auth';
+import { getFirestore, Firestore, doc, getDoc, setDoc, getDocFromServer, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage, FirebaseStorage } from 'firebase/storage';
 
 /**
@@ -110,6 +110,32 @@ if (isFirebaseConfigured()) {
     app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
     auth = getAuth(app);
     db = getFirestore(app);
+
+    const isNodeEnv = typeof window === 'undefined' && typeof process !== 'undefined';
+    const shouldConnectEmulator =
+      Boolean(process.env?.FIRESTORE_EMULATOR_HOST) ||
+      process.env?.VITE_USE_EMULATOR === 'true' ||
+      (isNodeEnv && process.env?.ALLOW_LIVE_FIREBASE !== 'true');
+
+    if (shouldConnectEmulator) {
+      const emulatorHostStr = process.env?.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
+      const parts = emulatorHostStr.split(':');
+      const host = parts[0] && parts[0].trim().length > 0 ? parts[0].trim() : '127.0.0.1';
+      const port = parseInt(parts[1] || '8088', 10) || 8088;
+      try {
+        connectFirestoreEmulator(db, host, port);
+      } catch {}
+
+      if (auth) {
+        const authHostStr = process.env?.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
+        const authParts = authHostStr.replace(/^https?:\/\//, '').split(':');
+        const authHost = authParts[0] && authParts[0].trim().length > 0 ? authParts[0].trim() : '127.0.0.1';
+        const authPort = parseInt(authParts[1] || '9099', 10) || 9099;
+        try {
+          connectAuthEmulator(auth, `http://${authHost}:${authPort}`);
+        } catch {}
+      }
+    }
     try {
       storage = getStorage(app);
     } catch (stErr) {
@@ -135,6 +161,39 @@ if (isFirebaseConfigured()) {
 }
 
 export { app, auth, db, storage };
+
+export function createSecondaryFirebaseApp(appName: string) {
+  if (!app) return null;
+  const secondaryApp = initializeApp(app.options, appName);
+  const secondaryAuth = getAuth(secondaryApp);
+  const secondaryDb = getFirestore(secondaryApp);
+
+  const isNodeEnv = typeof window === 'undefined' && typeof process !== 'undefined';
+  const shouldConnectEmulator =
+    Boolean(process.env?.FIRESTORE_EMULATOR_HOST) ||
+    process.env?.VITE_USE_EMULATOR === 'true' ||
+    (isNodeEnv && process.env?.ALLOW_LIVE_FIREBASE !== 'true');
+
+  if (shouldConnectEmulator) {
+    const emulatorHostStr = process.env?.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
+    const parts = emulatorHostStr.split(':');
+    const host = parts[0] && parts[0].trim().length > 0 ? parts[0].trim() : '127.0.0.1';
+    const port = parseInt(parts[1] || '8088', 10) || 8088;
+    try {
+      connectFirestoreEmulator(secondaryDb, host, port);
+    } catch {}
+
+    const authHostStr = process.env?.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
+    const authParts = authHostStr.replace(/^https?:\/\//, '').split(':');
+    const authHost = authParts[0] && authParts[0].trim().length > 0 ? authParts[0].trim() : '127.0.0.1';
+    const authPort = parseInt(authParts[1] || '9099', 10) || 9099;
+    try {
+      connectAuthEmulator(secondaryAuth, `http://${authHost}:${authPort}`);
+    } catch {}
+  }
+
+  return { app: secondaryApp, auth: secondaryAuth, db: secondaryDb };
+}
 
 let authInitPromise: Promise<string | null> | null = null;
 
@@ -320,8 +379,8 @@ export async function runFirebaseDiagnostics(): Promise<FirebaseDiagnosticReport
   return report;
 }
 
-// Auto-run diagnostic in background on startup if configured
-if (isFirebaseConfigured()) {
+// Auto-run diagnostic in background on startup if configured (browser only)
+if (isFirebaseConfigured() && typeof window !== 'undefined') {
   setTimeout(() => {
     runFirebaseDiagnostics().catch(() => {});
   }, 100);

@@ -10,7 +10,7 @@
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "for f in tests/verify-*.ts; do echo \"=== Running $f ===\" && tsx \"$f\" || exit 1; done",
+    "test": "VITE_USE_EMULATOR=true FIRESTORE_EMULATOR_HOST=127.0.0.1:8088 for f in tests/verify-*.ts; do echo \"=== Running $f ===\" && tsx \"$f\" || exit 1; done",
     "test:rules": "firebase emulators:exec --only firestore \"tsx tests/firestore-rules.spec.ts\""
   },
   "dependencies": {
