@@ -1,10 +1,8 @@
 # Her Pull Request için: kodu kontrol eder, derler ve Firebase Hosting'de
 # 7 gün geçerli bir önizleme linki oluşturup PR'a yorum olarak yazar.
 #
-# Gerekli GitHub secret'ları (Settings → Secrets and variables → Actions):
-#   FIREBASE_APPLET_CONFIG    - AI Studio'daki firebase-applet-config.json dosyasının içeriği
-#   FIREBASE_SERVICE_ACCOUNT  - Firebase servis hesabı JSON anahtarı
-# Secret'lar yoksa kontrol + derleme yine çalışır, sadece önizleme atlanır.
+# Firebase'e giriş, Workload Identity Federation ile şifresiz yapılır:
+# Google Cloud'daki github-deploy servis hesabını yalnızca bu depo kullanabilir.
 name: Önizleme
 
 on:
@@ -12,18 +10,28 @@ on:
 
 permissions:
   contents: read
+  id-token: write
   pull-requests: write
-  checks: write
 
 concurrency:
   group: preview-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+env:
+  # Firebase web ayarları herkese açıktır (derlenen sitenin içinde zaten görünür).
+  VITE_FIREBASE_API_KEY: AIzaSyA2tm7w5In7uV6qEPbfCjSOKZ6Sj2fRoHI
+  VITE_FIREBASE_AUTH_DOMAIN: kerek-9d153.firebaseapp.com
+  VITE_FIREBASE_PROJECT_ID: kerek-9d153
+  VITE_FIREBASE_STORAGE_BUCKET: kerek-9d153.firebasestorage.app
+  VITE_FIREBASE_MESSAGING_SENDER_ID: "24155315039"
+  VITE_FIREBASE_APP_ID: 1:24155315039:web:203f5b6fb4aa78d62574ea
+  FIREBASE_PROJECT_ID: kerek-9d153
+
 jobs:
   preview:
+    # Fork'lardan gelen PR'lar Google Cloud'a giriş yapamaz.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    env:
-      HAS_FIREBASE_SECRETS: ${{ secrets.FIREBASE_APPLET_CONFIG != '' && secrets.FIREBASE_SERVICE_ACCOUNT != '' && github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - uses: actions/checkout@v4
 
@@ -31,28 +39,48 @@ jobs:
         with:
           bun-version: 1.4.2
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Bağımlılıkları kur
         run: bun install --frozen-lockfile
 
       - name: Tip kontrolü
         run: bun run typecheck
 
-      - name: Firebase ayarlarını yaz
-        if: env.HAS_FIREBASE_SECRETS == 'true'
-        env:
-          FIREBASE_APPLET_CONFIG: ${{ secrets.FIREBASE_APPLET_CONFIG }}
-        run: |
-          printf '%s' "$FIREBASE_APPLET_CONFIG" > firebase-applet-config.json
-          echo "FIREBASE_PROJECT_ID=$(jq -r '.projectId // .firebaseConfig.projectId' firebase-applet-config.json)" >> "$GITHUB_ENV"
-
       - name: Derle
         run: bun run build
 
-      - name: Önizleme linki oluştur
-        if: env.HAS_FIREBASE_SECRETS == 'true'
-        uses: FirebaseExtended/action-hosting-deploy@v0
+      - name: Google Cloud'a giriş
+        uses: google-github-actions/auth@v2
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          projectId: ${{ env.FIREBASE_PROJECT_ID }}
-          expires: 7d
+          workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
+          service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
+
+      - name: Önizleme linki oluştur
+        id: channel
+        run: |
+          out=$(npx --yes firebase-tools@15.31.0 hosting:channel:deploy "pr-${{ github.event.pull_request.number }}" \
+            --expires 7d --project "$FIREBASE_PROJECT_ID" --json --non-interactive)
+          echo "$out"
+          url=$(echo "$out" | jq -r '.result[].url' | head -n 1)
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Linki PR'a yaz
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.channel.outputs.url }}
+        with:
+          script: |
+            const marker = '<!-- kerek-preview -->';
+            const body = `${marker}\n🔍 **Önizleme hazır:** ${process.env.PREVIEW_URL}\n\nCommit: ${context.payload.pull_request.head.sha.slice(0, 7)} · 7 gün geçerli`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find(c => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
