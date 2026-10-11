@@ -20,7 +20,6 @@ import {
   Sparkles,
   Wrench,
   FileText,
-  ShieldCheck,
   Award,
 } from 'lucide-react';
 
@@ -79,7 +78,6 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
         ? 'Тәжірибелі маманмын. Сапалы әрі жылдам жөндеп беремін, кепілдік бар.'
         : 'Опытный мастер. Качественно и оперативно выполню работу, предоставлю гарантию.')
   );
-  const [iin, setIin] = useState('');
   const [tradeLicense, setTradeLicense] = useState(initialProvider?.tradeLicense || '');
 
   // Constructed Preview Provider
@@ -92,10 +90,6 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
         exp = parsed;
       }
     }
-
-    const cleanIin = iin.replace(/\D/g, '');
-    const isIinValid = cleanIin.length === 12;
-    const hasCert = Boolean(tradeLicense.trim().length > 0);
 
     return {
       id: initialProvider?.id || 'preview-provider-id',
@@ -113,9 +107,10 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
       workingHours: workingHours.trim() || '09:00 - 20:00',
       experienceYears: exp,
       description: description.trim(),
-      verified: initialProvider?.verified ?? false, // Security: false for new provider
-      iinVerified: isIinValid || Boolean(initialProvider?.iinVerified),
-      hasCertificate: hasCert || Boolean(initialProvider?.hasCertificate),
+      // Trust badges are not self-assignable; they stay off until real verification exists
+      verified: false,
+      iinVerified: false,
+      hasCertificate: false,
       tradeLicense: tradeLicense.trim() || initialProvider?.tradeLicense || '',
       isDemo: false,
     };
@@ -132,7 +127,6 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
     workingHours,
     priceRange,
     description,
-    iin,
     tradeLicense,
     language,
   ]);
@@ -166,11 +160,6 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
   };
 
   const validateStep3 = (): boolean => {
-    const cleanIin = iin.replace(/\D/g, '');
-    if (cleanIin.length > 0 && cleanIin.length !== 12) {
-      setStepError(t.iinInvalidError);
-      return false;
-    }
     setStepError(null);
     return true;
   };
@@ -216,10 +205,6 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
       }
     }
 
-    const cleanIin = iin.replace(/\D/g, '');
-    const isIinValid = cleanIin.length === 12;
-    const hasCert = Boolean(tradeLicense.trim().length > 0);
-
     try {
       await onSave({
         name: name.trim(),
@@ -233,8 +218,6 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
         workingHours: workingHours.trim() || '09:00 - 20:00',
         experienceYears: expYears,
         description: description.trim(),
-        iinVerified: isIinValid || Boolean(initialProvider?.iinVerified),
-        hasCertificate: hasCert || Boolean(initialProvider?.hasCertificate),
         tradeLicense: tradeLicense.trim() || initialProvider?.tradeLicense || '',
       });
     } catch (err: any) {
@@ -574,33 +557,6 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
           <div className="pt-3 border-t border-slate-100 space-y-3">
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-sky-600" />
-                <span>{t.iinFieldLabel}</span>
-              </label>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={12}
-                value={iin}
-                onChange={(e) => {
-                  const digits = e.target.value.replace(/\D/g, '').slice(0, 12);
-                  setIin(digits);
-                  if (stepError) setStepError(null);
-                }}
-                placeholder="123456789012"
-                className="w-full h-12 px-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white transition-colors"
-              />
-              <p className="text-[11px] text-slate-400">
-                {language === 'kz'
-                  ? 'ЖСН 12 саннан тұрса, профиліңізге "ЖСН Расталған" белгішесі беріледі'
-                  : language === 'tr'
-                  ? '12 haneli İİN girdiğinizde profilinize "İİN Doğrulandı" rozeti verilir'
-                  : 'При указании 12 цифр ИИН профиль получает значок "ИИН Проверен"'}
-              </p>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                 <Award className="w-3.5 h-3.5 text-amber-600" />
                 <span>{t.certificateFieldLabel}</span>
               </label>
@@ -663,18 +619,6 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
                       <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
                         <CheckCircle className="w-3 h-3 text-emerald-600 stroke-[2.5]" />
                         <span>{t.verifiedProviderBadge}</span>
-                      </span>
-                    )}
-                    {previewProvider.iinVerified && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
-                        <ShieldCheck className="w-3 h-3 text-sky-600 stroke-[2.5]" />
-                        <span>{t.iinVerifiedBadge}</span>
-                      </span>
-                    )}
-                    {previewProvider.hasCertificate && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full">
-                        <Award className="w-3 h-3 text-purple-600 stroke-[2.5]" />
-                        <span>{t.certifiedMasterBadge}</span>
                       </span>
                     )}
                   </div>

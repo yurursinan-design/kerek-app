@@ -24,6 +24,41 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid != null;
     }
 
+    // Optional string field: absent, or a string of at most n characters
+    function strMax(m, k, n) {
+      return !(k in m) || (m[k] is string && m[k].size() <= n);
+    }
+
+    // Trust badges are not self-assignable: absent or false only
+    function falseOrAbsent(m, k) {
+      return !(k in m) || m[k] == false;
+    }
+
+    function noTrustBadges(m) {
+      return falseOrAbsent(m, 'verified') && falseOrAbsent(m, 'iinVerified') && falseOrAbsent(m, 'hasCertificate');
+    }
+
+    function requestFieldLimits(m) {
+      return strMax(m, 'requestText', 5000) && strMax(m, 'description', 5000)
+        && strMax(m, 'customerName', 100) && strMax(m, 'budget', 100)
+        && strMax(m, 'date', 100) && strMax(m, 'urgency', 20)
+        && strMax(m, 'cityId', 64) && strMax(m, 'categoryId', 64);
+    }
+
+    function offerFieldLimits(m) {
+      return strMax(m, 'message', 2000) && strMax(m, 'availability', 300)
+        && strMax(m, 'providerName', 100) && strMax(m, 'providerPhone', 30)
+        && strMax(m, 'providerWhatsapp', 30) && strMax(m, 'priceType', 20);
+    }
+
+    function providerFieldLimits(m) {
+      return strMax(m, 'phone', 30) && strMax(m, 'whatsapp', 30)
+        && strMax(m, 'district', 100) && strMax(m, 'services', 1000)
+        && strMax(m, 'priceRange', 100) && strMax(m, 'workingHours', 100)
+        && strMax(m, 'description', 5000) && strMax(m, 'availability', 300)
+        && strMax(m, 'tradeLicense', 100) && strMax(m, 'cityId', 64) && strMax(m, 'categoryId', 64);
+    }
+
     // =================== Users Collection ===================
     // Private user accounts: anonymous or authenticated users can read, create, and update only their own record
     match /users/{userId} {
@@ -33,11 +68,13 @@ service cloud.firestore {
                     && isValidId(userId)
                     && request.auth.uid == userId
                     && incoming().id == userId
-                    && incoming().createdAt is string;
+                    && incoming().createdAt is string
+                    && strMax(incoming(), 'name', 100) && strMax(incoming(), 'phone', 30);
       allow update: if isSignedIn()
                     && isValidId(userId)
                     && request.auth.uid == userId
-                    && incoming().id == userId;
+                    && incoming().id == userId
+                    && strMax(incoming(), 'name', 100) && strMax(incoming(), 'phone', 30);
       allow delete: if false;
     }
 
@@ -56,13 +93,18 @@ service cloud.firestore {
                     && incoming().userId == request.auth.uid
                     && incoming().city is string && incoming().city.size() <= 50
                     && incoming().category is string && incoming().category.size() <= 100
-                    && incoming().name is string && incoming().name.size() > 0 && incoming().name.size() <= 100;
+                    && incoming().name is string && incoming().name.size() > 0 && incoming().name.size() <= 100
+                    && noTrustBadges(incoming())
+                    && providerFieldLimits(incoming());
       allow update: if isSignedIn()
                     && isValidId(providerId)
                     && providerId == request.auth.uid
                     && existing().userId == request.auth.uid
                     && incoming().userId == request.auth.uid
-                    && incoming().id == request.auth.uid;
+                    && incoming().id == request.auth.uid
+                    && strMax(incoming(), 'name', 100) && strMax(incoming(), 'city', 50) && strMax(incoming(), 'category', 100)
+                    && noTrustBadges(incoming())
+                    && providerFieldLimits(incoming());
       allow delete: if false;
     }
 
@@ -84,6 +126,11 @@ service cloud.firestore {
                     && incoming().category is string && incoming().category.size() <= 100
                     && ('service' in incoming()) && incoming()['service'] is string && incoming()['service'].size() <= 150
                     && incoming().status in ['OPEN', 'NEW', 'MATCHING']
+                    // Selection and payment state are never set by the client at creation
+                    && !('selectedOfferId' in incoming())
+                    && !('paymentStatus' in incoming())
+                    && !('escrowAmount' in incoming())
+                    && requestFieldLimits(incoming())
                     && (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 15))
                     && (!('location' in incoming()) || (incoming().location is map && ('latitude' in incoming().location) && ('longitude' in incoming().location)));
       allow update: if isSignedIn() && isValidId(requestId) && (
@@ -100,6 +147,7 @@ service cloud.firestore {
            'city', 'cityId', 'date', 'budget', 'urgency', 'customerName',
            'attachments', 'location', 'understanding', 'updatedAt'
          ]) &&
+         requestFieldLimits(incoming()) &&
          (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 15)) &&
          (!('location' in incoming()) || (incoming().location is map && ('latitude' in incoming().location) && ('longitude' in incoming().location)))) ||
         // 2. Customer accepting an offer (transitioning to PROVIDER_SELECTED with verified offer; cannot switch once selected)
@@ -222,9 +270,14 @@ service cloud.firestore {
                     && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
                     && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED']
                     && incoming().providerUserId == request.auth.uid
-                    && (!('providerId' in incoming()) || incoming().providerId is string)
+                    // providerId names the provider profile shown to the customer; it must be the caller's own
+                    && (!('providerId' in incoming()) || incoming().providerId == request.auth.uid)
                     && incoming().price is string && incoming().price.size() <= 50
-                    && incoming().status == 'PENDING';
+                    && incoming().status == 'PENDING'
+                    // Payment state is managed by the backend only
+                    && !('paymentStatus' in incoming())
+                    && noTrustBadges(incoming())
+                    && offerFieldLimits(incoming());
       allow update: if isSignedIn() && isValidId(offerId) && (
         // Provider updating their own offer details while still PENDING
         (
@@ -238,9 +291,10 @@ service cloud.firestore {
           incoming().status == 'PENDING' &&
           incoming().diff(existing()).affectedKeys().hasOnly([
             'price', 'priceType', 'availability', 'message',
-            'providerPhone', 'providerWhatsapp', 'providerName',
-            'iinVerified', 'hasCertificate', 'updatedAt'
-          ])
+            'providerPhone', 'providerWhatsapp', 'providerName', 'updatedAt'
+          ]) &&
+          incoming().price is string && incoming().price.size() <= 50 &&
+          offerFieldLimits(incoming())
         ) ||
         // Customer accepting or rejecting an offer (status transition: PENDING -> ACCEPTED / REJECTED)
         // paymentStatus cannot be set or modified by client directly; it is managed exclusively by backend escrow webhook (kaspiEscrowWebhook)
@@ -327,8 +381,12 @@ service cloud.firestore {
          resource.data.providerId == request.auth.uid) &&
         incoming().customerId == existing().customerId &&
         incoming().providerUserId == existing().providerUserId &&
+        // providerId also grants access (reads, messages, attachments), so it is immutable too
+        incoming().get('providerId', null) == existing().get('providerId', null) &&
         incoming().requestId == existing().requestId &&
-        incoming().id == existing().id
+        incoming().id == existing().id &&
+        strMax(incoming(), 'customerName', 100) && strMax(incoming(), 'providerName', 100) &&
+        strMax(incoming(), 'lastMessageText', 2000)
       );
       allow delete: if false;
 

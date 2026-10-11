@@ -43,7 +43,6 @@ import {
   UserCheck,
   MessageSquare,
   ShieldCheck,
-  Award,
   Info,
 } from 'lucide-react';
 
@@ -460,8 +459,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         availability: offerTime.trim(),
         message: offerMessage.trim(),
         status: 'PENDING',
-        iinVerified: provider.iinVerified,
-        hasCertificate: provider.hasCertificate,
       });
 
       // Update sent offers mapping
@@ -718,18 +715,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full" title={t.verifiedProviderBadge}>
                           <CheckCircle className="w-3 h-3 text-emerald-600 stroke-[2.5]" />
                           <span>{t.verifiedProviderBadge}</span>
-                        </span>
-                      )}
-                      {provider.iinVerified && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full" title={t.iinVerifiedBadge}>
-                          <ShieldCheck className="w-3 h-3 text-sky-600 stroke-[2.5]" />
-                          <span>{t.iinVerifiedBadge}</span>
-                        </span>
-                      )}
-                      {provider.hasCertificate && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full" title={t.certifiedMasterBadge}>
-                          <Award className="w-3 h-3 text-purple-600 stroke-[2.5]" />
-                          <span>{t.certifiedMasterBadge}</span>
                         </span>
                       )}
                     </div>

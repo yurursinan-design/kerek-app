@@ -16,7 +16,7 @@ import { ResultScreen } from './components/ResultScreen';
 import { MyRequestsScreen } from './components/MyRequestsScreen';
 import { ProviderModeScreen } from './components/ProviderModeScreen';
 import { InAppToast } from './components/InAppToast';
-import { analyzeRequestLocally } from './services/analyzer';
+import { generateRequestId } from './services/ids';
 import {
   auth,
   repository,
@@ -245,7 +245,7 @@ export default function App() {
       const service = (updatedNeed.service || rawText || category).trim();
       const text = rawText || service;
 
-      const targetRequestId = `REQ-${Date.now().toString().slice(-6)}`;
+      const targetRequestId = generateRequestId();
       const uploadedAttachments: RequestAttachment[] = [];
 
       // Process pending attachments upload

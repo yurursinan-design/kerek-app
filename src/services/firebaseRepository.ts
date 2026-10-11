@@ -68,6 +68,7 @@ import {
   validateReviewData,
 } from './validation';
 import { getCurrentUserId } from './localRepository';
+import { generateOfferId, generateRequestId } from './ids';
 import { CANONICAL_CITIES, CANONICAL_CATEGORIES, normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 
 /**
@@ -245,9 +246,10 @@ export class FirebaseRepository implements Repository {
         ? { experienceYears: providerData.experienceYears }
         : {}),
       availability: providerData.availability || providerData.workingHours || '09:00 - 20:00',
-      verified: providerData.verified ?? false,
-      iinVerified: providerData.iinVerified ?? false,
-      hasCertificate: providerData.hasCertificate ?? false,
+      // Trust badges are not self-assignable; they stay off until real verification exists
+      verified: false,
+      iinVerified: false,
+      hasCertificate: false,
       ...(providerData.tradeLicense ? { tradeLicense: providerData.tradeLicense } : {}),
       isDemo: false,
       createdAt: providerData.createdAt || new Date().toISOString(),
@@ -388,8 +390,7 @@ export class FirebaseRepository implements Repository {
 
     const firestore = this.ensureDb();
     const customerId = auth?.currentUser?.uid || requestData.customerId || getCurrentUserId();
-    const nowTimestamp = Date.now().toString().slice(-6);
-    const id = requestData.id || `REQ-${nowTimestamp}`;
+    const id = requestData.id || generateRequestId();
 
     const rawCity = requestData.city?.trim() || '';
     const city = rawCity.slice(0, 50);
@@ -427,9 +428,7 @@ export class FirebaseRepository implements Repository {
       createdAt: requestData.createdAt || new Date().toISOString(),
     };
 
-    if (requestData.selectedOfferId && requestData.selectedOfferId.trim()) {
-      newRequest.selectedOfferId = requestData.selectedOfferId.trim();
-    }
+    // selectedOfferId is never set at creation: it is only written by acceptOffer
     if (requestData.attachments && requestData.attachments.length > 0) {
       newRequest.attachments = requestData.attachments;
     }
@@ -460,12 +459,6 @@ export class FirebaseRepository implements Repository {
           { merge: true }
         );
       }
-
-      // Generate demo offers to simulate immediate marketplace responsiveness
-      await this.generateDemoOffersForRequest({
-        ...newRequest,
-        ...(customerPhone ? { customerPhone } : {}),
-      });
 
       return {
         ...newRequest,
@@ -1107,7 +1100,7 @@ export class FirebaseRepository implements Repository {
 
     const firestore = this.ensureDb();
     const providerUserId = auth?.currentUser?.uid || getCurrentUserId();
-    const id = offerData.id || `OFFER-${offerData.requestId || 'REQ'}-${Date.now().toString().slice(-4)}`;
+    const id = offerData.id || generateOfferId(offerData.requestId || 'REQ');
 
     const priceType = offerData.priceType || 'fixed';
     let price = (offerData.price || '').trim();
@@ -1120,7 +1113,9 @@ export class FirebaseRepository implements Repository {
     const newOffer: ProviderOffer = {
       id,
       requestId: offerData.requestId || '',
-      providerId: offerData.providerId || '',
+      // A provider's profile document id is their auth uid, and the rules only accept offers
+      // under the caller's own profile, so the offer always points at the caller.
+      providerId: providerUserId,
       providerUserId,
       providerName: offerData.providerName || '',
       providerPhone: offerData.providerPhone || '',
@@ -1132,8 +1127,9 @@ export class FirebaseRepository implements Repository {
       message: offerData.message || '',
       status: 'PENDING',
       createdAt: offerData.createdAt || new Date().toISOString(),
-      iinVerified: offerData.iinVerified ?? false,
-      hasCertificate: offerData.hasCertificate ?? false,
+      // Trust badges are not self-assignable; they stay off until real verification exists
+      iinVerified: false,
+      hasCertificate: false,
     };
 
     try {
@@ -1261,8 +1257,6 @@ export class FirebaseRepository implements Repository {
     const targetOfferRef = doc(firestore, 'offers', cleanOfferId);
     const convId = getConversationId(cleanReqId);
     const convRef = doc(firestore, 'conversations', convId);
-    const apptId = getAppointmentId(cleanReqId);
-    const apptRef = doc(firestore, 'appointments', apptId);
 
     try {
       let resultReq: any = null;
@@ -1372,63 +1366,40 @@ export class FirebaseRepository implements Repository {
         };
       });
 
-      // Post-transaction: Initialize conversation and appointment now that request is committed as PROVIDER_SELECTED
+      // Post-transaction: initialize the conversation now that the request is committed as PROVIDER_SELECTED.
+      // No appointment is created here: a time is proposed later by either side from the appointment
+      // section, and an auto-created placeholder (scheduled "now", proposed on the provider's behalf by
+      // the customer) was rejected by the security rules on every acceptance.
       if (resultReq && resultOffer) {
         try {
           const effectiveProviderId = resultOffer.providerId;
           const effectiveProviderUserId = resultOffer.providerUserId || resultOffer.providerId;
           const effectiveProviderName = resultOffer.providerName || 'Мастер';
-
-          const apptNote = resultOffer.availability
-            ? String(resultOffer.availability).trim().slice(0, 1000)
-            : undefined;
-
           const now = new Date().toISOString();
 
-          await Promise.all([
-            setDoc(
-              convRef,
-              sanitizeForFirestore({
-                id: convId,
-                requestId: cleanReqId,
-                customerId: resultReq.customerId,
-                customerName: resultReq.customerName || 'Клиент',
-                providerId: effectiveProviderId,
-                providerUserId: effectiveProviderUserId,
-                providerName: effectiveProviderName,
-                status: 'ACTIVE',
-                lastMessageText: '',
-                lastMessageSenderId: '',
-                lastMessageAt: now,
-                unreadCountCustomer: 0,
-                unreadCountProvider: 0,
-                createdAt: now,
-                updatedAt: now,
-              }),
-              { merge: true }
-            ),
-            setDoc(
-              apptRef,
-              sanitizeForFirestore({
-                id: apptId,
-                requestId: cleanReqId,
-                customerId: resultReq.customerId,
-                providerId: effectiveProviderId,
-                providerUserId: effectiveProviderUserId,
-                proposedBy: 'provider',
-                scheduledAt: now,
-                status: 'PROPOSED',
-                ...(apptNote ? { note: apptNote } : {}),
-                workStatus: 'NOT_STARTED',
-                workStatusUpdatedAt: now,
-                createdAt: now,
-                updatedAt: now,
-              }),
-              { merge: true }
-            ),
-          ]);
+          await setDoc(
+            convRef,
+            sanitizeForFirestore({
+              id: convId,
+              requestId: cleanReqId,
+              customerId: resultReq.customerId,
+              customerName: resultReq.customerName || 'Клиент',
+              providerId: effectiveProviderId,
+              providerUserId: effectiveProviderUserId,
+              providerName: effectiveProviderName,
+              status: 'ACTIVE',
+              lastMessageText: '',
+              lastMessageSenderId: '',
+              lastMessageAt: now,
+              unreadCountCustomer: 0,
+              unreadCountProvider: 0,
+              createdAt: now,
+              updatedAt: now,
+            }),
+            { merge: true }
+          );
         } catch (postInitErr) {
-          console.warn('[FirebaseRepository] Note initializing conversation/appointment:', postInitErr);
+          console.warn('[FirebaseRepository] Note initializing conversation:', postInitErr);
         }
       }
 
@@ -1543,47 +1514,6 @@ export class FirebaseRepository implements Repository {
   }
 
   // Helper: Seed initial simulated demo offers in Firestore for realistic testing
-  private async generateDemoOffersForRequest(request: ServiceRequest): Promise<void> {
-    try {
-      const matched = await this.matchProviders(request);
-      const demoProviders = matched.filter((p) => p.isDemo).slice(0, 2);
-
-      const templates = [
-        {
-          price: '15 000 ₸',
-          availability: 'Сегодня, 40 минут',
-          message: 'Құрал-саймандар өзімде бар. Келіп диагностика жасап, дереу жөндеп беремін.',
-        },
-        {
-          price: '18 000 ₸',
-          availability: 'Сегодня, 1 час',
-          message: 'Түпнұсқа бөлшектер мен ресми кепілдік беремін.',
-        },
-      ];
-
-      for (let i = 0; i < demoProviders.length; i++) {
-        const prov = demoProviders[i];
-        const tmpl = templates[i % templates.length];
-        const offerId = `OFFER-${request.id}-${i + 1}`;
-        await this.createOffer({
-          id: offerId,
-          requestId: request.id,
-          providerId: prov.id,
-          providerName: prov.name,
-          providerPhone: prov.phone,
-          providerWhatsapp: prov.whatsapp,
-          isDemo: true,
-          price: tmpl.price,
-          availability: tmpl.availability,
-          message: tmpl.message,
-          status: 'PENDING',
-        });
-      }
-    } catch (err) {
-      console.warn('[FirebaseRepository] Note: could not generate demo offers:', err);
-    }
-  }
-
   // =================== Reviews ===================
   async createReview(reviewData: Partial<Review>): Promise<Review> {
     await ensureFirebaseAuth();

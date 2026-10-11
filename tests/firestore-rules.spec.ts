@@ -23,6 +23,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { firebaseRepository } from '../src/services/firebaseRepository';
 import { ensureFirebaseAuth, auth } from '../src/services/firebase';
+import { setCurrentUserId } from '../src/services/localRepository';
 
 const PROJECT_ID = 'kerek-emulator-security-test';
 const RULES_PATH = path.resolve(process.cwd(), 'firestore.rules');
@@ -544,6 +545,9 @@ async function runTestSuite() {
 
     await test('Parallel concurrent offer acceptance via firebaseRepository.acceptOffer results in exactly 1 ACCEPTED offer and consistent request state', async () => {
       const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      // acceptOffer's client-side ownership check reads the app's current user id, not the
+      // test context's auth, so align it with the context the transaction runs under.
+      setCurrentUserId('user_alice');
       const pA = firebaseRepository.acceptOffer('req_concurrent_01', 'offer_conc_A', aliceDb as any);
       const pB = firebaseRepository.acceptOffer('req_concurrent_01', 'offer_conc_B', aliceDb as any);
 
@@ -1409,6 +1413,163 @@ async function runTestSuite() {
           })
         );
       }
+    });
+
+    // =========================================================================
+    // SECTION 11: Hardening — impersonation, self-assigned badges, payment state,
+    // conversation access and field size limits
+    // =========================================================================
+    console.log('\n--- SECTION 11: Hardening (impersonation, badges, payment, sizes) ---');
+
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      const adminDb = adminContext.firestore();
+      await setDoc(doc(adminDb, 'requests', 'req_h_open'), {
+        id: 'req_h_open',
+        customerId: 'user_alice',
+        city: 'almaty',
+        category: 'appliances',
+        service: 'Repair',
+        status: 'OPEN',
+      });
+      await setDoc(doc(adminDb, 'providers', 'prov_trusted'), {
+        id: 'prov_trusted',
+        userId: 'prov_trusted',
+        name: 'Trusted Master',
+        city: 'almaty',
+        category: 'appliances',
+      });
+      await setDoc(doc(adminDb, 'providers', 'mallory'), {
+        id: 'mallory',
+        userId: 'mallory',
+        name: 'Mallory',
+        city: 'almaty',
+        category: 'appliances',
+      });
+      await setDoc(doc(adminDb, 'offers', 'offer_h_mallory'), {
+        id: 'offer_h_mallory',
+        requestId: 'req_h_open',
+        providerId: 'mallory',
+        providerUserId: 'mallory',
+        price: '10 000 ₸',
+        status: 'PENDING',
+      });
+      await setDoc(doc(adminDb, 'conversations', 'conv_req_h_sel'), {
+        id: 'conv_req_h_sel',
+        requestId: 'req_h_sel',
+        customerId: 'user_alice',
+        providerId: 'mallory',
+        providerUserId: 'mallory',
+        status: 'ACTIVE',
+      });
+    });
+
+    const malloryDb = () => testEnv.authenticatedContext('mallory').firestore();
+    const baseOffer = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      requestId: 'req_h_open',
+      providerUserId: 'mallory',
+      price: '9 000 ₸',
+      status: 'PENDING',
+      ...extra,
+    });
+
+    await test('Provider cannot create an offer that impersonates another provider profile', async () => {
+      await assertFails(
+        setDoc(doc(malloryDb(), 'offers', 'offer_h_imp'), baseOffer('offer_h_imp', { providerId: 'prov_trusted', providerName: 'Trusted Master' }))
+      );
+    });
+
+    await test('Provider can create an offer under their own provider profile', async () => {
+      await assertSucceeds(
+        setDoc(doc(malloryDb(), 'offers', 'offer_h_own'), baseOffer('offer_h_own', { providerId: 'mallory', iinVerified: false, hasCertificate: false }))
+      );
+    });
+
+    await test('Provider cannot create an offer with a pre-set paymentStatus', async () => {
+      await assertFails(
+        setDoc(doc(malloryDb(), 'offers', 'offer_h_pay'), baseOffer('offer_h_pay', { providerId: 'mallory', paymentStatus: 'held_in_escrow' }))
+      );
+    });
+
+    await test('Provider cannot create an offer carrying self-assigned trust badges', async () => {
+      await assertFails(
+        setDoc(doc(malloryDb(), 'offers', 'offer_h_badge'), baseOffer('offer_h_badge', { providerId: 'mallory', iinVerified: true }))
+      );
+      await assertFails(
+        setDoc(doc(malloryDb(), 'offers', 'offer_h_badge2'), baseOffer('offer_h_badge2', { providerId: 'mallory', hasCertificate: true }))
+      );
+    });
+
+    await test('Provider cannot turn on trust badges by editing a pending offer', async () => {
+      await assertFails(updateDoc(doc(malloryDb(), 'offers', 'offer_h_mallory'), { iinVerified: true }));
+    });
+
+    await test('Provider can still edit price and message of their pending offer', async () => {
+      await assertSucceeds(updateDoc(doc(malloryDb(), 'offers', 'offer_h_mallory'), { price: '8 500 ₸', message: 'Бүгін келемін' }));
+    });
+
+    await test('Offer message longer than 2000 characters is rejected', async () => {
+      await assertFails(
+        setDoc(doc(malloryDb(), 'offers', 'offer_h_long'), baseOffer('offer_h_long', { providerId: 'mallory', message: 'x'.repeat(2001) }))
+      );
+    });
+
+    await test('Provider cannot create a profile with self-assigned verified / IIN / certificate badges', async () => {
+      const eveDb = testEnv.authenticatedContext('eve').firestore();
+      const base = { id: 'eve', userId: 'eve', name: 'Eve', city: 'almaty', category: 'appliances' };
+      await assertFails(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, iinVerified: true }));
+      await assertFails(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, verified: true }));
+      await assertFails(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, hasCertificate: true }));
+      await assertSucceeds(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, verified: false, iinVerified: false, hasCertificate: false }));
+    });
+
+    await test('Provider cannot add trust badges to an existing profile', async () => {
+      await assertFails(updateDoc(doc(malloryDb(), 'providers', 'mallory'), { iinVerified: true }));
+      await assertSucceeds(updateDoc(doc(malloryDb(), 'providers', 'mallory'), { description: 'Тәжірибем 3 жыл' }));
+    });
+
+    await test('Provider description longer than 5000 characters is rejected', async () => {
+      await assertFails(updateDoc(doc(malloryDb(), 'providers', 'mallory'), { description: 'x'.repeat(5001) }));
+    });
+
+    const aliceDb = () => testEnv.authenticatedContext('user_alice').firestore();
+    const baseRequest = (id: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      customerId: 'user_alice',
+      city: 'almaty',
+      category: 'appliances',
+      service: 'Repair',
+      status: 'MATCHING',
+      ...extra,
+    });
+
+    await test('Customer can create a normal request', async () => {
+      await assertSucceeds(setDoc(doc(aliceDb(), 'requests', 'req_h_ok'), baseRequest('req_h_ok', { requestText: 'Тоңазытқыш суытпайды' })));
+    });
+
+    await test('Customer cannot create a request with pre-set payment or selection state', async () => {
+      await assertFails(setDoc(doc(aliceDb(), 'requests', 'req_h_pay'), baseRequest('req_h_pay', { paymentStatus: 'held_in_escrow' })));
+      await assertFails(setDoc(doc(aliceDb(), 'requests', 'req_h_esc'), baseRequest('req_h_esc', { escrowAmount: 15000 })));
+      await assertFails(setDoc(doc(aliceDb(), 'requests', 'req_h_sel2'), baseRequest('req_h_sel2', { selectedOfferId: 'offer_h_mallory' })));
+    });
+
+    await test('Request text longer than 5000 characters is rejected', async () => {
+      await assertFails(setDoc(doc(aliceDb(), 'requests', 'req_h_long'), baseRequest('req_h_long', { requestText: 'x'.repeat(5001) })));
+    });
+
+    await test('Chat participant cannot change the conversation providerId to add a third person', async () => {
+      await assertFails(updateDoc(doc(malloryDb(), 'conversations', 'conv_req_h_sel'), { providerId: 'eve' }));
+      await assertFails(updateDoc(doc(aliceDb(), 'conversations', 'conv_req_h_sel'), { providerId: 'eve' }));
+    });
+
+    await test('Chat participant can still update last message summary and unread counters', async () => {
+      await assertSucceeds(
+        updateDoc(doc(aliceDb(), 'conversations', 'conv_req_h_sel'), {
+          lastMessageText: 'Сәлем!',
+          lastMessageSenderId: 'user_alice',
+          unreadCountProvider: 1,
+        })
+      );
     });
 
   } finally {
