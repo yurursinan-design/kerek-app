@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AppNotification, Language } from '../types';
-import { ArrowLeft, Database, Download, Upload, X, CheckCircle, AlertCircle, Cloud, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from 'lucide-react';
+import { ArrowLeft, Database, Download, Upload, X, CheckCircle, AlertCircle, Cloud, RefreshCw, ShieldAlert, ShieldCheck, Trash2, UserRound, LogOut } from 'lucide-react';
+import { maskPhone } from '../services/phoneAuth';
 import { isDebugMode } from '../services/debug';
 import { exportLocalData, importLocalData, clearAllKerekLocalStorage, isFirebaseConfigured, resilientRepository, runFirebaseDiagnostics, getLatestDiagnosticReport } from '../services';
 import { NotificationBell } from './NotificationBell';
@@ -16,6 +17,11 @@ interface HeaderProps {
   unreadCount?: number;
   currentUserId?: string;
   onSelectNotification?: (notif: AppNotification) => void;
+  /** SMS login controls (cloud mode only) */
+  showAccount?: boolean;
+  phoneNumber?: string | null;
+  onLoginClick?: () => void;
+  onLogout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -29,8 +35,15 @@ export const Header: React.FC<HeaderProps> = ({
   unreadCount = 0,
   currentUserId = '',
   onSelectNotification,
+  showAccount = false,
+  phoneNumber = null,
+  onLoginClick,
+  onLogout,
 }) => {
   const [showDemoModal, setShowDemoModal] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const accountLabel =
+    language === 'kz' ? 'Аккаунт' : language === 'tr' ? 'Hesap' : 'Аккаунт';
   const [importStatus, setImportStatus] = useState<{ success: boolean; message: string } | null>(null);
   const [isCloud, setIsCloud] = useState<boolean>(() => resilientRepository.isCloudActive());
   const [diagReport, setDiagReport] = useState<any>(() => getLatestDiagnosticReport());
@@ -182,6 +195,43 @@ export const Header: React.FC<HeaderProps> = ({
                 TR
               </button>
             </div>
+
+            {/* SMS login: "log in" when not verified, otherwise the masked number with a log-out option */}
+            {showAccount && (
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label={accountLabel}
+                  aria-expanded={showAccountMenu}
+                  onClick={() => (phoneNumber ? setShowAccountMenu((v) => !v) : onLoginClick?.())}
+                  className={`relative min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center transition-colors ${
+                    phoneNumber ? 'text-emerald-700 hover:bg-emerald-50' : 'text-slate-500 hover:bg-slate-100'
+                  }`}
+                >
+                  <UserRound className="w-5 h-5" />
+                  {phoneNumber && <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-500" />}
+                </button>
+                {phoneNumber && showAccountMenu && (
+                  <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl p-3 space-y-2">
+                    <div className="text-[11px] text-slate-500">
+                      {language === 'kz' ? 'Расталған нөмір' : language === 'tr' ? 'Doğrulanmış numara' : 'Подтверждённый номер'}
+                    </div>
+                    <div className="text-sm font-bold text-slate-900">{maskPhone(phoneNumber)}</div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAccountMenu(false);
+                        onLogout?.();
+                      }}
+                      className="w-full min-h-[40px] rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center justify-center gap-1.5"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>{language === 'kz' ? 'Шығу' : language === 'tr' ? 'Çıkış yap' : 'Выйти'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* In-App Notifications Bell */}
             <NotificationBell

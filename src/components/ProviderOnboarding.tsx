@@ -1,4 +1,5 @@
 import { getFriendlyErrorMessage } from '../services';
+import { auth } from '../services/firebase';
 import React, { useState, useMemo } from 'react';
 import { Language, Provider } from '../types';
 import { translations } from '../i18n/translations';
@@ -47,7 +48,7 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
 
   // Form Fields State
   const [name, setName] = useState(initialProvider?.name || '');
-  const [phone, setPhone] = useState(initialProvider?.phone || '');
+  const [phone, setPhone] = useState(initialProvider?.phone || auth?.currentUser?.phoneNumber || '');
   const [whatsapp, setWhatsapp] = useState(initialProvider?.whatsapp || '');
 
   const [city, setCity] = useState(

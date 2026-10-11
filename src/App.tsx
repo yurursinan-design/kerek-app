@@ -16,6 +16,9 @@ import { ResultScreen } from './components/ResultScreen';
 import { MyRequestsScreen } from './components/MyRequestsScreen';
 import { ProviderModeScreen } from './components/ProviderModeScreen';
 import { InAppToast } from './components/InAppToast';
+import { PhoneLoginModal, PhoneLoginReason } from './components/PhoneLoginModal';
+import { onAuthStateChanged } from 'firebase/auth';
+import { logoutToAnonymous, requiresPhoneLogin } from './services/phoneAuth';
 import { generateRequestId } from './services/ids';
 import {
   auth,
@@ -66,6 +69,30 @@ export default function App() {
   const [customerRequests, setCustomerRequests] = useState<ServiceRequest[]>([]);
   const [hasProviderProfile, setHasProviderProfile] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
+
+  // SMS login: who is signed in, and the dialog that asks for a verified phone before publishing
+  const [authUid, setAuthUid] = useState<string | null>(auth?.currentUser?.uid || null);
+  const [phoneNumber, setPhoneNumber] = useState<string | null>(auth?.currentUser?.phoneNumber || null);
+  const [phoneLogin, setPhoneLogin] = useState<PhoneLoginReason | null>(null);
+  const afterPhoneLoginRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!auth) return;
+    return onAuthStateChanged(auth, (user) => {
+      setAuthUid(user?.uid || null);
+      setPhoneNumber(user?.phoneNumber || null);
+    });
+  }, []);
+
+  /** Runs `action` now if the account may publish, otherwise after a successful SMS login. */
+  const withPhoneLogin = (reason: PhoneLoginReason, action: () => void) => {
+    if (!requiresPhoneLogin()) {
+      action();
+      return;
+    }
+    afterPhoneLoginRef.current = action;
+    setPhoneLogin(reason);
+  };
   const [hasFatalFailedMutations, setHasFatalFailedMutations] = useState(false);
 
   // Monitor offline queue for fatal failed requests
@@ -146,7 +173,7 @@ export default function App() {
         } catch {}
       }
     };
-  }, [language]);
+  }, [language, authUid]);
 
   // Security rule: Customer only sees their own requests!
   const refreshData = useCallback(async () => {
@@ -176,7 +203,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [refreshData]);
+  }, [refreshData, authUid]);
 
   // Trigger search & analysis using Request Understanding 2.0 (with AI Cloud Function merge)
   const handleSearch = async (
@@ -246,6 +273,11 @@ export default function App() {
   const handleContinue = async (updatedNeed: ExtractedNeed) => {
     setExtractedNeed(updatedNeed);
     setAppError(null);
+
+    if (requiresPhoneLogin()) {
+      withPhoneLogin('request', () => handleContinue(updatedNeed));
+      return;
+    }
 
     const currentUserId = getCurrentUserId();
 
@@ -388,6 +420,10 @@ export default function App() {
 
   // Switch tabs
   const handleTabChange = (tab: MainTab) => {
+    if (tab === 'provider-mode' && requiresPhoneLogin()) {
+      withPhoneLogin('provider', () => handleTabChange('provider-mode'));
+      return;
+    }
     setActiveTab(tab);
     if (tab === 'home' && currentScreen !== 'interpretation' && currentScreen !== 'results') {
       setCurrentScreen('home');
@@ -427,7 +463,7 @@ export default function App() {
 
     // 3. Role / screen navigation
     if (notif.recipientRole === 'provider') {
-      setActiveTab('provider-mode');
+      handleTabChange('provider-mode');
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
@@ -472,6 +508,38 @@ export default function App() {
           unreadCount={unreadCount}
           currentUserId={auth?.currentUser?.uid || getCurrentUserId()}
           onSelectNotification={handleNotificationClick}
+          showAccount={isFirebaseConfigured()}
+          phoneNumber={phoneNumber}
+          onLoginClick={() => setPhoneLogin('header')}
+          onLogout={async () => {
+            try {
+              await logoutToAnonymous();
+              setActiveTab('home');
+              setCurrentScreen('home');
+              setActiveRequest(null);
+              setExtractedNeed(null);
+            } catch (err) {
+              setAppError(getFriendlyErrorMessage(err, language));
+            }
+          }}
+        />
+
+        <PhoneLoginModal
+          open={phoneLogin !== null}
+          language={language}
+          reason={phoneLogin || 'header'}
+          onCancel={() => {
+            afterPhoneLoginRef.current = null;
+            setPhoneLogin(null);
+          }}
+          onSuccess={() => {
+            const next = afterPhoneLoginRef.current;
+            afterPhoneLoginRef.current = null;
+            setPhoneLogin(null);
+            setPhoneNumber(auth?.currentUser?.phoneNumber || null);
+            setAuthUid(auth?.currentUser?.uid || null);
+            if (next) next();
+          }}
         />
 
         {/* Realtime In-App Notification Toast */}

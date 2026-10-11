@@ -237,6 +237,12 @@ export async function ensureFirebaseAuth(): Promise<string | null> {
   if (!isFirebaseConfigured() || !auth) {
     return null;
   }
+  // Wait for the saved session to be restored first. Before that, currentUser is null even for a
+  // signed-in visitor, and signing in anonymously at that moment replaced a phone-verified session
+  // with a new anonymous account on every page load.
+  try {
+    await auth.authStateReady();
+  } catch {}
   if (auth.currentUser?.uid) {
     try {
       localStorage.setItem('kerek_current_user_id_v2', auth.currentUser.uid);
