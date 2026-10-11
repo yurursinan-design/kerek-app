@@ -1,7 +1,7 @@
 import { Repository } from './repository';
 import { resilientRepository, ResilientRepository } from './resilientRepository';
 import { firebaseRepository, FirebaseRepository } from './firebaseRepository';
-import { localRepository, getCurrentUserId, generateUUID } from './localRepository';
+import { localRepository, getCurrentUserId, setCurrentUserId, generateUUID } from './localRepository';
 import { auth, isFirebaseConfigured, ensureFirebaseAuth, runFirebaseDiagnostics, getLatestDiagnosticReport } from './firebase';
 
 // Single data access layer for all UI components.
@@ -14,7 +14,7 @@ export { auth, localRepository, firebaseRepository, resilientRepository, isFireb
 export type { ResilientRepository, FirebaseRepository };
 
 // User Identification
-export { getCurrentUserId, generateUUID };
+export { getCurrentUserId, setCurrentUserId, generateUUID };
 
 // Error Handling & Validation
 export { getFriendlyErrorMessage, logTechnicalError } from './errorHandler';

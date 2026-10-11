@@ -94,6 +94,17 @@ export function generateUUID(): string {
   return 'usr-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 9);
 }
 
+// Export setCurrentUserId helper for explicit session tracking and testing
+export function setCurrentUserId(uid: string | null): void {
+  try {
+    if (!uid) {
+      safeStorage.removeItem(STORAGE_KEY_USER_ID);
+    } else {
+      safeStorage.setItem(STORAGE_KEY_USER_ID, uid);
+    }
+  } catch {}
+}
+
 // Get or initialize persistent local user ID (synchronizes strictly with Firebase Auth UID as canonical identity)
 export function getCurrentUserId(): string {
   try {
@@ -106,24 +117,12 @@ export function getCurrentUserId(): string {
     }
 
     let uid = safeStorage.getItem(STORAGE_KEY_USER_ID);
-    // If a non-legacy UID exists in storage, return it
-    if (uid && !uid.startsWith('usr-') && !uid.startsWith('temp-')) {
-      return uid;
+    if (uid && uid.trim().length > 0) {
+      return uid.trim();
     }
 
-    // Re-check auth currentUser if safeStorage contains legacy usr-* or is empty
-    if (auth?.currentUser?.uid) {
-      const canonicalUid = auth.currentUser.uid;
-      try {
-        safeStorage.setItem(STORAGE_KEY_USER_ID, canonicalUid);
-      } catch {}
-      return canonicalUid;
-    }
-
-    if (!uid) {
-      uid = generateUUID();
-      safeStorage.setItem(STORAGE_KEY_USER_ID, uid);
-    }
+    uid = generateUUID();
+    safeStorage.setItem(STORAGE_KEY_USER_ID, uid);
     return uid;
   } catch {
     return 'temp-local-user-id';
@@ -918,23 +917,55 @@ export class LocalRepository implements Repository {
     }
 
     // Check if request exists and is COMPLETED
-    let req = await this.getRequest(requestId);
-    if (req && normalizeRequestStatus(req.status) !== 'COMPLETED') {
-      await this.updateRequestStatus(requestId, 'COMPLETED');
-      req = await this.getRequest(requestId);
+    const req = await this.getRequest(requestId);
+    if (!req) {
+      throw new Error('Validation Error: Отсутствует ID заявки');
     }
-    let acceptedOffer: ProviderOffer | null = null;
-    if (req?.selectedOfferId) {
-      const allOffers = await this.getAllOffersRaw();
-      acceptedOffer = allOffers.find((o) => o.id === req.selectedOfferId) || null;
-    }
-    if (!acceptedOffer) {
-      const allOffers = await this.getAllOffersRaw();
-      acceptedOffer = allOffers.find((o) => o.requestId === requestId && o.status === 'ACCEPTED') || null;
+    const canonicalStatus = normalizeRequestStatus(req.status);
+    if (canonicalStatus !== 'COMPLETED') {
+      throw new Error('Validation Error: Оценивать можно только завершенные заказы');
     }
 
-    const customerId = reviewData.customerId?.trim() || req?.customerId || getCurrentUserId();
-    const providerId = reviewData.providerId?.trim() || acceptedOffer?.providerId || '';
+    // Verify session owner is strictly the customer who created the request (no anonymous/usr- bypass)
+    const sessionUid = auth?.currentUser?.uid ? auth.currentUser.uid : getCurrentUserId();
+    if (!sessionUid || sessionUid !== req.customerId) {
+      throw new Error('Validation Error: Только заказчик может оставить отзыв');
+    }
+    if (reviewData.customerId && reviewData.customerId.trim() !== req.customerId) {
+      throw new Error('Validation Error: Только заказчик может оставить отзыв');
+    }
+    const customerId = req.customerId;
+
+    // Verify selectedOfferId is strictly present
+    if (!req.selectedOfferId || typeof req.selectedOfferId !== 'string' || !req.selectedOfferId.trim()) {
+      throw new Error('Validation Error: Предложение не было принято');
+    }
+
+    let acceptedOffer: ProviderOffer | null = null;
+    const allOffers = await this.getAllOffersRaw();
+    acceptedOffer = allOffers.find((o) => o.id === req.selectedOfferId && o.requestId === requestId && o.status === 'ACCEPTED') || null;
+
+    if (!acceptedOffer || acceptedOffer.status !== 'ACCEPTED') {
+      throw new Error('Validation Error: Предложение не было принято');
+    }
+
+    if (!acceptedOffer.providerId) {
+      throw new Error('Validation Error: Нельзя оставить отзыв неподтвержденному исполнителю');
+    }
+
+    if (reviewData.providerId && reviewData.providerId.trim() !== acceptedOffer.providerId) {
+      throw new Error('Validation Error: Нельзя оставить отзыв неподтвержденному исполнителю');
+    }
+    const providerId = acceptedOffer.providerId;
+
+    if (
+      customerId === providerId ||
+      (acceptedOffer.providerUserId && customerId === acceptedOffer.providerUserId) ||
+      sessionUid === providerId ||
+      (acceptedOffer.providerUserId && sessionUid === acceptedOffer.providerUserId)
+    ) {
+      throw new Error('Validation Error: Исполнитель не может оценивать самого себя');
+    }
 
     const reviewPayload: Partial<Review> = {
       ...reviewData,
@@ -942,14 +973,7 @@ export class LocalRepository implements Repository {
       providerId,
     };
 
-    const isAnonymousSession = Boolean(
-      !auth?.currentUser ||
-      auth.currentUser.isAnonymous ||
-      getCurrentUserId().startsWith('usr-') ||
-      getCurrentUserId() === 'temp-local-user-id'
-    );
-
-    const validation = validateReviewData(reviewPayload, req, acceptedOffer, 'ru', isAnonymousSession);
+    const validation = validateReviewData(reviewPayload, req, acceptedOffer, 'ru', false);
     if (!validation.valid) {
       throw new Error(`Validation Error: ${validation.message}`);
     }

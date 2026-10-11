@@ -246,30 +246,27 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   };
 
   const handleOpenRating = async () => {
+    setActionError(null);
+    let currentStatus = request?.status;
     if (request?.id) {
       try {
         const fresh = await repository.getRequest(request.id);
         if (fresh) {
-          const canonical = normalizeRequestStatus(fresh.status);
-          if (canonical !== 'COMPLETED') {
-            const currentUid = auth?.currentUser?.uid || getCurrentUserId();
-            if (fresh.customerId === currentUid || request.customerId === currentUid) {
-              const updated = await repository.updateRequestStatus(request.id, 'COMPLETED');
-              if (updated) {
-                setRequest({ ...updated, status: 'COMPLETED' });
-              } else {
-                setRequest({ ...fresh, status: 'COMPLETED' });
-              }
-            } else {
-              setRequest({ ...fresh, status: canonical });
-            }
-          } else {
-            setRequest({ ...fresh, status: 'COMPLETED' });
-          }
+          setRequest(fresh);
+          currentStatus = fresh.status;
         }
       } catch (err) {
         console.warn('[ResultScreen] Refreshing request on open rating:', err);
       }
+    }
+    const canonical = normalizeRequestStatus(currentStatus);
+    if (canonical !== 'COMPLETED') {
+      setActionError(
+        language === 'kz'
+          ? 'Тек аяқталған тапсырысқа баға беруге болады'
+          : 'Оценивать можно только завершенные заказы'
+      );
+      return;
     }
     setIsReviewModalOpen(true);
   };
@@ -296,20 +293,16 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
       ? offers.find((o) => o.status === 'ACCEPTED')
       : undefined);
 
-  const isAnonymousSession = Boolean(
-    !auth?.currentUser ||
-    auth.currentUser.isAnonymous ||
-    getCurrentUserId().startsWith('usr-') ||
-    getCurrentUserId() === 'temp-local-user-id'
-  );
-
   const isSelfProvider = Boolean(
-    !isAnonymousSession &&
     request &&
     selectedOffer &&
     request.customerId &&
     ((selectedOffer.providerId && request.customerId.trim() === selectedOffer.providerId.trim()) ||
-     (selectedOffer.providerUserId && request.customerId.trim() === selectedOffer.providerUserId.trim()))
+     (selectedOffer.providerUserId && request.customerId.trim() === selectedOffer.providerUserId.trim()) ||
+     (auth?.currentUser?.uid && selectedOffer.providerUserId && auth.currentUser.uid === selectedOffer.providerUserId.trim()) ||
+     (auth?.currentUser?.uid && selectedOffer.providerId && auth.currentUser.uid === selectedOffer.providerId.trim()) ||
+     (getCurrentUserId() && selectedOffer.providerUserId && getCurrentUserId() === selectedOffer.providerUserId.trim()) ||
+     (getCurrentUserId() && selectedOffer.providerId && getCurrentUserId() === selectedOffer.providerId.trim()))
   );
 
   // Format created date nicely

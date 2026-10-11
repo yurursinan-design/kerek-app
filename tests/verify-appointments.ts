@@ -275,6 +275,371 @@ async function runAppointmentTests() {
     `21. ResilientRepository retrieves appointment via fallback/cache layer`
   );
 
+  // 16. Functional Firestore Security Rules Simulation for /appointments/{appointmentId}
+  console.log('\n--- 16. Running Functional Firestore Security Rules Evaluation for Appointments ---');
+
+  interface RulesContext {
+    auth: { uid: string | null };
+    database: {
+      requests: Record<string, any>;
+      offers: Record<string, any>;
+      appointments: Record<string, any>;
+    };
+  }
+
+  // Exact reproduction of the logic inside firestore.rules for appointments
+  function evaluateAppointmentCreateRule(
+    ctx: RulesContext,
+    appointmentId: string,
+    incoming: any
+  ): boolean {
+    if (!ctx.auth.uid) return false;
+    if (!appointmentId || appointmentId.length > 128) return false;
+    if (appointmentId !== `appointment_${incoming.requestId}`) return false;
+    if (incoming.id !== appointmentId) return false;
+    if (!['customer', 'provider'].includes(incoming.proposedBy)) return false;
+
+    const reqDoc = ctx.database.requests[incoming.requestId];
+    if (!reqDoc) return false;
+    if (!['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'].includes(reqDoc.status)) return false;
+    if (!reqDoc.selectedOfferId || typeof reqDoc.selectedOfferId !== 'string') return false;
+    if (reqDoc.customerId !== incoming.customerId) return false;
+
+    const offerDoc = ctx.database.offers[reqDoc.selectedOfferId];
+    if (!offerDoc) return false;
+    if (offerDoc.requestId !== incoming.requestId) return false;
+    if (offerDoc.status !== 'ACCEPTED') return false;
+
+    const provIdMatches = incoming.providerId === offerDoc.providerId || incoming.providerId === offerDoc.providerUserId;
+    const provUserIdMatches = incoming.providerUserId === offerDoc.providerUserId || incoming.providerUserId === offerDoc.providerId;
+    if (!provIdMatches || !provUserIdMatches) return false;
+
+    const isAuthorizedCustomer = incoming.proposedBy === 'customer' &&
+      ctx.auth.uid === incoming.customerId &&
+      ctx.auth.uid === reqDoc.customerId;
+
+    const isAuthorizedProvider = incoming.proposedBy === 'provider' &&
+      (ctx.auth.uid === incoming.providerUserId || ctx.auth.uid === incoming.providerId) &&
+      (ctx.auth.uid === offerDoc.providerUserId || ctx.auth.uid === offerDoc.providerId);
+
+    if (!isAuthorizedCustomer && !isAuthorizedProvider) return false;
+
+    if (!['PROPOSED', 'CONFIRMED'].includes(incoming.status)) return false;
+    if (typeof incoming.scheduledAt !== 'string' || incoming.scheduledAt.length < 10) return false;
+    if (typeof incoming.createdAt !== 'string' || typeof incoming.updatedAt !== 'string') return false;
+
+    return true;
+  }
+
+  function evaluateAppointmentUpdateRule(
+    ctx: RulesContext,
+    appointmentId: string,
+    resource: any,
+    incoming: any
+  ): boolean {
+    if (!ctx.auth.uid) return false;
+    if (!appointmentId || appointmentId.length > 128) return false;
+
+    const isParticipant =
+      resource.customerId === ctx.auth.uid ||
+      resource.providerUserId === ctx.auth.uid ||
+      resource.providerId === ctx.auth.uid;
+    if (!isParticipant) return false;
+
+    // Strict immutability checks: id, requestId, customerId, providerId, providerUserId, createdAt
+    if (incoming.id !== resource.id) return false;
+    if (incoming.requestId !== resource.requestId) return false;
+    if (incoming.customerId !== resource.customerId) return false;
+    if (incoming.providerId !== resource.providerId) return false;
+    if (incoming.providerUserId !== resource.providerUserId) return false;
+    if (incoming.createdAt !== resource.createdAt) return false;
+
+    // proposedBy caller role check: must remain same or match authorized role of actor
+    const isProposedByPreserved = incoming.proposedBy === resource.proposedBy;
+    const isCustomerProposing = incoming.proposedBy === 'customer' && ctx.auth.uid === resource.customerId;
+    const isProviderProposing = incoming.proposedBy === 'provider' && (ctx.auth.uid === resource.providerUserId || ctx.auth.uid === resource.providerId);
+    if (!isProposedByPreserved && !isCustomerProposing && !isProviderProposing) return false;
+
+    if (typeof incoming.updatedAt !== 'string') return false;
+    if (typeof incoming.scheduledAt !== 'string' || incoming.scheduledAt.length < 10) return false;
+
+    const reqDoc = ctx.database.requests[resource.requestId];
+    if (!reqDoc) return false;
+    if (reqDoc.status === 'COMPLETED') return false;
+
+    // Valid status transitions:
+    const validTransitions: Record<string, string[]> = {
+      'PROPOSED': ['PROPOSED', 'CONFIRMED', 'RESCHEDULED', 'CANCELLED'],
+      'CONFIRMED': ['CONFIRMED', 'RESCHEDULED', 'CANCELLED', 'COMPLETED'],
+      'RESCHEDULED': ['RESCHEDULED', 'CONFIRMED', 'CANCELLED'],
+      'COMPLETED': ['COMPLETED'],
+      'CANCELLED': ['CANCELLED'],
+    };
+    if (!validTransitions[resource.status]?.includes(incoming.status)) return false;
+
+    return true;
+  }
+
+  // Setup mock database state
+  const mockCtx: RulesContext = {
+    auth: { uid: null },
+    database: {
+      requests: {
+        'REQ-SEC-1': {
+          id: 'REQ-SEC-1',
+          customerId: 'cust-sec-1',
+          status: 'PROVIDER_SELECTED',
+          selectedOfferId: 'OFFER-SEC-1',
+        },
+        'REQ-OPEN-1': {
+          id: 'REQ-OPEN-1',
+          customerId: 'cust-sec-1',
+          status: 'OPEN',
+        },
+        'REQ-COMP-1': {
+          id: 'REQ-COMP-1',
+          customerId: 'cust-sec-1',
+          status: 'COMPLETED',
+          selectedOfferId: 'OFFER-SEC-1',
+        },
+      },
+      offers: {
+        'OFFER-SEC-1': {
+          id: 'OFFER-SEC-1',
+          requestId: 'REQ-SEC-1',
+          providerId: 'prov-sec-1',
+          providerUserId: 'user-prov-1',
+          status: 'ACCEPTED',
+        },
+      },
+      appointments: {},
+    },
+  };
+
+  const validApptData = {
+    id: 'appointment_REQ-SEC-1',
+    requestId: 'REQ-SEC-1',
+    customerId: 'cust-sec-1',
+    providerId: 'prov-sec-1',
+    providerUserId: 'user-prov-1',
+    proposedBy: 'customer',
+    status: 'PROPOSED',
+    scheduledAt: '2026-10-15 14:00',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  // Rule Test 1: Customer can create appointment with proposedBy = customer
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentCreateRule(mockCtx, 'appointment_REQ-SEC-1', validApptData) === true,
+    '22. [Security Rule] Request owner customer can create appointment with proposedBy = customer'
+  );
+
+  // Rule Test 2: Selected provider can create appointment with proposedBy = provider
+  mockCtx.auth.uid = 'user-prov-1';
+  assert(
+    evaluateAppointmentCreateRule(mockCtx, 'appointment_REQ-SEC-1', {
+      ...validApptData,
+      proposedBy: 'provider',
+    }) === true,
+    '23. [Security Rule] Accepted provider can create appointment with proposedBy = provider'
+  );
+
+  // Rule Test 3: Attacker provider cannot create appointment
+  mockCtx.auth.uid = 'attacker-provider-999';
+  assert(
+    evaluateAppointmentCreateRule(mockCtx, 'appointment_REQ-SEC-1', {
+      ...validApptData,
+      proposedBy: 'provider',
+    }) === false,
+    '24. [Security Rule] Attacker provider attempt to create appointment is strictly DENIED'
+  );
+
+  // Rule Test 4: Attacker customer cannot create appointment for another customer
+  mockCtx.auth.uid = 'attacker-customer-999';
+  assert(
+    evaluateAppointmentCreateRule(mockCtx, 'appointment_REQ-SEC-1', validApptData) === false,
+    '25. [Security Rule] Unauthorized third-party customer creation is strictly DENIED'
+  );
+
+  // Rule Test 5: Role mismatch: customer claiming proposedBy = provider is rejected
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentCreateRule(mockCtx, 'appointment_REQ-SEC-1', {
+      ...validApptData,
+      proposedBy: 'provider',
+    }) === false,
+    '26. [Security Rule] Role spoofing (customer claiming proposedBy = provider) is DENIED'
+  );
+
+  // Rule Test 6: OPEN request blocked from creating appointment
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentCreateRule(mockCtx, 'appointment_REQ-OPEN-1', {
+      ...validApptData,
+      id: 'appointment_REQ-OPEN-1',
+      requestId: 'REQ-OPEN-1',
+    }) === false,
+    '27. [Security Rule] Appointment creation for OPEN request without accepted offer is DENIED'
+  );
+
+  // Rule Test 7: Customer attempt to alter providerId during update is strictly DENIED
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData,
+      { ...validApptData, providerId: 'hijacked-provider-id', updatedAt: new Date().toISOString() }
+    ) === false,
+    '28. [Security Rule] Customer attempt to mutate providerId on appointment update is strictly DENIED'
+  );
+
+  // Rule Test 8: Customer attempt to alter providerUserId during update is strictly DENIED
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData,
+      { ...validApptData, providerUserId: 'hijacked-user-id', updatedAt: new Date().toISOString() }
+    ) === false,
+    '29. [Security Rule] Customer attempt to mutate providerUserId on appointment update is strictly DENIED'
+  );
+
+  // Rule Test 9: Customer attempt to alter customerId during update is strictly DENIED
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData,
+      { ...validApptData, customerId: 'different-customer-id', updatedAt: new Date().toISOString() }
+    ) === false,
+    '30. [Security Rule] Attempt to mutate customerId on appointment update is strictly DENIED'
+  );
+
+  // Rule Test 10: Appointment update on COMPLETED request is strictly DENIED
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-COMP-1',
+      { ...validApptData, requestId: 'REQ-COMP-1', id: 'appointment_REQ-COMP-1' },
+      { ...validApptData, requestId: 'REQ-COMP-1', id: 'appointment_REQ-COMP-1', status: 'RESCHEDULED' }
+    ) === false,
+    '31. [Security Rule] Appointment update after request is COMPLETED is strictly DENIED'
+  );
+
+  // Rule Test 11: Customer attempt to alter id during update is strictly DENIED
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData,
+      { ...validApptData, id: 'appointment_TAMPERED', updatedAt: new Date().toISOString() }
+    ) === false,
+    '32. [Security Rule] Customer attempt to mutate id on appointment update is strictly DENIED'
+  );
+
+  // Rule Test 12: Customer attempt to alter requestId during update is strictly DENIED
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData,
+      { ...validApptData, requestId: 'REQ-HIJACKED', updatedAt: new Date().toISOString() }
+    ) === false,
+    '33. [Security Rule] Customer attempt to mutate requestId on appointment update is strictly DENIED'
+  );
+
+  // Rule Test 13: Customer attempt to alter createdAt during update is strictly DENIED
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData,
+      { ...validApptData, createdAt: '2020-01-01T00:00:00Z', updatedAt: new Date().toISOString() }
+    ) === false,
+    '34. [Security Rule] Customer attempt to mutate createdAt on appointment update is strictly DENIED'
+  );
+
+  // Rule Test 14: Provider attempt to alter customerId during update is strictly DENIED
+  mockCtx.auth.uid = 'user-prov-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData,
+      { ...validApptData, customerId: 'different-customer-id', updatedAt: new Date().toISOString() }
+    ) === false,
+    '35. [Security Rule] Provider attempt to mutate customerId on appointment update is strictly DENIED'
+  );
+
+  // Rule Test 15: Provider attempt to alter providerId during update is strictly DENIED
+  mockCtx.auth.uid = 'user-prov-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData,
+      { ...validApptData, providerId: 'hijacked-provider-id', updatedAt: new Date().toISOString() }
+    ) === false,
+    '36. [Security Rule] Provider attempt to mutate providerId on appointment update is strictly DENIED'
+  );
+
+  // Rule Test 16: Unauthorized 3rd-party user attempt to update appointment is strictly DENIED
+  mockCtx.auth.uid = 'attacker-user-999';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData,
+      { ...validApptData, status: 'CONFIRMED', updatedAt: new Date().toISOString() }
+    ) === false,
+    '37. [Security Rule] Unauthorized third party attempt to update appointment is strictly DENIED'
+  );
+
+  // Rule Test 17: Provider confirms appointment proposed by customer -> ALLOWED
+  mockCtx.auth.uid = 'user-prov-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData,
+      { ...validApptData, status: 'CONFIRMED', updatedAt: new Date().toISOString() }
+    ) === true,
+    '38. [Security Rule] Provider successfully confirms customer-proposed appointment'
+  );
+
+  // Rule Test 18: Customer reschedules appointment (proposedBy = "customer") -> ALLOWED
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData,
+      { ...validApptData, status: 'RESCHEDULED', proposedBy: 'customer', scheduledAt: '2026-10-18 10:00', updatedAt: new Date().toISOString() }
+    ) === true,
+    '39. [Security Rule] Customer successfully reschedules appointment with proposedBy = customer'
+  );
+
+  // Rule Test 19: Direct jump from PROPOSED to COMPLETED without CONFIRMED is strictly DENIED
+  mockCtx.auth.uid = 'cust-sec-1';
+  assert(
+    evaluateAppointmentUpdateRule(
+      mockCtx,
+      'appointment_REQ-SEC-1',
+      validApptData, // status: 'PROPOSED'
+      { ...validApptData, status: 'COMPLETED', updatedAt: new Date().toISOString() }
+    ) === false,
+    '40. [Security Rule] Direct illegal transition from PROPOSED to COMPLETED is strictly DENIED'
+  );
+
   console.log(`\n=============================================`);
   console.log(`ALL APPOINTMENT TESTS PASSED: ${passed} passed, ${failed} failed`);
   console.log(`=============================================\n`);

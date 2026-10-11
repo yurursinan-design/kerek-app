@@ -1593,28 +1593,41 @@ export class FirebaseRepository implements Repository {
     const firestore = this.ensureDb();
     const currentUid = auth?.currentUser?.uid || getCurrentUserId();
 
-    // Check cross-document request state
-    let req = await this.getRequest(requestId);
-    if (req && normalizeRequestStatus(req.status) !== 'COMPLETED') {
-      try {
-        await this.updateRequestStatus(requestId, 'COMPLETED');
-        req = await this.getRequest(requestId);
-      } catch (e) {
-        console.warn('[FirebaseRepository] Note ensuring COMPLETED status before review:', e);
-      }
+    // Check cross-document request state: job must be completed via real completion flow
+    const req = await this.getRequest(requestId);
+    if (!req) {
+      throw new Error('Validation Error: Отсутствует ID заявки');
+    }
+
+    const canonicalStatus = normalizeRequestStatus(req.status);
+    if (canonicalStatus !== 'COMPLETED') {
+      throw new Error('Validation Error: Оценивать можно только завершенные заказы');
+    }
+
+    // Verify session owner is strictly the customer who created the request (no anonymous/usr- bypass)
+    const sessionUid = auth?.currentUser?.uid ? auth.currentUser.uid : getCurrentUserId();
+    if (!sessionUid || sessionUid !== req.customerId) {
+      throw new Error('Validation Error: Только заказчик может оставить отзыв');
+    }
+    if (reviewData.customerId && reviewData.customerId.trim() !== req.customerId) {
+      throw new Error('Validation Error: Только заказчик может оставить отзыв');
+    }
+    const customerId = req.customerId;
+
+    // Verify selectedOfferId is strictly present
+    if (!req.selectedOfferId || typeof req.selectedOfferId !== 'string' || !req.selectedOfferId.trim()) {
+      throw new Error('Validation Error: Предложение не было принято');
     }
 
     let acceptedOffer: ProviderOffer | null = null;
-    if (req?.selectedOfferId) {
-      const offSnap = await getDoc(doc(firestore, 'offers', req.selectedOfferId));
-      if (offSnap.exists()) {
-        acceptedOffer = offSnap.data() as ProviderOffer;
-      }
+    const offSnap = await getDoc(doc(firestore, 'offers', req.selectedOfferId.trim()));
+    if (offSnap.exists()) {
+      acceptedOffer = offSnap.data() as ProviderOffer;
     }
     if (!acceptedOffer) {
       try {
         const siblingOffers = await this.getOffers({ requestId });
-        const accepted = siblingOffers.find((o) => o.status === 'ACCEPTED');
+        const accepted = siblingOffers.find((o) => o.id === req.selectedOfferId && o.requestId === requestId && o.status === 'ACCEPTED');
         if (accepted) {
           acceptedOffer = accepted;
         }
@@ -1623,8 +1636,27 @@ export class FirebaseRepository implements Repository {
       }
     }
 
-    const customerId = reviewData.customerId?.trim() || req?.customerId || currentUid;
-    const providerId = reviewData.providerId?.trim() || acceptedOffer?.providerId || '';
+    if (!acceptedOffer || acceptedOffer.status !== 'ACCEPTED' || acceptedOffer.requestId !== requestId) {
+      throw new Error('Validation Error: Предложение не было принято');
+    }
+
+    if (!acceptedOffer.providerId) {
+      throw new Error('Validation Error: Нельзя оставить отзыв неподтвержденному исполнителю');
+    }
+
+    if (reviewData.providerId && reviewData.providerId.trim() !== acceptedOffer.providerId) {
+      throw new Error('Validation Error: Нельзя оставить отзыв неподтвержденному исполнителю');
+    }
+    const providerId = acceptedOffer.providerId;
+
+    if (
+      customerId === providerId ||
+      (acceptedOffer.providerUserId && customerId === acceptedOffer.providerUserId) ||
+      sessionUid === providerId ||
+      (acceptedOffer.providerUserId && sessionUid === acceptedOffer.providerUserId)
+    ) {
+      throw new Error('Validation Error: Исполнитель не может оценивать самого себя');
+    }
 
     const reviewPayload: Partial<Review> = {
       ...reviewData,
@@ -1632,13 +1664,7 @@ export class FirebaseRepository implements Repository {
       providerId,
     };
 
-    const isAnonymousSession = Boolean(
-      auth?.currentUser?.isAnonymous ||
-      getCurrentUserId().startsWith('usr-') ||
-      getCurrentUserId() === 'temp-local-user-id'
-    );
-
-    const validation = validateReviewData(reviewPayload, req, acceptedOffer, 'ru', isAnonymousSession);
+    const validation = validateReviewData(reviewPayload, req, acceptedOffer, 'ru', false);
     if (!validation.valid) {
       throw new Error(`Validation Error: ${validation.message}`);
     }

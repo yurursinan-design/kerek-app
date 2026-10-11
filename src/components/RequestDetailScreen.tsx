@@ -152,32 +152,28 @@ export const RequestDetailScreen: React.FC<RequestDetailScreenProps> = ({
   };
 
   const handleOpenRating = async () => {
+    setActionError(null);
+    let currentStatus = request?.status;
     if (request?.id) {
       try {
         const fresh = await repository.getRequest(request.id);
         if (fresh) {
-          const canonical = normalizeRequestStatus(fresh.status);
-          if (canonical !== 'COMPLETED') {
-            const currentUid = auth?.currentUser?.uid || getCurrentUserId();
-            if (fresh.customerId === currentUid || request.customerId === currentUid) {
-              const updated = await repository.updateRequestStatus(request.id, 'COMPLETED');
-              const target = updated ? { ...updated, status: 'COMPLETED' as RequestStatus } : { ...fresh, status: 'COMPLETED' as RequestStatus };
-              setRequest(target);
-              if (onRefreshRequest) onRefreshRequest(target);
-            } else {
-              const target = { ...fresh, status: canonical };
-              setRequest(target);
-              if (onRefreshRequest) onRefreshRequest(target);
-            }
-          } else {
-            const target = { ...fresh, status: 'COMPLETED' as RequestStatus };
-            setRequest(target);
-            if (onRefreshRequest) onRefreshRequest(target);
-          }
+          setRequest(fresh);
+          currentStatus = fresh.status;
+          if (onRefreshRequest) onRefreshRequest(fresh);
         }
       } catch (err) {
         console.warn('[RequestDetailScreen] Refreshing request on open rating:', err);
       }
+    }
+    const canonical = normalizeRequestStatus(currentStatus);
+    if (canonical !== 'COMPLETED') {
+      setActionError(
+        language === 'kz'
+          ? 'Тек аяқталған тапсырысқа баға беруге болады'
+          : 'Оценивать можно только завершенные заказы'
+      );
+      return;
     }
     setIsReviewModalOpen(true);
   };
@@ -205,20 +201,16 @@ export const RequestDetailScreen: React.FC<RequestDetailScreenProps> = ({
       ? offers.find((o) => o.status === 'ACCEPTED')
       : undefined);
 
-  const isAnonymousSession = Boolean(
-    !auth?.currentUser ||
-    auth.currentUser.isAnonymous ||
-    getCurrentUserId().startsWith('usr-') ||
-    getCurrentUserId() === 'temp-local-user-id'
-  );
-
   const isSelfProvider = Boolean(
-    !isAnonymousSession &&
     request &&
     selectedOffer &&
     request.customerId &&
     ((selectedOffer.providerId && request.customerId.trim() === selectedOffer.providerId.trim()) ||
-     (selectedOffer.providerUserId && request.customerId.trim() === selectedOffer.providerUserId.trim()))
+     (selectedOffer.providerUserId && request.customerId.trim() === selectedOffer.providerUserId.trim()) ||
+     (auth?.currentUser?.uid && selectedOffer.providerUserId && auth.currentUser.uid === selectedOffer.providerUserId.trim()) ||
+     (auth?.currentUser?.uid && selectedOffer.providerId && auth.currentUser.uid === selectedOffer.providerId.trim()) ||
+     (getCurrentUserId() && selectedOffer.providerUserId && getCurrentUserId() === selectedOffer.providerUserId.trim()) ||
+     (getCurrentUserId() && selectedOffer.providerId && getCurrentUserId() === selectedOffer.providerId.trim()))
   );
 
   // Helper for status styling

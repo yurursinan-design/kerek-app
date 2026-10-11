@@ -6,7 +6,7 @@ import {
   ServiceRequest,
 } from '../src/types';
 import { validateReviewData } from '../src/services/validation';
-import { LocalRepository } from '../src/services/localRepository';
+import { LocalRepository, setCurrentUserId } from '../src/services/localRepository';
 import { translations } from '../src/i18n/translations';
 
 // Setup Mock LocalStorage
@@ -232,6 +232,9 @@ async function runTests() {
   // Transition request to COMPLETED
   await repo.updateRequestStatus(seededReq.id, 'COMPLETED');
 
+  // Set current user session to the request customer
+  setCurrentUserId(seededReq.customerId);
+
   // Create valid review
   const reviewResult = await repo.createReview({
     id: seededReq.id,
@@ -266,6 +269,116 @@ async function runTests() {
     duplicateThrew = true;
   }
   assert('Duplicate review for same requestId is rejected', duplicateThrew);
+
+  // Security test 2.1: createReview on IN_PROGRESS request must NOT automatically complete the request
+  const uncompletedReq = await repo.createRequest({
+    customerId: 'cust-real-uncompleted',
+    customerName: 'Бауыржан',
+    customerPhone: '+7 705 333 4455',
+    city: 'Алматы',
+    category: 'Сантехника',
+    service: 'Замена сифона',
+    requestText: 'Замена сифона на кухне',
+    budget: '5 000 ₸',
+    urgency: 'normal',
+  });
+  const uncompletedOffer = await repo.createOffer({
+    id: 'OFFER-UNCOMPLETED-1',
+    requestId: uncompletedReq.id,
+    providerId: provider.id,
+    providerName: provider.name,
+    providerPhone: provider.phone,
+    providerWhatsapp: provider.whatsapp,
+    price: '5 000 ₸',
+    priceType: 'fixed',
+    availability: 'Сегодня',
+    message: 'Готов',
+  });
+  await repo.acceptOffer(uncompletedReq.id, uncompletedOffer.id);
+  await repo.updateRequestStatus(uncompletedReq.id, 'IN_PROGRESS');
+
+  // Customer session for uncompleted request
+  setCurrentUserId(uncompletedReq.customerId);
+
+  let incompleteCreateFailed = false;
+  try {
+    await repo.createReview({
+      id: uncompletedReq.id,
+      requestId: uncompletedReq.id,
+      customerId: uncompletedReq.customerId,
+      customerName: uncompletedReq.customerName,
+      providerId: provider.id,
+      providerName: provider.name,
+      rating: 5,
+      comment: 'Попытка оценить незавершенный заказ',
+    });
+  } catch (err: any) {
+    incompleteCreateFailed = err.message.includes('Оценивать можно только завершенные заказы');
+  }
+  assert('createReview strictly rejects IN_PROGRESS request without marking it COMPLETED', incompleteCreateFailed);
+
+  // Verify that uncompletedReq status was NOT mutated to COMPLETED
+  const checkFreshUncompleted = await repo.getRequest(uncompletedReq.id);
+  assert(
+    'Request status remains strictly IN_PROGRESS and was not auto-completed by createReview',
+    checkFreshUncompleted?.status === 'IN_PROGRESS'
+  );
+
+  // Security test 2.2: createReview by non-owner customer is strictly rejected
+  await repo.updateRequestStatus(uncompletedReq.id, 'COMPLETED');
+  setCurrentUserId('attacker-fake-customer');
+  let nonOwnerFailed = false;
+  try {
+    await repo.createReview({
+      id: uncompletedReq.id,
+      requestId: uncompletedReq.id,
+      customerId: 'attacker-fake-customer',
+      customerName: 'Хакер',
+      providerId: provider.id,
+      providerName: provider.name,
+      rating: 1,
+      comment: 'Поддельный отзыв чужого клиента',
+    });
+  } catch (err: any) {
+    nonOwnerFailed = err.message.includes('Только заказчик может оставить отзыв');
+  }
+  assert('createReview strictly rejects non-owner customer', nonOwnerFailed);
+
+  // Security test 2.3: createReview for mismatched provider is strictly rejected
+  setCurrentUserId(uncompletedReq.customerId);
+  let mismatchedProvFailed = false;
+  try {
+    await repo.createReview({
+      id: uncompletedReq.id,
+      requestId: uncompletedReq.id,
+      customerId: uncompletedReq.customerId,
+      customerName: uncompletedReq.customerName,
+      providerId: 'unapproved-random-provider',
+      providerName: 'Другой мастер',
+      rating: 5,
+      comment: 'Отзыв не тому исполнителю',
+    });
+  } catch (err: any) {
+    mismatchedProvFailed = err.message.includes('Нельзя оставить отзыв неподтвержденному исполнителю');
+  }
+  assert('createReview strictly rejects provider not matching accepted offer', mismatchedProvFailed);
+
+  // Security test 2.4: Provider self-review is strictly rejected
+  setCurrentUserId(provider.id);
+  let selfReviewFailed = false;
+  try {
+    await repo.createReview({
+      id: uncompletedReq.id,
+      requestId: uncompletedReq.id,
+      customerId: provider.id,
+      providerId: provider.id,
+      rating: 5,
+      comment: 'Самооценка',
+    });
+  } catch (err: any) {
+    selfReviewFailed = err.message.includes('Исполнитель не может оценивать самого себя') || err.message.includes('Только заказчик может оставить отзыв');
+  }
+  assert('createReview strictly rejects self-review', selfReviewFailed);
 
   console.log('\n--- 3. Querying reviews via getReviews ---');
   // Query by requestId
@@ -311,6 +424,7 @@ async function runTests() {
 
   await repo.acceptOffer(seededReq2.id, seededOffer2.id);
   await repo.updateRequestStatus(seededReq2.id, 'COMPLETED');
+  setCurrentUserId(seededReq2.customerId);
 
   await repo.createReview({
     id: seededReq2.id,

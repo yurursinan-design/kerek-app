@@ -42,6 +42,7 @@ async function runCustomerCompletionFlowTests() {
     // TEST 1: IN_PROGRESS request -> updateRequestStatus to COMPLETED
     // -------------------------------------------------------------
     const req1Id = `REQ_COMP_1_${timestamp}`;
+    const offer1Id = `OFFER_COMP_1_${timestamp}`;
     await localRepository.createRequest({
       id: req1Id,
       customerId,
@@ -51,7 +52,24 @@ async function runCustomerCompletionFlowTests() {
       categoryId: 'home_services',
       service: 'Сантехник',
       status: 'IN_PROGRESS',
+      selectedOfferId: offer1Id,
     });
+    await localRepository.createOffer({
+      id: offer1Id,
+      requestId: req1Id,
+      providerId,
+      providerName: 'Kyzylorda Master',
+      providerPhone: '+7 701 555 1234',
+      providerWhatsapp: '+7 701 555 1234',
+      price: '10 000 ₸',
+      priceType: 'fixed',
+      availability: 'Сегодня',
+      message: 'Сделаю',
+      status: 'ACCEPTED',
+    });
+    if (typeof globalThis.localStorage !== 'undefined') {
+      globalThis.localStorage.setItem('kerek_user_id', customerId);
+    }
 
     const updated1 = await localRepository.updateRequestStatus(req1Id, 'COMPLETED');
     assert(

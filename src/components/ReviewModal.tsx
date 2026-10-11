@@ -35,46 +35,43 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const isAnonymousSession = Boolean(
-    !auth?.currentUser ||
-    auth.currentUser.isAnonymous ||
-    getCurrentUserId().startsWith('usr-') ||
-    getCurrentUserId() === 'temp-local-user-id'
-  );
-
   const isSelfReview = Boolean(
-    !isAnonymousSession &&
     customerId &&
     providerId &&
     (customerId.trim() === providerId.trim() ||
-     (auth?.currentUser?.uid && providerId.trim() === auth.currentUser.uid))
+     (auth?.currentUser?.uid && providerId.trim() === auth.currentUser.uid) ||
+     (getCurrentUserId() && providerId.trim() === getCurrentUserId()))
   );
 
-  // When modal opens, inspect and ensure COMPLETED status in Firestore/repository
+  // When modal opens, verify COMPLETED status in Firestore/repository
   useEffect(() => {
     if (!isOpen || !requestId) return;
     let isMounted = true;
-    const verifyAndFixStatus = async () => {
+    const verifyStatus = async () => {
       try {
         const fresh = await repository.getRequest(requestId);
         if (fresh && isMounted) {
           const canonical = normalizeRequestStatus(fresh.status);
           if (canonical !== 'COMPLETED') {
-            const currentUid = auth?.currentUser?.uid || getCurrentUserId();
-            if (fresh.customerId === currentUid || customerId === currentUid) {
-              await repository.updateRequestStatus(requestId, 'COMPLETED');
-            }
+            setErrorMessage(
+              language === 'kz'
+                ? 'Тек аяқталған тапсырысқа баға беруге болады'
+                : 'Оценивать можно только завершенные заказы'
+            );
+            setTimeout(() => {
+              if (isMounted) onClose();
+            }, 1800);
           }
         }
       } catch (err) {
         console.warn('[ReviewModal] Verify request status note:', err);
       }
     };
-    verifyAndFixStatus();
+    verifyStatus();
     return () => {
       isMounted = false;
     };
-  }, [isOpen, requestId, customerId]);
+  }, [isOpen, requestId, language]);
 
   if (!isOpen) return null;
 
@@ -99,27 +96,11 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
 
     try {
       // 1. Fetch fresh request from Firestore/repository to verify true status
-      let freshReq = await repository.getRequest(requestId);
-      let canonicalStatus = normalizeRequestStatus(freshReq?.status);
+      const freshReq = await repository.getRequest(requestId);
+      const canonicalStatus = normalizeRequestStatus(freshReq?.status);
 
-      // If not marked COMPLETED yet, attempt to ensure it is COMPLETED if current user is customer
-      if (freshReq && canonicalStatus !== 'COMPLETED') {
-        const currentUid = auth?.currentUser?.uid || getCurrentUserId();
-        if (freshReq.customerId === currentUid || customerId === currentUid) {
-          try {
-            const updated = await repository.updateRequestStatus(requestId, 'COMPLETED');
-            if (updated) {
-              freshReq = updated;
-              canonicalStatus = normalizeRequestStatus(updated.status);
-            }
-          } catch (statusErr) {
-            console.warn('[ReviewModal] Note ensuring COMPLETED status:', statusErr);
-          }
-        }
-      }
-
-      // If after checking the request is still not COMPLETED, inform user and prevent invalid submission
-      if (freshReq && canonicalStatus !== 'COMPLETED') {
+      // Verify request is strictly COMPLETED
+      if (!freshReq || canonicalStatus !== 'COMPLETED') {
         setErrorMessage(
           language === 'kz'
             ? 'Тек аяқталған тапсырысқа баға беруге болады'
