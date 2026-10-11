@@ -52,6 +52,24 @@ interface ResultScreenProps {
   onEditSearch: () => void;
 }
 
+// Kazakhstan numbers are stored as typed (e.g. "+7 701 111 22 33" or "8 701 111 22 33").
+// Normalize to international digits: a leading 8 on an 11-digit number is the domestic prefix for +7.
+function toIntlDigits(raw?: string): string | null {
+  let digits = (raw || '').replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('8')) digits = '7' + digits.slice(1);
+  return digits.length >= 10 && digits.length <= 15 ? digits : null;
+}
+
+function toTelHref(raw?: string): string | null {
+  const digits = toIntlDigits(raw);
+  return digits ? `tel:+${digits}` : null;
+}
+
+function toWhatsAppHref(raw?: string): string | null {
+  const digits = toIntlDigits(raw);
+  return digits ? `https://wa.me/${digits}` : null;
+}
+
 export const ResultScreen: React.FC<ResultScreenProps> = ({
   need,
   request: initialRequest,
@@ -636,39 +654,63 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 <span>{t.chatWithProviderBtn}</span>
               </button>
 
-              {/* Call & WhatsApp buttons: Preserved phone/WhatsApp communication */}
+              {/* Call & WhatsApp: real providers get working tel:/wa.me links; demo offers keep the demo notice */}
               <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActiveModal({
-                      type: 'call',
-                      title: selectedOffer.providerName,
-                      phone: selectedOffer.providerPhone,
-                      whatsapp: selectedOffer.providerWhatsapp,
-                    })
-                  }
-                  className="min-h-[44px] rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-[0.98] transition-transform"
-                >
-                  <Phone className="w-3.5 h-3.5" />
-                  <span>{t.btnCall}</span>
-                </button>
+                {!selectedOffer.isDemo && toTelHref(selectedOffer.providerPhone) ? (
+                  <a
+                    href={toTelHref(selectedOffer.providerPhone)!}
+                    className="min-h-[44px] rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-[0.98] transition-transform"
+                  >
+                    <Phone className="w-3.5 h-3.5" />
+                    <span>{t.btnCall}</span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!selectedOffer.isDemo}
+                    onClick={() =>
+                      setActiveModal({
+                        type: 'call',
+                        title: selectedOffer.providerName,
+                        phone: selectedOffer.providerPhone,
+                        whatsapp: selectedOffer.providerWhatsapp,
+                      })
+                    }
+                    className="min-h-[44px] rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-[0.98] transition-transform"
+                  >
+                    <Phone className="w-3.5 h-3.5" />
+                    <span>{t.btnCall}</span>
+                  </button>
+                )}
 
-                <button
-                  type="button"
-                  onClick={() =>
-                    setActiveModal({
-                      type: 'whatsapp',
-                      title: selectedOffer.providerName,
-                      phone: selectedOffer.providerPhone,
-                      whatsapp: selectedOffer.providerWhatsapp,
-                    })
-                  }
-                  className="min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-[0.98] transition-transform"
-                >
-                  <MessageCircle className="w-3.5 h-3.5" />
-                  <span>{t.btnWhatsapp}</span>
-                </button>
+                {!selectedOffer.isDemo && toWhatsAppHref(selectedOffer.providerWhatsapp || selectedOffer.providerPhone) ? (
+                  <a
+                    href={toWhatsAppHref(selectedOffer.providerWhatsapp || selectedOffer.providerPhone)!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-[0.98] transition-transform"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    <span>{t.btnWhatsapp}</span>
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!selectedOffer.isDemo}
+                    onClick={() =>
+                      setActiveModal({
+                        type: 'whatsapp',
+                        title: selectedOffer.providerName,
+                        phone: selectedOffer.providerPhone,
+                        whatsapp: selectedOffer.providerWhatsapp,
+                      })
+                    }
+                    className="min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-[0.98] transition-transform"
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    <span>{t.btnWhatsapp}</span>
+                  </button>
+                )}
               </div>
 
               {/* Status Workflow Action Buttons */}
@@ -789,24 +831,6 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                               <span className="w-3 h-3 border-2 border-sky-600 border-t-transparent rounded-full animate-spin shrink-0" />
                             )}
                           </button>
-                          {offer.iinVerified && (
-                            <span
-                              className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full"
-                              title={t.iinVerifiedBadge}
-                            >
-                              <ShieldCheck className="w-3 h-3 text-sky-600 stroke-[2.5]" />
-                              <span>{t.iinVerifiedBadge}</span>
-                            </span>
-                          )}
-                          {offer.hasCertificate && (
-                            <span
-                              className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full"
-                              title={t.certifiedMasterBadge}
-                            >
-                              <Award className="w-3 h-3 text-purple-600 stroke-[2.5]" />
-                              <span>{t.certifiedMasterBadge}</span>
-                            </span>
-                          )}
                           {offer.isDemo && (
                             <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">
                               ДЕМО
@@ -1029,11 +1053,9 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
               <div className="font-bold text-slate-900">
                 {activeModal.title}
               </div>
+              {/* Demo numbers are not shown: they are placeholders and may belong to real people */}
               <div className="text-slate-600">
-                Телефон (ДЕМО): {activeModal.phone}
-              </div>
-              <div className="text-slate-600">
-                WhatsApp (ДЕМО): {activeModal.whatsapp}
+                {language === 'kz' ? 'Демо нөмір көрсетілмейді' : language === 'tr' ? 'Demo numara gösterilmez' : 'Демо-номер не показывается'}
               </div>
             </div>
 

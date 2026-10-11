@@ -37,7 +37,7 @@ import {
   validateReviewData,
 } from './validation';
 import { logTechnicalError } from './errorHandler';
-import { auth } from './firebase';
+import { auth, isFirebaseConfigured } from './firebase';
 import { normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 
 const STORAGE_KEY_USER_ID = 'kerek_current_user_id_v2';
@@ -389,8 +389,12 @@ export class LocalRepository implements Repository {
       const updated = [newRequest, ...filteredExisting];
       safeStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify(updated));
 
-      // Generate simulated matching offers from demo providers
-      await this.generateDemoOffersForRequest(newRequest);
+      // Simulated offers from demo providers exist only in the offline demo mode (no Firebase).
+      // When the cloud is active this repository is a local cache of real data, and demo offers
+      // here would show up beside real ones and fail when a customer tries to accept them.
+      if (!isFirebaseConfigured()) {
+        await this.generateDemoOffersForRequest(newRequest);
+      }
 
       return newRequest;
     } catch (e) {

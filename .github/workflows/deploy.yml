@@ -1,0 +1,83 @@
+# main dalına her birleştirmede (Merge) uygulamayı yayına alır:
+#   - Web uygulaması → Firebase Hosting (canlı site)
+#   - Firestore güvenlik kuralları
+#   - İsteğe bağlı: Storage kuralları ve Cloud Functions
+#
+# Firebase'e giriş, Workload Identity Federation ile şifresiz yapılır:
+# Google Cloud'daki github-deploy servis hesabını yalnızca bu depo kullanabilir.
+#
+# İsteğe bağlı GitHub variable'ları (Settings → Secrets and variables → Actions → Variables):
+#   DEPLOY_STORAGE   = true  → storage.rules da yüklenir
+#   DEPLOY_FUNCTIONS = true  → Cloud Functions da yüklenir (Blaze planı + ek yetkiler gerekir)
+name: Yayına al
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  # Firebase web ayarları herkese açıktır (derlenen sitenin içinde zaten görünür).
+  VITE_FIREBASE_API_KEY: AIzaSyA2tm7w5In7uV6qEPbfCjSOKZ6Sj2fRoHI
+  VITE_FIREBASE_AUTH_DOMAIN: kerek-9d153.firebaseapp.com
+  VITE_FIREBASE_PROJECT_ID: kerek-9d153
+  VITE_FIREBASE_STORAGE_BUCKET: kerek-9d153.firebasestorage.app
+  VITE_FIREBASE_MESSAGING_SENDER_ID: "24155315039"
+  VITE_FIREBASE_APP_ID: 1:24155315039:web:203f5b6fb4aa78d62574ea
+  FIREBASE_PROJECT_ID: kerek-9d153
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Bağımlılıkları kur
+        run: bun install --frozen-lockfile
+
+      - name: Tip kontrolü
+        run: bun run typecheck
+
+      - name: Derle
+        run: bun run build
+
+      - name: Functions bağımlılıklarını kur
+        if: vars.DEPLOY_FUNCTIONS == 'true'
+        run: npm --prefix functions ci
+
+      - name: Google Cloud'a giriş
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
+          service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
+
+      - name: Firebase'e yükle
+        env:
+          DEPLOY_STORAGE: ${{ vars.DEPLOY_STORAGE }}
+          DEPLOY_FUNCTIONS: ${{ vars.DEPLOY_FUNCTIONS }}
+        run: |
+          targets="hosting,firestore:rules"
+          [ "$DEPLOY_STORAGE" = "true" ] && targets="$targets,storage"
+          [ "$DEPLOY_FUNCTIONS" = "true" ] && targets="$targets,functions"
+          echo "Yüklenenler: $targets → $FIREBASE_PROJECT_ID"
+          npx --yes firebase-tools@15.31.0 deploy \
+            --only "$targets" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --non-interactive \
+            --force
