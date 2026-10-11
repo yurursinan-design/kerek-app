@@ -334,12 +334,16 @@ export async function runFirebaseDiagnostics(): Promise<FirebaseDiagnosticReport
     // Step 5: Firestore Write (user profile)
     if (report.auth.uid) {
       try {
-        await setDoc(doc(db, 'users', report.auth.uid), {
-          id: report.auth.uid,
-          role: 'customer',
-          diagnosticPingAt: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-        }, { merge: true });
+        // Touch only the ping field; never overwrite the user's role or original createdAt
+        const userRef = doc(db, 'users', report.auth.uid);
+        const existingUser = await getDoc(userRef);
+        await setDoc(
+          userRef,
+          existingUser.exists()
+            ? { id: report.auth.uid, diagnosticPingAt: new Date().toISOString() }
+            : { id: report.auth.uid, createdAt: new Date().toISOString(), diagnosticPingAt: new Date().toISOString() },
+          { merge: true }
+        );
         report.firestoreWrite = { ok: true };
         console.log(`✅ [5/6 Firestore Write] Successfully wrote user record to "users/${report.auth.uid}".`);
       } catch (err: any) {
@@ -379,12 +383,8 @@ export async function runFirebaseDiagnostics(): Promise<FirebaseDiagnosticReport
   return report;
 }
 
-// Auto-run diagnostic in background on startup if configured (browser only)
-if (isFirebaseConfigured() && typeof window !== 'undefined') {
-  setTimeout(() => {
-    runFirebaseDiagnostics().catch(() => {});
-  }, 100);
-}
+// Diagnostics run only on demand from the developer panel (?debug=1). Running them on every app
+// open cost extra reads/writes and overwrote the user's record (role and createdAt) each time.
 
 
 // Standardized error context handling conforming to Firebase skill

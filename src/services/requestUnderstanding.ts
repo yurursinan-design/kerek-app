@@ -754,7 +754,8 @@ export function understandingToExtractedNeed(
     urgency: urgencyMapping,
     originalQuery,
     confidence: understanding.confidence,
-    isAiParsed: true,
+    // Local rules engine; App sets isAiParsed only when the Gemini parser actually answered
+    isAiParsed: false,
     understanding,
   };
 }

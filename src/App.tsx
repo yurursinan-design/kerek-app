@@ -195,6 +195,7 @@ export default function App() {
 
       if (aiResponse.success && aiResponse.data) {
         const aiData = aiResponse.data;
+        need.isAiParsed = true;
         if (aiData.cityId) {
           const canonicalCityId = normalizeCityId(aiData.cityId);
           need.cityId = canonicalCityId;

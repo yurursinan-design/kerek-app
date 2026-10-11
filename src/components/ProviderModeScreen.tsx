@@ -13,6 +13,7 @@ import {
 } from '../types';
 import { translations } from '../i18n/translations';
 import { repository, getCurrentUserId, checkClientRateLimit, getFriendlyErrorMessage } from '../services';
+import { isDebugMode } from '../services/debug';
 import { auth } from '../services/firebase';
 import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
 import {
@@ -637,7 +638,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col justify-between space-y-5">
-      {debugError && (
+      {isDebugMode && debugError && (
         <div
           style={{
             background: '#dc2626',
@@ -653,7 +654,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
           <strong>🔴 DEBUG:</strong> {debugError}
         </div>
       )}
-      {debugInfo && (
+      {isDebugMode && debugInfo && (
         <div
           style={{
             background: '#16a34a',

@@ -769,6 +769,12 @@ export class ResilientRepository implements Repository {
   // =================== In-App Notifications ===================
 
   async createNotification(notificationData: AppNotification): Promise<AppNotification> {
+    // Providers are not notified about their own actions (e.g. marking their own job completed);
+    // the security rules reject such self-notifications, so skip them instead of failing.
+    const currentUid = auth?.currentUser?.uid || getCurrentUserId();
+    if (notificationData.recipientRole === 'provider' && notificationData.recipientUserId === currentUid) {
+      return notificationData;
+    }
     if (this.firebaseRepo.isAvailable()) {
       try {
         const cloudNotif = await this.firebaseRepo.createNotification(notificationData);

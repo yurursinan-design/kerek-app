@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AppNotification, Language } from '../types';
 import { ArrowLeft, Database, Download, Upload, X, CheckCircle, AlertCircle, Cloud, RefreshCw, ShieldAlert, ShieldCheck, Trash2 } from 'lucide-react';
+import { isDebugMode } from '../services/debug';
 import { exportLocalData, importLocalData, clearAllKerekLocalStorage, isFirebaseConfigured, resilientRepository, runFirebaseDiagnostics, getLatestDiagnosticReport } from '../services';
 import { NotificationBell } from './NotificationBell';
 
@@ -121,7 +122,8 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right slot: Cloud/Demo Badge + Language Switcher RU / KZ */}
           <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* Clickable CLOUD / Firebase or DEMO / Local Storage badge */}
+            {/* Developer-only CLOUD / Firebase or DEMO / Local Storage badge (opens diagnostics and data tools) */}
+            {isDebugMode && (
             <button
               type="button"
               onClick={() => setShowDemoModal(true)}
@@ -143,6 +145,7 @@ export const Header: React.FC<HeaderProps> = ({
               />
               <span>{isCloud ? 'CLOUD / Firebase' : 'DEMO / Local Storage'}</span>
             </button>
+            )}
 
             <div className="inline-flex p-0.5 bg-slate-100 rounded-lg border border-slate-200">
               <button
