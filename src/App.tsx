@@ -247,6 +247,7 @@ export default function App() {
 
       const targetRequestId = generateRequestId();
       const uploadedAttachments: RequestAttachment[] = [];
+      let failedUploads = 0;
 
       // Process pending attachments upload
       if (updatedNeed.pendingAttachments && updatedNeed.pendingAttachments.length > 0) {
@@ -264,18 +265,9 @@ export default function App() {
             );
             uploadedAttachments.push(uploaded);
           } catch (uploadErr) {
-            console.warn('[App] uploadRequestAttachment graceful fallback:', uploadErr);
-            uploadedAttachments.push({
-              id: item.id,
-              type: item.mediaType,
-              storagePath: `requests/${targetRequestId}/${item.id}_${item.name}`,
-              downloadUrl: item.previewUrl,
-              fileName: item.name,
-              mimeType: item.type,
-              sizeBytes: item.size,
-              durationSeconds: item.durationSeconds,
-              createdAt: new Date().toISOString(),
-            });
+            // Skip the file instead of saving a link that only works on this phone
+            console.warn('[App] uploadRequestAttachment failed, skipping file:', uploadErr);
+            failedUploads++;
           }
         }
       }
@@ -302,6 +294,16 @@ export default function App() {
 
       setActiveRequest(newReq);
       await refreshData();
+
+      if (failedUploads > 0) {
+        setAppError(
+          language === 'kz'
+            ? `${failedUploads} файл жүктелмеді. Өтініш файлсыз жіберілді.`
+            : language === 'tr'
+            ? `${failedUploads} dosya yüklenemedi. Talep dosyasız gönderildi.`
+            : `Не удалось загрузить файлов: ${failedUploads}. Заявка отправлена без них.`
+        );
+      }
 
       setCurrentScreen('results');
       window.scrollTo({ top: 0, behavior: 'smooth' });

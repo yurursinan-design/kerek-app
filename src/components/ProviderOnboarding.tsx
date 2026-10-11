@@ -1,3 +1,4 @@
+import { getFriendlyErrorMessage } from '../services';
 import React, { useState, useMemo } from 'react';
 import { Language, Provider } from '../types';
 import { translations } from '../i18n/translations';
@@ -221,7 +222,7 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
         tradeLicense: tradeLicense.trim() || initialProvider?.tradeLicense || '',
       });
     } catch (err: any) {
-      setStepError(err?.message || (language === 'kz' ? 'Қате орын алды' : 'Произошла ошибка при сохранении'));
+      setStepError(getFriendlyErrorMessage(err, language));
     } finally {
       setIsSubmitting(false);
     }

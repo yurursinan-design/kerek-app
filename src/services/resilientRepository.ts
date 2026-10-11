@@ -25,7 +25,7 @@ import {
 import { localRepository, getCurrentUserId } from './localRepository';
 import { firebaseRepository, FirebaseRepository } from './firebaseRepository';
 import { auth, isFirebaseConfigured } from './firebase';
-import { logTechnicalError } from './errorHandler';
+import { isCloudRejection, logTechnicalError } from './errorHandler';
 import { notificationService } from './notificationService';
 import { offlineQueueService } from './offlineQueueService';
 
@@ -73,7 +73,8 @@ export class ResilientRepository implements Repository {
   private async executeWithFallback<T>(
     operationName: string,
     cloudOp: () => Promise<T>,
-    localOp: () => Promise<T>
+    localOp: () => Promise<T>,
+    kind: 'read' | 'write' = 'read'
   ): Promise<T> {
     if (this.firebaseRepo.isAvailable()) {
       try {
@@ -84,6 +85,11 @@ export class ResilientRepository implements Repository {
           err?.message?.startsWith('Validation Error:') ||
           err?.message?.includes('Duplicate')
         ) {
+          throw err;
+        }
+        // A write the cloud rejected must not be reported as saved: a local copy would only
+        // exist on this device and nobody else would ever see it.
+        if (kind === 'write' && isCloudRejection(err)) {
           throw err;
         }
 
@@ -106,7 +112,8 @@ export class ResilientRepository implements Repository {
     return this.executeWithFallback(
       'createUser',
       () => this.firebaseRepo.createUser(userData),
-      () => this.localRepo.createUser(userData)
+      () => this.localRepo.createUser(userData),
+      'write'
     );
   }
 
@@ -140,6 +147,9 @@ export class ResilientRepository implements Repository {
           `[KEREK Firebase Fallback] Operation "createProvider" on Cloud Firestore fell back to LocalRepository:`,
           err?.message || err
         );
+        if (isCloudRejection(err)) {
+          throw err;
+        }
         logTechnicalError(`ResilientRepository.createProvider (Firebase fallback to Local)`, err?.message || err);
         return await this.localRepo.createProvider(providerData);
       }
@@ -192,22 +202,9 @@ export class ResilientRepository implements Repository {
     customerId?: string
   ): Promise<RequestAttachment> {
     if (this.firebaseRepo.isAvailable()) {
-      try {
-        return await this.firebaseRepo.uploadRequestAttachment(requestId, file, customerId);
-      } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.includes('Attachment validation failed')
-        ) {
-          throw err;
-        }
-        console.warn(
-          `[KEREK Firebase Fallback] Operation "uploadRequestAttachment" on Cloud fell back to LocalRepository:`,
-          err?.message || err
-        );
-        logTechnicalError('ResilientRepository.uploadRequestAttachment (Firebase fallback to Local)', err?.message || err);
-        return await this.localRepo.uploadRequestAttachment(requestId, file, customerId);
-      }
+      // Cloud mode uploads only to Cloud Storage. A local fallback would store the file on this
+      // device and put a link into the shared request that no provider can open.
+      return await this.firebaseRepo.uploadRequestAttachment(requestId, file, customerId);
     }
     return await this.localRepo.uploadRequestAttachment(requestId, file, customerId);
   }
@@ -304,10 +301,7 @@ export class ResilientRepository implements Repository {
       try {
         result = await this.firebaseRepo.updateRequest(requestId, updates);
       } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.startsWith('Unauthorized:')
-        ) {
+        if (isCloudRejection(err)) {
           throw err;
         }
         console.warn('[ResilientRepository] updateRequest cloud note, falling back to local:', err?.message || err);
@@ -332,10 +326,7 @@ export class ResilientRepository implements Repository {
       try {
         result = await this.firebaseRepo.updateRequestStatus(requestId, canonicalStatus, selectedOfferId);
       } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.startsWith('Unauthorized:')
-        ) {
+        if (isCloudRejection(err)) {
           throw err;
         }
         console.warn('[ResilientRepository] updateRequestStatus cloud note, falling back to local:', err?.message || err);
@@ -430,10 +421,7 @@ export class ResilientRepository implements Repository {
       try {
         result = await this.firebaseRepo.updateOffer(offerId, updates);
       } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.startsWith('Unauthorized:')
-        ) {
+        if (isCloudRejection(err)) {
           throw err;
         }
         console.warn('[ResilientRepository] updateOffer cloud note, falling back to local:', err?.message || err);
@@ -497,10 +485,7 @@ export class ResilientRepository implements Repository {
       try {
         return await this.firebaseRepo.createReview(reviewData);
       } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.startsWith('Unauthorized:')
-        ) {
+        if (isCloudRejection(err)) {
           throw err;
         }
         console.warn('[ResilientRepository] createReview cloud note, falling back to local:', err?.message || err);
@@ -615,10 +600,7 @@ export class ResilientRepository implements Repository {
         } catch {}
         return cloudMsg;
       } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.startsWith('Unauthorized:')
-        ) {
+        if (isCloudRejection(err)) {
           throw err;
         }
         console.warn('[ResilientRepository] sendMessage cloud note, falling back locally:', err?.message || err);
@@ -930,7 +912,8 @@ export class ResilientRepository implements Repository {
     const appt = await this.executeWithFallback(
       'createAppointment',
       () => this.firebaseRepo.createAppointment(appointmentData),
-      () => this.localRepo.createAppointment(appointmentData)
+      () => this.localRepo.createAppointment(appointmentData),
+      'write'
     );
 
     // Also cache locally
@@ -954,7 +937,8 @@ export class ResilientRepository implements Repository {
     const updated = await this.executeWithFallback(
       'updateAppointment',
       () => this.firebaseRepo.updateAppointment(appointmentId, updates),
-      () => this.localRepo.updateAppointment(appointmentId, updates)
+      () => this.localRepo.updateAppointment(appointmentId, updates),
+      'write'
     );
 
     if (this.firebaseRepo.isAvailable()) {
@@ -972,7 +956,8 @@ export class ResilientRepository implements Repository {
     const appt = await this.executeWithFallback(
       'cancelAppointment',
       () => this.firebaseRepo.cancelAppointment(appointmentId, cancelledByRole, reason),
-      () => this.localRepo.cancelAppointment(appointmentId, cancelledByRole, reason)
+      () => this.localRepo.cancelAppointment(appointmentId, cancelledByRole, reason),
+      'write'
     );
 
     if (this.firebaseRepo.isAvailable()) {
@@ -1000,7 +985,8 @@ export class ResilientRepository implements Repository {
     const appt = await this.executeWithFallback(
       'confirmAppointment',
       () => this.firebaseRepo.confirmAppointment(appointmentId, confirmedByRole),
-      () => this.localRepo.confirmAppointment(appointmentId, confirmedByRole)
+      () => this.localRepo.confirmAppointment(appointmentId, confirmedByRole),
+      'write'
     );
 
     if (this.firebaseRepo.isAvailable()) {
@@ -1030,7 +1016,8 @@ export class ResilientRepository implements Repository {
     const appt = await this.executeWithFallback(
       'rescheduleAppointment',
       () => this.firebaseRepo.rescheduleAppointment(appointmentId, scheduledAt, proposedBy, note),
-      () => this.localRepo.rescheduleAppointment(appointmentId, scheduledAt, proposedBy, note)
+      () => this.localRepo.rescheduleAppointment(appointmentId, scheduledAt, proposedBy, note),
+      'write'
     );
 
     if (this.firebaseRepo.isAvailable()) {
@@ -1061,10 +1048,7 @@ export class ResilientRepository implements Repository {
           await this.localRepo.completeAppointment(appointmentId);
         } catch {}
       } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.startsWith('Unauthorized:')
-        ) {
+        if (isCloudRejection(err)) {
           throw err;
         }
         console.warn('[ResilientRepository] completeAppointment cloud note, falling back to local:', err?.message || err);
@@ -1094,10 +1078,7 @@ export class ResilientRepository implements Repository {
         } catch {}
         return result;
       } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.startsWith('Unauthorized:')
-        ) {
+        if (isCloudRejection(err)) {
           throw err;
         }
         console.warn('[ResilientRepository] confirmCustomerCompletion cloud note, falling back to local:', err?.message || err);
@@ -1129,11 +1110,7 @@ export class ResilientRepository implements Repository {
           await this.localRepo.updateWorkStatus(appointmentId, workStatus, providerUserId);
         } catch {}
       } catch (err: any) {
-        if (
-          err?.message?.startsWith('Validation Error:') ||
-          err?.message?.startsWith('Unauthorized:') ||
-          err?.message?.includes('Invalid work status transition')
-        ) {
+        if (isCloudRejection(err) || err?.message?.includes('Invalid work status transition')) {
           throw err;
         }
         console.warn('[ResilientRepository] updateWorkStatus cloud note, falling back to local:', err?.message || err);

@@ -9,7 +9,7 @@ import {
   WorkStatus,
 } from '../types';
 import { translations } from '../i18n/translations';
-import { repository, getCurrentUserId } from '../services';
+import { repository, getCurrentUserId, getFriendlyErrorMessage } from '../services';
 import { auth } from '../services/firebase';
 import {
   Calendar,
@@ -132,7 +132,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       setNoteStr('');
     } catch (err: any) {
       console.error('[AppointmentSection] Create appointment error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Қате орын алды' : 'Произошла ошибка'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -147,7 +147,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       await repository.confirmAppointment(appointment.id, currentRole);
     } catch (err: any) {
       console.error('[AppointmentSection] Confirm error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Растау қатесі' : 'Ошибка подтверждения'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -171,7 +171,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       setNoteStr('');
     } catch (err: any) {
       console.error('[AppointmentSection] Reschedule error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Өзгерту қатесі' : 'Ошибка переноса'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -192,7 +192,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       setCancelReason('');
     } catch (err: any) {
       console.error('[AppointmentSection] Cancel error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Болдырмау қатесі' : 'Ошибка отмены'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -207,7 +207,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       await repository.completeAppointment(appointment.id);
     } catch (err: any) {
       console.error('[AppointmentSection] Complete error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Аяқтау қатесі' : 'Ошибка завершения'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -229,14 +229,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       }
     } catch (err: any) {
       console.error('[AppointmentSection] Confirm completion error:', err);
-      setErrorMsg(
-        err?.message ||
-          (language === 'kz'
-            ? 'Жұмысты аяқтау қатесі'
-            : language === 'tr'
-            ? 'İş tamamlanırken bir hata oluştu'
-            : 'Ошибка завершения работы')
-      );
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -251,7 +244,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       await repository.updateWorkStatus(appointment.id, targetStatus, effectiveUserId);
     } catch (err: any) {
       console.error('[AppointmentSection] Work status error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Күйді жаңарту қатесі' : 'Ошибка обновления статуса'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
