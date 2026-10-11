@@ -1,0 +1,58 @@
+# Her Pull Request için: kodu kontrol eder, derler ve Firebase Hosting'de
+# 7 gün geçerli bir önizleme linki oluşturup PR'a yorum olarak yazar.
+#
+# Gerekli GitHub secret'ları (Settings → Secrets and variables → Actions):
+#   FIREBASE_APPLET_CONFIG    - AI Studio'daki firebase-applet-config.json dosyasının içeriği
+#   FIREBASE_SERVICE_ACCOUNT  - Firebase servis hesabı JSON anahtarı
+# Secret'lar yoksa kontrol + derleme yine çalışır, sadece önizleme atlanır.
+name: Önizleme
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    env:
+      HAS_FIREBASE_SECRETS: ${{ secrets.FIREBASE_APPLET_CONFIG != '' && secrets.FIREBASE_SERVICE_ACCOUNT != '' && github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Bağımlılıkları kur
+        run: bun install --frozen-lockfile
+
+      - name: Tip kontrolü
+        run: bun run typecheck
+
+      - name: Firebase ayarlarını yaz
+        if: env.HAS_FIREBASE_SECRETS == 'true'
+        env:
+          FIREBASE_APPLET_CONFIG: ${{ secrets.FIREBASE_APPLET_CONFIG }}
+        run: |
+          printf '%s' "$FIREBASE_APPLET_CONFIG" > firebase-applet-config.json
+          echo "FIREBASE_PROJECT_ID=$(jq -r '.projectId // .firebaseConfig.projectId' firebase-applet-config.json)" >> "$GITHUB_ENV"
+
+      - name: Derle
+        run: bun run build
+
+      - name: Önizleme linki oluştur
+        if: env.HAS_FIREBASE_SECRETS == 'true'
+        uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          repoToken: ${{ secrets.GITHUB_TOKEN }}
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: ${{ env.FIREBASE_PROJECT_ID }}
+          expires: 7d

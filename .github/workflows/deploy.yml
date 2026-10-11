@@ -1,0 +1,87 @@
+# main dalına her birleştirmede (Merge) uygulamayı yayına alır:
+#   - Web uygulaması → Firebase Hosting (canlı site)
+#   - Firestore güvenlik kuralları
+#   - İsteğe bağlı: Storage kuralları ve Cloud Functions (Blaze planı gerektirir)
+#
+# Gerekli GitHub secret'ları (Settings → Secrets and variables → Actions → Secrets):
+#   FIREBASE_APPLET_CONFIG    - AI Studio'daki firebase-applet-config.json dosyasının içeriği
+#   FIREBASE_SERVICE_ACCOUNT  - Firebase servis hesabı JSON anahtarı
+#
+# İsteğe bağlı GitHub variable'ları (aynı sayfa → Variables):
+#   DEPLOY_STORAGE   = true  → storage.rules da yüklenir (Storage bucket'ı olmalı)
+#   DEPLOY_FUNCTIONS = true  → Cloud Functions da yüklenir (Blaze planı + secret'lar olmalı)
+name: Yayına al
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Secret'ları kontrol et
+        env:
+          FIREBASE_APPLET_CONFIG: ${{ secrets.FIREBASE_APPLET_CONFIG }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_APPLET_CONFIG" ] || [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::FIREBASE_APPLET_CONFIG ve FIREBASE_SERVICE_ACCOUNT secret'ları GitHub'a eklenmemiş."
+            exit 1
+          fi
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Bağımlılıkları kur
+        run: bun install --frozen-lockfile
+
+      - name: Tip kontrolü
+        run: bun run typecheck
+
+      - name: Firebase ayarlarını yaz
+        env:
+          FIREBASE_APPLET_CONFIG: ${{ secrets.FIREBASE_APPLET_CONFIG }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$FIREBASE_APPLET_CONFIG" > firebase-applet-config.json
+          echo "FIREBASE_PROJECT_ID=$(jq -r '.projectId // .firebaseConfig.projectId' firebase-applet-config.json)" >> "$GITHUB_ENV"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/service-account.json" >> "$GITHUB_ENV"
+
+      - name: Derle
+        run: bun run build
+
+      - name: Functions bağımlılıklarını kur
+        if: vars.DEPLOY_FUNCTIONS == 'true'
+        run: npm --prefix functions ci
+
+      - name: Firebase'e yükle
+        env:
+          DEPLOY_STORAGE: ${{ vars.DEPLOY_STORAGE }}
+          DEPLOY_FUNCTIONS: ${{ vars.DEPLOY_FUNCTIONS }}
+        run: |
+          targets="hosting,firestore:rules"
+          [ "$DEPLOY_STORAGE" = "true" ] && targets="$targets,storage"
+          [ "$DEPLOY_FUNCTIONS" = "true" ] && targets="$targets,functions"
+          echo "Yüklenenler: $targets → $FIREBASE_PROJECT_ID"
+          npx --yes firebase-tools@15.31.0 deploy \
+            --only "$targets" \
+            --project "$FIREBASE_PROJECT_ID" \
+            --non-interactive \
+            --force
