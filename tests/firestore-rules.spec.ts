@@ -15,9 +15,13 @@ import {
 import {
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   deleteDoc,
+  collection,
+  query,
+  where,
 } from 'firebase/firestore';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -143,6 +147,7 @@ async function runTestSuite() {
           userId: 'prov_master1',
           name: 'Master Ruslan',
           city: 'almaty',
+          cityId: 'almaty',
           category: 'appliance_repair',
         })
       );
@@ -182,6 +187,7 @@ async function runTestSuite() {
           id: 'req_alice_01',
           customerId: 'user_alice',
           city: 'almaty',
+          cityId: 'almaty',
           category: 'appliances',
           service: 'Washing machine repair',
           status: 'OPEN',
@@ -1570,6 +1576,75 @@ async function runTestSuite() {
           unreadCountProvider: 1,
         })
       );
+    });
+
+    // =========================================================================
+    // SECTION 12: Request visibility — only the customer, providers in the same
+    // city, and the selected provider can read a request
+    // =========================================================================
+    console.log('\n--- SECTION 12: Request visibility ---');
+
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      const adminDb = adminContext.firestore();
+      await setDoc(doc(adminDb, 'requests', 'req_v_almaty'), {
+        id: 'req_v_almaty',
+        customerId: 'cust_v',
+        customerName: 'Клиент',
+        city: 'Алматы',
+        cityId: 'almaty',
+        category: 'appliances',
+        categoryId: 'appliances',
+        service: 'Тоңазытқыш жөндеу',
+        status: 'MATCHING',
+        location: { latitude: 43.24, longitude: 76.95 },
+      });
+      await setDoc(doc(adminDb, 'providers', 'prov_v_almaty'), {
+        id: 'prov_v_almaty', userId: 'prov_v_almaty', name: 'Almaty Master', city: 'Алматы', cityId: 'almaty', category: 'appliances', categoryId: 'appliances',
+      });
+      await setDoc(doc(adminDb, 'providers', 'prov_v_astana'), {
+        id: 'prov_v_astana', userId: 'prov_v_astana', name: 'Astana Master', city: 'Астана', cityId: 'astana', category: 'appliances', categoryId: 'appliances',
+      });
+      // A request in Almaty whose selected provider is based in Astana
+      await setDoc(doc(adminDb, 'offers', 'offer_v_sel'), {
+        id: 'offer_v_sel', requestId: 'req_v_sel', providerId: 'prov_v_astana', providerUserId: 'prov_v_astana', price: '1', status: 'ACCEPTED',
+      });
+      await setDoc(doc(adminDb, 'requests', 'req_v_sel'), {
+        id: 'req_v_sel', customerId: 'cust_v', city: 'Алматы', cityId: 'almaty', category: 'appliances', categoryId: 'appliances',
+        service: 'x', status: 'PROVIDER_SELECTED', selectedOfferId: 'offer_v_sel',
+      });
+    });
+
+    const ctx = (uid: string) => testEnv.authenticatedContext(uid).firestore();
+    const cityQuery = (db: any, cityId: string) =>
+      getDocs(query(collection(db, 'requests'), where('cityId', '==', cityId), where('categoryId', '==', 'appliances')));
+
+    await test('A signed-in stranger without a provider profile cannot list or read requests', async () => {
+      await assertFails(getDocs(collection(ctx('stranger_v'), 'requests')));
+      await assertFails(cityQuery(ctx('stranger_v'), 'almaty'));
+      await assertFails(getDoc(doc(ctx('stranger_v'), 'requests', 'req_v_almaty')));
+    });
+
+    await test('Customer can list and read their own requests', async () => {
+      await assertSucceeds(getDocs(query(collection(ctx('cust_v'), 'requests'), where('customerId', '==', 'cust_v'))));
+      await assertSucceeds(getDoc(doc(ctx('cust_v'), 'requests', 'req_v_almaty')));
+    });
+
+    await test('Provider can list and read requests in their own city', async () => {
+      await assertSucceeds(cityQuery(ctx('prov_v_almaty'), 'almaty'));
+      await assertSucceeds(getDoc(doc(ctx('prov_v_almaty'), 'requests', 'req_v_almaty')));
+    });
+
+    await test('Provider cannot list or read requests in another city', async () => {
+      await assertFails(cityQuery(ctx('prov_v_astana'), 'almaty'));
+      await assertFails(getDoc(doc(ctx('prov_v_astana'), 'requests', 'req_v_almaty')));
+    });
+
+    await test('Provider cannot list the whole requests collection', async () => {
+      await assertFails(getDocs(collection(ctx('prov_v_almaty'), 'requests')));
+    });
+
+    await test('Selected provider from another city can still read the request they work on', async () => {
+      await assertSucceeds(getDoc(doc(ctx('prov_v_astana'), 'requests', 'req_v_sel')));
     });
 
   } finally {

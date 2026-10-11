@@ -142,6 +142,8 @@ export interface RequestLocation {
   longitude: number;
   accuracy?: number;
   address?: string;
+  /** True on the shared request: coordinates are rounded (~1 km); the exact point is in requestContacts */
+  approximate?: boolean;
 }
 
 export interface ServiceRequest {

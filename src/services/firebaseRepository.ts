@@ -432,8 +432,15 @@ export class FirebaseRepository implements Repository {
     if (requestData.attachments && requestData.attachments.length > 0) {
       newRequest.attachments = requestData.attachments;
     }
-    if (requestData.location) {
-      newRequest.location = requestData.location;
+    // The shared request only carries an approximate point (~1 km); the exact location goes to
+    // the private requestContacts document that only the customer and the selected provider can read.
+    const preciseLocation = requestData.location;
+    if (preciseLocation && typeof preciseLocation.latitude === 'number' && typeof preciseLocation.longitude === 'number') {
+      newRequest.location = {
+        latitude: Math.round(preciseLocation.latitude * 100) / 100,
+        longitude: Math.round(preciseLocation.longitude * 100) / 100,
+        approximate: true,
+      };
     }
     if (requestData.understanding) {
       newRequest.understanding = requestData.understanding;
@@ -443,17 +450,20 @@ export class FirebaseRepository implements Repository {
       const reqRef = doc(firestore, 'requests', id);
       await setDoc(reqRef, sanitizeForFirestore(newRequest));
 
-      // Privacy: Store private customer phone number in restricted requestContacts collection
+      // Privacy: phone number and exact location live in the restricted requestContacts document
       let customerPhone: string | undefined = undefined;
       if (requestData.customerPhone && requestData.customerPhone.trim()) {
         customerPhone = requestData.customerPhone.trim();
+      }
+      if (customerPhone || newRequest.location) {
         const contactRef = doc(firestore, 'requestContacts', id);
         await setDoc(
           contactRef,
           sanitizeForFirestore({
             requestId: id,
             customerId: customerId || auth?.currentUser?.uid || id,
-            customerPhone,
+            ...(customerPhone ? { customerPhone } : {}),
+            ...(newRequest.location && preciseLocation ? { location: preciseLocation } : {}),
             createdAt: new Date().toISOString(),
           }),
           { merge: true }
@@ -463,6 +473,7 @@ export class FirebaseRepository implements Repository {
       return {
         ...newRequest,
         ...(customerPhone ? { customerPhone } : {}),
+        ...(newRequest.location && preciseLocation ? { location: preciseLocation } : {}),
         status: normalizeRequestStatus(newRequest.status),
       };
     } catch (err) {
@@ -576,21 +587,26 @@ export class FirebaseRepository implements Repository {
           : undefined;
 
       let customerPhone = data.customerPhone;
-      if (!customerPhone) {
-        try {
-          const contactRef = doc(firestore, 'requestContacts', requestId);
-          const contactSnap = await getDoc(contactRef);
-          if (contactSnap.exists()) {
-            customerPhone = contactSnap.data()?.customerPhone;
+      let preciseLocation: RequestLocation | undefined;
+      try {
+        // Readable only by the customer and the selected provider; everyone else keeps the approximate point
+        const contactRef = doc(firestore, 'requestContacts', requestId);
+        const contactSnap = await getDoc(contactRef);
+        if (contactSnap.exists()) {
+          const contact = contactSnap.data();
+          customerPhone = customerPhone || contact?.customerPhone;
+          if (contact?.location && typeof contact.location.latitude === 'number') {
+            preciseLocation = contact.location as RequestLocation;
           }
-        } catch {
-          // If unauthorized or contact not present, ignore and proceed without customerPhone
         }
+      } catch {
+        // Not authorized or no contact document: proceed with the shared data only
       }
 
       return {
         ...data,
         ...(customerPhone ? { customerPhone } : {}),
+        ...(preciseLocation ? { location: preciseLocation } : {}),
         status: normalizeRequestStatus(data.status),
         selectedOfferId: cleanSelectedOfferId,
         cityId: data.cityId || normalizeCityId(data.city),

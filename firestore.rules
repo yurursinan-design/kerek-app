@@ -113,11 +113,34 @@ service cloud.firestore {
     // - Authenticated users can view request details by ID (all PII like phone is isolated in requestContacts)
     // - Customer can list their own requests, or browse active requests in marketplace
     // - Blanket or unconstrained requests queries are strictly forbidden
+    // A provider sees requests from their own city (the city on their provider profile)
+    function isProviderInCityOf(r) {
+      return exists(/databases/$(database)/documents/providers/$(request.auth.uid))
+        && ('cityId' in r) && r.cityId is string
+        && get(/databases/$(database)/documents/providers/$(request.auth.uid)).data.get('cityId', '') == r.cityId;
+    }
+
+    // The provider whose offer was selected keeps access to the request they work on
+    function isSelectedProviderOf(r) {
+      return ('selectedOfferId' in r) && r.selectedOfferId is string && r.selectedOfferId.size() > 0
+        && exists(/databases/$(database)/documents/offers/$(r.selectedOfferId))
+        && (get(/databases/$(database)/documents/offers/$(r.selectedOfferId)).data.get('providerUserId', '') == request.auth.uid
+            || get(/databases/$(database)/documents/offers/$(r.selectedOfferId)).data.get('providerId', '') == request.auth.uid);
+    }
+
     match /requests/{requestId} {
-      allow get: if isSignedIn() && isValidId(requestId);
-      // NOT: Firestore query'lerinde get() çağrıları değerlendirilemediği için list kuralı sadeleştirildi.
-      // Detay okuma (get) hâlâ sıkı korunuyor; telefon/ad bilgileri ayrıca requestContacts koleksiyonunda korunmaktadır.
-      allow list: if isSignedIn();
+      // Requests are not public: only the customer, providers in the same city and the selected
+      // provider can read them. Provider queries filter by cityId, which this rule can verify.
+      allow get: if isSignedIn() && isValidId(requestId) && (
+        resource == null ||
+        resource.data.customerId == request.auth.uid ||
+        isProviderInCityOf(resource.data) ||
+        isSelectedProviderOf(resource.data)
+      );
+      allow list: if isSignedIn() && (
+        resource.data.customerId == request.auth.uid ||
+        isProviderInCityOf(resource.data)
+      );
       allow create: if isSignedIn()
                     && isValidId(requestId)
                     && incoming().id == requestId

@@ -86,14 +86,20 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
             <div className="min-w-0">
               <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                 <span>{language === 'kz' ? 'Орналасқан жер' : 'Геолокация'}</span>
-                {location.accuracy !== undefined && (
+                {location.approximate ? (
                   <span className="text-[10px] font-semibold text-sky-700 bg-sky-100/80 px-1.5 py-0.2 rounded">
-                    ±{Math.round(location.accuracy)} m
+                    {language === 'kz' ? '≈1 км, шамамен' : language === 'tr' ? '≈1 km, yaklaşık' : '≈1 км, примерно'}
                   </span>
+                ) : (
+                  location.accuracy !== undefined && (
+                    <span className="text-[10px] font-semibold text-sky-700 bg-sky-100/80 px-1.5 py-0.2 rounded">
+                      ±{Math.round(location.accuracy)} m
+                    </span>
+                  )
                 )}
               </div>
               <div className="text-[11px] text-slate-500 font-mono truncate">
-                {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
+                {location.latitude.toFixed(location.approximate ? 2 : 5)}, {location.longitude.toFixed(location.approximate ? 2 : 5)}
                 {location.address ? ` · ${location.address}` : ''}
               </div>
             </div>
