@@ -162,6 +162,8 @@ export interface ServiceRequest {
   status: RequestStatus;
   createdAt: string;
   selectedOfferId?: string;
+  lastOfferId?: string;
+  offerId?: string;
   attachments?: RequestAttachment[];
   location?: RequestLocation;
   understanding?: RequestUnderstanding;

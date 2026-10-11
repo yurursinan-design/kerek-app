@@ -207,23 +207,77 @@ async function runTestSuite() {
           customerId: 'user_bob',
         })
       );
+      await assertFails(
+        updateDoc(doc(aliceDb, 'requests', 'req_alice_01'), {
+          id: 'req_hacked_id',
+        })
+      );
+    });
+
+    // Seed a second provider for competitive / negative scenario tests
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      const adminDb = adminContext.firestore();
+      await setDoc(doc(adminDb, 'providers', 'prov_master2'), {
+        id: 'prov_master2',
+        userId: 'prov_master2',
+        name: 'Master Sergey',
+        city: 'almaty',
+        category: 'appliance_repair',
+      });
+    });
+
+    // Provider who has not submitted an offer cannot change request status to OFFERS_RECEIVED
+    await test('Provider who has not submitted an offer cannot change status to OFFERS_RECEIVED', async () => {
+      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      await assertFails(
+        updateDoc(doc(master2Db, 'requests', 'req_alice_01'), {
+          status: 'OFFERS_RECEIVED',
+          updatedAt: new Date().toISOString(),
+        })
+      );
     });
 
     // =========================================================================
-    // SECTION 5: Offers & Selection (/offers/{offerId})
+    // SECTION 5: Offers Creation & Security (/offers/{offerId})
     // =========================================================================
-    console.log('\n--- SECTION 5: Offers & Selection (/offers/{offerId}) ---');
+    console.log('\n--- SECTION 5: Offers Creation & Security (/offers/{offerId}) ---');
 
-    await test('Provider can submit PENDING offer with matching providerUserId', async () => {
+    await test('Creating offer for non-existent request is rejected', async () => {
       const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
-      await assertSucceeds(
-        setDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
-          id: 'offer_m1_01',
-          requestId: 'req_alice_01',
+      await assertFails(
+        setDoc(doc(masterDb, 'offers', 'offer_m1_ghost'), {
+          id: 'offer_m1_ghost',
+          requestId: 'req_non_existent',
           providerId: 'prov_master1',
           providerUserId: 'prov_master1',
-          providerName: 'Master Ruslan',
-          price: '12 000 ₸',
+          price: '15 000 ₸',
+          status: 'PENDING',
+        })
+      );
+    });
+
+    // Seed a CANCELLED request to verify closed request check
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      const adminDb = adminContext.firestore();
+      await setDoc(doc(adminDb, 'requests', 'req_closed_01'), {
+        id: 'req_closed_01',
+        customerId: 'user_alice',
+        city: 'almaty',
+        category: 'appliances',
+        service: 'Repair',
+        status: 'CANCELLED',
+      });
+    });
+
+    await test('Creating offer for closed/cancelled request is rejected', async () => {
+      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      await assertFails(
+        setDoc(doc(masterDb, 'offers', 'offer_m1_closed'), {
+          id: 'offer_m1_closed',
+          requestId: 'req_closed_01',
+          providerId: 'prov_master1',
+          providerUserId: 'prov_master1',
+          price: '15 000 ₸',
           status: 'PENDING',
         })
       );
@@ -243,21 +297,163 @@ async function runTestSuite() {
       );
     });
 
-    await test('Customer owning the request can accept offer (status -> ACCEPTED)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+    await test('Provider can submit valid PENDING offer for open request', async () => {
+      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
       await assertSucceeds(
-        updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), {
+        setDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
+          id: 'offer_m1_01',
+          requestId: 'req_alice_01',
+          providerId: 'prov_master1',
+          providerUserId: 'prov_master1',
+          providerName: 'Master Ruslan',
+          price: '12 000 ₸',
+          availability: 'Today 15:00',
+          message: 'Can fix today',
+          createdAt: new Date().toISOString(),
+          status: 'PENDING',
+        })
+      );
+    });
+
+    // Seed a second offer by prov_master2 for cross-offer exploit testing
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      const adminDb = adminContext.firestore();
+      await setDoc(doc(adminDb, 'offers', 'offer_m2_01'), {
+        id: 'offer_m2_01',
+        requestId: 'req_alice_01',
+        providerId: 'prov_master2',
+        providerUserId: 'prov_master2',
+        providerName: 'Master Sergey',
+        price: '14 000 ₸',
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      });
+    });
+
+    // Now test Request OFFERS_RECEIVED transition under strict offer verification:
+    await test('Attacker cannot use another provider offer to update request status', async () => {
+      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      // prov_master2 attempts to claim offer_m1_01 belonging to prov_master1
+      await assertFails(
+        updateDoc(doc(master2Db, 'requests', 'req_alice_01'), {
+          status: 'OFFERS_RECEIVED',
+          lastOfferId: 'offer_m1_01',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    await test('Customer and other unauthorized users cannot use provider privilege to set OFFERS_RECEIVED', async () => {
+      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      // Customer cannot use provider branch to transition OPEN -> OFFERS_RECEIVED
+      await assertFails(
+        updateDoc(doc(aliceDb, 'requests', 'req_alice_01'), {
+          status: 'OFFERS_RECEIVED',
+          lastOfferId: 'offer_m1_01',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+      // Unrelated user cannot use provider branch
+      await assertFails(
+        updateDoc(doc(bobDb, 'requests', 'req_alice_01'), {
+          status: 'OFFERS_RECEIVED',
+          lastOfferId: 'offer_m1_01',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    await test('Legitimate provider who submitted offer can update request to OFFERS_RECEIVED', async () => {
+      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      await assertSucceeds(
+        updateDoc(doc(masterDb, 'requests', 'req_alice_01'), {
+          status: 'OFFERS_RECEIVED',
+          lastOfferId: 'offer_m1_01',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    // =========================================================================
+    // SECTION 5B: Offer Updates & Customer Selection
+    // =========================================================================
+    console.log('\n--- SECTION 5B: Offer Updates & Customer Selection ---');
+
+    await test('Provider can update allowed fields of their own PENDING offer', async () => {
+      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      await assertSucceeds(
+        updateDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
+          price: '11 500 ₸',
+          message: 'Updated price with discount',
+          availability: 'Today 16:00',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    await test('Provider cannot alter immutable identity fields on offer update', async () => {
+      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      await assertFails(
+        updateDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
+          providerUserId: 'user_bob',
+        })
+      );
+      await assertFails(
+        updateDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
+          requestId: 'req_closed_01',
+        })
+      );
+      await assertFails(
+        updateDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
+          status: 'ACCEPTED', // Provider cannot self-accept!
+        })
+      );
+    });
+
+    await test('Unrelated user cannot update or tamper with offer', async () => {
+      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      await assertFails(
+        updateDoc(doc(bobDb, 'offers', 'offer_m1_01'), {
+          price: '500 ₸',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    // Unrelated user cannot accept or reject offer while still PENDING (fixes false-positive)
+    await test('Unrelated user cannot accept or reject PENDING offer of another customer request', async () => {
+      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      await assertFails(
+        updateDoc(doc(bobDb, 'offers', 'offer_m1_01'), {
+          status: 'REJECTED',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+      await assertFails(
+        updateDoc(doc(bobDb, 'offers', 'offer_m1_01'), {
           status: 'ACCEPTED',
           updatedAt: new Date().toISOString(),
         })
       );
     });
 
-    await test('Unrelated user cannot accept or reject offer', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+    await test('Customer cannot set invalid paymentStatus value on offer', async () => {
+      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
       await assertFails(
-        updateDoc(doc(bobDb, 'offers', 'offer_m1_01'), {
-          status: 'REJECTED',
+        updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), {
+          paymentStatus: 'unauthorized_bypass_status',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    await test('Customer owning the request can accept offer (status -> ACCEPTED)', async () => {
+      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      await assertSucceeds(
+        updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), {
+          status: 'ACCEPTED',
+          paymentStatus: 'held_in_escrow',
           updatedAt: new Date().toISOString(),
         })
       );
@@ -355,7 +551,7 @@ async function runTestSuite() {
     });
 
     // =========================================================================
-    // SECTION 8: Appointments & Identity Protection (/appointments/{id})
+    // SECTION 8: Appointments & Field Whitelist Protection (/appointments/{id})
     // =========================================================================
     console.log('\n--- SECTION 8: Appointments & Identity Protection ---');
 
@@ -395,11 +591,35 @@ async function runTestSuite() {
       );
     });
 
-    await test('Provider can confirm appointment (proposedBy preserved)', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
-      await assertSucceeds(
-        updateDoc(doc(masterDb, 'appointments', apptId), {
-          status: 'CONFIRMED',
+    await test('Mutating appointment id, requestId, providerUserId, or createdAt is rejected', async () => {
+      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      await assertFails(
+        updateDoc(doc(aliceDb, 'appointments', apptId), {
+          id: 'appointment_hacked',
+        })
+      );
+      await assertFails(
+        updateDoc(doc(aliceDb, 'appointments', apptId), {
+          requestId: 'req_other',
+        })
+      );
+      await assertFails(
+        updateDoc(doc(aliceDb, 'appointments', apptId), {
+          providerUserId: 'user_bob',
+        })
+      );
+      await assertFails(
+        updateDoc(doc(aliceDb, 'appointments', apptId), {
+          createdAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    await test('Injecting unauthorized or unexpected fields into appointment update is rejected', async () => {
+      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      await assertFails(
+        updateDoc(doc(aliceDb, 'appointments', apptId), {
+          maliciousInjectedField: 'attack_payload',
           updatedAt: new Date().toISOString(),
         })
       );
@@ -410,6 +630,38 @@ async function runTestSuite() {
       await assertFails(
         updateDoc(doc(bobDb, 'appointments', apptId), {
           status: 'CANCELLED',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    await test('Provider can confirm appointment (PROPOSED -> CONFIRMED)', async () => {
+      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      await assertSucceeds(
+        updateDoc(doc(masterDb, 'appointments', apptId), {
+          status: 'CONFIRMED',
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    await test('Provider can update workStatus linearly (PROVIDER_ON_THE_WAY)', async () => {
+      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      await assertSucceeds(
+        updateDoc(doc(masterDb, 'appointments', apptId), {
+          workStatus: 'PROVIDER_ON_THE_WAY',
+          workStatusUpdatedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    await test('Invalid appointment status regression is rejected', async () => {
+      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      // Cannot regress CONFIRMED back to PROPOSED
+      await assertFails(
+        updateDoc(doc(masterDb, 'appointments', apptId), {
+          status: 'PROPOSED',
           updatedAt: new Date().toISOString(),
         })
       );
@@ -459,16 +711,55 @@ async function runTestSuite() {
       );
     });
 
-    await test('Provider cannot submit review for themselves (Self-Review)', async () => {
+    // Isolated Genuine Self-Review Test on Fresh Unreviewed Request (Fixes false-positive)
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      const adminDb = adminContext.firestore();
+      // Create a fresh completed request without an existing review document
+      await setDoc(doc(adminDb, 'requests', 'req_self_audit_01'), {
+        id: 'req_self_audit_01',
+        customerId: 'user_charlie',
+        city: 'almaty',
+        category: 'appliances',
+        service: 'Repair',
+        status: 'COMPLETED',
+        selectedOfferId: 'offer_charlie_m1',
+      });
+      await setDoc(doc(adminDb, 'offers', 'offer_charlie_m1'), {
+        id: 'offer_charlie_m1',
+        requestId: 'req_self_audit_01',
+        providerId: 'prov_master1',
+        providerUserId: 'prov_master1',
+        price: '20 000 ₸',
+        status: 'ACCEPTED',
+      });
+    });
+
+    await test('Provider cannot submit review for themselves on a fresh completed request (Self-Review)', async () => {
       const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      // prov_master1 tries to create reviews/req_self_audit_01 for their own service
       await assertFails(
-        setDoc(doc(masterDb, 'reviews', 'req_alice_01'), {
-          id: 'req_alice_01',
-          requestId: 'req_alice_01',
+        setDoc(doc(masterDb, 'reviews', 'req_self_audit_01'), {
+          id: 'req_self_audit_01',
+          requestId: 'req_self_audit_01',
           customerId: 'prov_master1',
           providerId: 'prov_master1',
           rating: 5,
-          comment: 'Self review',
+          comment: 'I am the best master',
+          createdAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    await test('Legitimate customer can review provider on the fresh completed request', async () => {
+      const charlieDb = testEnv.authenticatedContext('user_charlie').firestore();
+      await assertSucceeds(
+        setDoc(doc(charlieDb, 'reviews', 'req_self_audit_01'), {
+          id: 'req_self_audit_01',
+          requestId: 'req_self_audit_01',
+          customerId: 'user_charlie',
+          providerId: 'prov_master1',
+          rating: 5,
+          comment: 'Charlie confirms great work!',
           createdAt: new Date().toISOString(),
         })
       );

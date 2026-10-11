@@ -125,10 +125,28 @@ service cloud.firestore {
          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
         // 4. Provider updating status to OFFERS_RECEIVED when submitting an offer
         (existing().customerId != request.auth.uid &&
-         exists(/databases/$(database)/documents/providers/$(request.auth.uid)) &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
+         incoming().customerId == existing().customerId &&
+         incoming().id == existing().id &&
+         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'lastOfferId', 'offerId']) &&
          incoming().status == 'OFFERS_RECEIVED' &&
-         existing().status in ['OPEN', 'MATCHING', 'NEW', 'OFFERS_RECEIVED']) ||
+         existing().status in ['OPEN', 'MATCHING', 'NEW', 'OFFERS_RECEIVED'] &&
+         (
+           ('lastOfferId' in incoming() &&
+            incoming().lastOfferId is string &&
+            exists(/databases/$(database)/documents/offers/$(incoming().lastOfferId)) &&
+            get(/databases/$(database)/documents/offers/$(incoming().lastOfferId)).data.requestId == requestId &&
+            (get(/databases/$(database)/documents/offers/$(incoming().lastOfferId)).data.providerUserId == request.auth.uid ||
+             get(/databases/$(database)/documents/offers/$(incoming().lastOfferId)).data.providerId == request.auth.uid) &&
+            get(/databases/$(database)/documents/offers/$(incoming().lastOfferId)).data.status == 'PENDING')
+           ||
+           ('offerId' in incoming() &&
+            incoming().offerId is string &&
+            exists(/databases/$(database)/documents/offers/$(incoming().offerId)) &&
+            get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.requestId == requestId &&
+            (get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.providerUserId == request.auth.uid ||
+             get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.providerId == request.auth.uid) &&
+            get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.status == 'PENDING')
+         )) ||
         // 5. Selected provider updating job status (in-progress, completed)
         (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
          incoming().status in ['IN_PROGRESS', 'COMPLETED'] &&
@@ -189,22 +207,41 @@ service cloud.firestore {
                     && isValidId(offerId)
                     && incoming().id == offerId
                     && incoming().requestId is string && incoming().requestId.size() <= 64
+                    && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED']
                     && incoming().providerUserId == request.auth.uid
+                    && (!('providerId' in incoming()) || incoming().providerId is string)
                     && incoming().price is string && incoming().price.size() <= 50
                     && incoming().status == 'PENDING';
       allow update: if isSignedIn() && isValidId(offerId) && (
         // Provider updating their own offer details while still PENDING
-        (existing().providerUserId == request.auth.uid &&
-         incoming().providerUserId == existing().providerUserId &&
-         incoming().requestId == existing().requestId &&
-         incoming().id == existing().id &&
-         existing().status == 'PENDING' &&
-         incoming().status == 'PENDING') ||
+        (
+          (existing().providerUserId == request.auth.uid || (('providerId' in existing()) && existing().providerId == request.auth.uid)) &&
+          incoming().providerUserId == existing().providerUserId &&
+          incoming().requestId == existing().requestId &&
+          incoming().id == existing().id &&
+          (!('providerId' in existing()) || incoming().providerId == existing().providerId) &&
+          (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) &&
+          existing().status == 'PENDING' &&
+          incoming().status == 'PENDING' &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'price', 'priceType', 'availability', 'message',
+            'providerPhone', 'providerWhatsapp', 'providerName',
+            'iinVerified', 'hasCertificate', 'updatedAt'
+          ])
+        ) ||
         // Customer accepting or rejecting an offer, or updating paymentStatus (e.g. releasing escrow)
-        (get(/databases/$(database)/documents/requests/$(existing().requestId)).data.customerId == request.auth.uid &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'updatedAt']) &&
-         (incoming().status == existing().status || (existing().status == 'PENDING' && incoming().status in ['ACCEPTED', 'REJECTED'])) &&
-         (!('paymentStatus' in incoming()) || incoming().paymentStatus in ['pending', 'held_in_escrow', 'released', 'refunded']))
+        (
+          get(/databases/$(database)/documents/requests/$(existing().requestId)).data.customerId == request.auth.uid &&
+          incoming().id == existing().id &&
+          incoming().requestId == existing().requestId &&
+          incoming().providerUserId == existing().providerUserId &&
+          (!('providerId' in existing()) || incoming().providerId == existing().providerId) &&
+          (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paymentStatus', 'updatedAt']) &&
+          (incoming().status == existing().status || (existing().status == 'PENDING' && incoming().status in ['ACCEPTED', 'REJECTED'])) &&
+          (!('paymentStatus' in incoming()) || incoming().paymentStatus in ['pending', 'held_in_escrow', 'released', 'refunded'])
+        )
       );
       allow delete: if false;
     }
@@ -554,6 +591,10 @@ service cloud.firestore {
                     && incoming().providerId == resource.data.providerId
                     && incoming().providerUserId == resource.data.providerUserId
                     && incoming().createdAt == resource.data.createdAt
+                    && incoming().diff(resource.data).affectedKeys().hasOnly([
+                      'status', 'scheduledAt', 'durationMinutes', 'note', 'proposedBy',
+                      'workStatus', 'workStatusUpdatedAt', 'updatedAt'
+                    ])
                     && (
                       incoming().proposedBy == resource.data.proposedBy ||
                       (incoming().proposedBy == 'customer' && request.auth.uid == resource.data.customerId) ||

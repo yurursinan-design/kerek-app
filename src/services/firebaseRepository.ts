@@ -1144,8 +1144,8 @@ export class FirebaseRepository implements Repository {
         try {
           const req = await this.getRequest(newOffer.requestId);
           if (req) {
-            if (req.status === 'MATCHING' || req.status === 'NEW') {
-              await this.updateRequest(req.id, { status: 'OFFERS_RECEIVED' });
+            if (req.status === 'MATCHING' || req.status === 'NEW' || req.status === 'OPEN') {
+              await this.updateRequest(req.id, { status: 'OFFERS_RECEIVED', lastOfferId: newOffer.id });
             }
             // Trigger customer notification
             notificationService.notifyNewOffer(req, newOffer).catch(() => {});
