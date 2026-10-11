@@ -292,7 +292,8 @@ async function runAllTests() {
   assert('ExtractedNeed has city', Boolean(need.city));
   assert('ExtractedNeed has cityId kyzylorda', need.cityId === 'kyzylorda');
   assert('ExtractedNeed has categoryId appliance_repair or appliances', need.categoryId === 'appliance_repair' || need.categoryId === 'appliances');
-  assert('ExtractedNeed has isAiParsed true', need.isAiParsed === true);
+  // The local rules engine must not claim to be Gemini; App sets isAiParsed only when the AI answered
+  assert('Local ExtractedNeed is not labelled as AI-parsed', need.isAiParsed === false);
   assert('ExtractedNeed preserves original query', need.originalQuery === kzQuery);
   assert('ExtractedNeed contains understanding object', Boolean(need.understanding));
 

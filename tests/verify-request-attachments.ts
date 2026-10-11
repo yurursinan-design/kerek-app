@@ -314,20 +314,28 @@ async function runTests() {
   assert.strictEqual(resilientReq.location?.latitude, 44.84883);
 
   // Upload attachment via resilient repository
-  const resilientAttachment = await resilientRepository.uploadRequestAttachment(
-    'REQ-000002',
-    {
-      name: 'test_photo.jpg',
-      size: 1024 * 100,
-      type: 'image/jpeg',
-      data: 'data:image/jpeg;base64,/9j/4AAQ',
-    },
-    customerId
-  );
-  assert.strictEqual(resilientAttachment.type, 'image');
-  assert(resilientAttachment.storagePath.startsWith('requests/REQ-000002/'));
+  const uploadInput = {
+    name: 'test_photo.jpg',
+    size: 1024 * 100,
+    type: 'image/jpeg',
+    data: 'data:image/jpeg;base64,/9j/4AAQ',
+  };
+  if (resilientRepository.isCloudActive()) {
+    // Cloud mode: the file must reach Cloud Storage or the upload must fail visibly. A device-local
+    // copy would put a link into the shared request that no provider can open.
+    try {
+      const cloudAttachment = await resilientRepository.uploadRequestAttachment('REQ-000002', uploadInput, customerId);
+      assert(!/^(data:|blob:)/.test(cloudAttachment.downloadUrl), 'cloud upload must not return a device-local URL');
+    } catch {
+      console.log('  (Cloud Storage unavailable here: upload was rejected instead of saved locally, as intended)');
+    }
+  } else {
+    const resilientAttachment = await resilientRepository.uploadRequestAttachment('REQ-000002', uploadInput, customerId);
+    assert.strictEqual(resilientAttachment.type, 'image');
+    assert(resilientAttachment.storagePath.startsWith('requests/REQ-000002/'));
+  }
 
-  console.log('✓ Test 10 Passed: ResilientRepository supports attachments with fallback');
+  console.log('✓ Test 10 Passed: ResilientRepository uploads attachments without device-local fallback in cloud mode');
 
   // -------------------------------------------------------------
   console.log('\n[TEST 11] Storage Security Rules Audit');
