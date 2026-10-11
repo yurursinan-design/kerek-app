@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { db, auth, app, ensureFirebaseAuth, createSecondaryFirebaseApp } from '../src/services/firebase';
+import { db, auth, app, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { deleteApp } from 'firebase/app';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, getDocs, collection, setDoc, deleteDoc } from 'firebase/firestore';
@@ -31,6 +31,7 @@ async function runMessagingSecurityTests() {
   const providerApp = provClient.app;
   const providerAuth = provClient.auth;
   const providerCred = await signInAnonymously(providerAuth);
+  await attachEmulatorTestPhone(providerAuth);
   const providerUid = providerCred.user.uid;
   const providerDb = provClient.db;
   console.log('✓ [Client 2 - Provider] Authenticated. UID:', providerUid);
@@ -40,6 +41,7 @@ async function runMessagingSecurityTests() {
   const unrelatedApp = unrelClient.app;
   const unrelatedAuth = unrelClient.auth;
   const unrelatedCred = await signInAnonymously(unrelatedAuth);
+  await attachEmulatorTestPhone(unrelatedAuth);
   const unrelatedUid = unrelatedCred.user.uid;
   const unrelatedDb = unrelClient.db;
   console.log('✓ [Client 3 - Unrelated User] Authenticated. UID:', unrelatedUid);

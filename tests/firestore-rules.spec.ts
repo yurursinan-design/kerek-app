@@ -71,6 +71,11 @@ async function runTestSuite() {
     },
   });
 
+  // Publishing (requests, offers, provider profiles) requires a phone-verified account, so test users
+  // carry a phone_number claim unless a test deliberately uses anonymousUser().
+  const phoneUser = (uid: string) => testEnv.authenticatedContext(uid, { phone_number: '+77000000000' });
+  const anonymousUser = (uid: string) => testEnv.authenticatedContext(uid);
+
   console.log('2. Test environment ready. Running isolated security scenarios...\n');
 
   try {
@@ -109,7 +114,7 @@ async function runTestSuite() {
     console.log('\n--- SECTION 2: User Profiles (/users/{userId}) ---');
 
     await test('Authenticated user can create and read their own profile', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'users', 'user_alice'), {
           id: 'user_alice',
@@ -121,7 +126,7 @@ async function runTestSuite() {
     });
 
     await test('User cannot read or write another user private profile', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       // Read Alice's profile
       await assertFails(getDoc(doc(bobDb, 'users', 'user_alice')));
       // Write / spoof Alice's profile
@@ -140,7 +145,7 @@ async function runTestSuite() {
     console.log('\n--- SECTION 3: Provider Profiles (/providers/{providerId}) ---');
 
     await test('Provider can create their own profile with matching UID', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
         setDoc(doc(masterDb, 'providers', 'prov_master1'), {
           id: 'prov_master1',
@@ -154,7 +159,7 @@ async function runTestSuite() {
     });
 
     await test('Provider cannot create profile under another user ID or spoof userId', async () => {
-      const attackerDb = testEnv.authenticatedContext('user_attacker').firestore();
+      const attackerDb = phoneUser('user_attacker').firestore();
       await assertFails(
         setDoc(doc(attackerDb, 'providers', 'prov_master2'), {
           id: 'prov_master2',
@@ -181,7 +186,7 @@ async function runTestSuite() {
     console.log('\n--- SECTION 4: Requests (/requests/{requestId}) ---');
 
     await test('Customer can create OPEN request with matching customerId', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'requests', 'req_alice_01'), {
           id: 'req_alice_01',
@@ -196,7 +201,7 @@ async function runTestSuite() {
     });
 
     await test('User cannot create request on behalf of another customer', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         setDoc(doc(bobDb, 'requests', 'req_bob_spoof'), {
           id: 'req_bob_spoof',
@@ -210,7 +215,7 @@ async function runTestSuite() {
     });
 
     await test('Customer cannot alter request id or customerId on update', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         updateDoc(doc(aliceDb, 'requests', 'req_alice_01'), {
           customerId: 'user_bob',
@@ -237,7 +242,7 @@ async function runTestSuite() {
 
     // Provider who has not submitted an offer cannot change request status to OFFERS_RECEIVED
     await test('Provider who has not submitted an offer cannot change status to OFFERS_RECEIVED', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
       await assertFails(
         updateDoc(doc(master2Db, 'requests', 'req_alice_01'), {
           status: 'OFFERS_RECEIVED',
@@ -248,7 +253,7 @@ async function runTestSuite() {
 
     // Request Privacy & Field Security Tests
     await test('Marketplace query / read returns open listing without sensitive contact information', async () => {
-      const master1Db = testEnv.authenticatedContext('prov_master1').firestore();
+      const master1Db = phoneUser('prov_master1').firestore();
       const reqSnap = await getDoc(doc(master1Db, 'requests', 'req_alice_01'));
       // Provider can read the public request document to make an offer
       await assertSucceeds(getDoc(doc(master1Db, 'requests', 'req_alice_01')));
@@ -260,8 +265,8 @@ async function runTestSuite() {
     });
 
     await test('Unrelated user or unselected provider cannot access private customer contact in requestContacts', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
       await assertFails(getDoc(doc(bobDb, 'requestContacts', 'req_alice_01')));
       await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_alice_01')));
     });
@@ -272,7 +277,7 @@ async function runTestSuite() {
     console.log('\n--- SECTION 5: Offers Creation & Security (/offers/{offerId}) ---');
 
     await test('Creating offer for non-existent request is rejected', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertFails(
         setDoc(doc(masterDb, 'offers', 'offer_m1_ghost'), {
           id: 'offer_m1_ghost',
@@ -299,7 +304,7 @@ async function runTestSuite() {
     });
 
     await test('Creating offer for closed/cancelled request is rejected', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertFails(
         setDoc(doc(masterDb, 'offers', 'offer_m1_closed'), {
           id: 'offer_m1_closed',
@@ -313,7 +318,7 @@ async function runTestSuite() {
     });
 
     await test('Attacker cannot create offer with someone else providerUserId', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         setDoc(doc(bobDb, 'offers', 'offer_fake_01'), {
           id: 'offer_fake_01',
@@ -327,7 +332,7 @@ async function runTestSuite() {
     });
 
     await test('Provider can submit valid PENDING offer for open request', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
         setDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
           id: 'offer_m1_01',
@@ -361,7 +366,7 @@ async function runTestSuite() {
 
     // Now test Request OFFERS_RECEIVED transition under strict offer verification:
     await test('Attacker cannot use another provider offer to update request status', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
       // prov_master2 attempts to claim offer_m1_01 belonging to prov_master1
       await assertFails(
         updateDoc(doc(master2Db, 'requests', 'req_alice_01'), {
@@ -373,8 +378,8 @@ async function runTestSuite() {
     });
 
     await test('Customer and other unauthorized users cannot use provider privilege to set OFFERS_RECEIVED', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       // Customer cannot use provider branch to transition OPEN -> OFFERS_RECEIVED
       await assertFails(
         updateDoc(doc(aliceDb, 'requests', 'req_alice_01'), {
@@ -394,7 +399,7 @@ async function runTestSuite() {
     });
 
     await test('Legitimate provider who submitted offer can update request to OFFERS_RECEIVED', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
         updateDoc(doc(masterDb, 'requests', 'req_alice_01'), {
           status: 'OFFERS_RECEIVED',
@@ -410,7 +415,7 @@ async function runTestSuite() {
     console.log('\n--- SECTION 5B: Offer Updates & Customer Selection ---');
 
     await test('Provider can update allowed fields of their own PENDING offer', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
         updateDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
           price: '11 500 ₸',
@@ -422,7 +427,7 @@ async function runTestSuite() {
     });
 
     await test('Provider cannot alter immutable identity fields on offer update', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertFails(
         updateDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
           providerUserId: 'user_bob',
@@ -441,7 +446,7 @@ async function runTestSuite() {
     });
 
     await test('Unrelated user cannot update or tamper with offer', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         updateDoc(doc(bobDb, 'offers', 'offer_m1_01'), {
           price: '500 ₸',
@@ -452,7 +457,7 @@ async function runTestSuite() {
 
     // Unrelated user cannot accept or reject offer while still PENDING (fixes false-positive)
     await test('Unrelated user cannot accept or reject PENDING offer of another customer request', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         updateDoc(doc(bobDb, 'offers', 'offer_m1_01'), {
           status: 'REJECTED',
@@ -468,7 +473,7 @@ async function runTestSuite() {
     });
 
     await test('Customer cannot tamper with paymentStatus (cannot set held_in_escrow, released, or refunded)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       // Test setting held_in_escrow directly by customer
       await assertFails(
         updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), {
@@ -493,7 +498,7 @@ async function runTestSuite() {
     });
 
     await test('Customer owning the request can accept offer (status -> ACCEPTED) without modifying paymentStatus', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), {
           status: 'ACCEPTED',
@@ -550,7 +555,7 @@ async function runTestSuite() {
     });
 
     await test('Parallel concurrent offer acceptance via firebaseRepository.acceptOffer results in exactly 1 ACCEPTED offer and consistent request state', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       // acceptOffer's client-side ownership check reads the app's current user id, not the
       // test context's auth, so align it with the context the transaction runs under.
       setCurrentUserId('user_alice');
@@ -599,7 +604,7 @@ async function runTestSuite() {
     console.log('\n--- SECTION 6: Private Contact Info (/requestContacts/{requestId}) ---');
 
     await test('Customer can create their private contact info', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'requestContacts', 'req_alice_01'), {
           customerId: 'user_alice',
@@ -610,13 +615,13 @@ async function runTestSuite() {
 
     // 1. İsteğin sahibi müşteri iletişim bilgilerini okuyabilir
     await test('1. Customer owning the request can read their private contact info', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(getDoc(doc(aliceDb, 'requestContacts', 'req_alice_01')));
     });
 
     // 2. Kabul edilmiş teklifin sağlayıcısı okuyabilir
     await test('2. Provider of an ACCEPTED offer can read customer contact info', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(getDoc(doc(masterDb, 'requestContacts', 'req_alice_01')));
     });
 
@@ -702,20 +707,20 @@ async function runTestSuite() {
 
     // 3. "PENDING" durumundaki teklifin sağlayıcısı okuyamaz
     await test('3. Provider with PENDING offer cannot read customer contact info', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
       await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_pending_contact')));
     });
 
     // 4. "REJECTED" durumundaki teklifin sağlayıcısı okuyamaz
     await test('4. Provider with REJECTED offer cannot read customer contact info', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
       await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_rejected_contact')));
     });
 
     // 5. Başka sağlayıcı ve ilgisiz kullanıcı okuyamaz
     await test('5. Other providers and unrelated users cannot read customer contact info', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       const unauthDb = testEnv.unauthenticatedContext().firestore();
       await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_alice_01')));
       await assertFails(getDoc(doc(bobDb, 'requestContacts', 'req_alice_01')));
@@ -724,7 +729,7 @@ async function runTestSuite() {
 
     // 6. Eksik veya geçersiz "selectedOfferId" durumunda erişim reddedilir
     await test('6. Access denied when selectedOfferId is missing, invalid, or belongs to another request', async () => {
-      const master1Db = testEnv.authenticatedContext('prov_master1').firestore();
+      const master1Db = phoneUser('prov_master1').firestore();
       // Missing selectedOfferId
       await assertFails(getDoc(doc(master1Db, 'requestContacts', 'req_no_selection')));
       // Invalid (non-existent) selectedOfferId
@@ -735,8 +740,8 @@ async function runTestSuite() {
 
     // 7. Kabul edilmiş geçerli teklif akışı çalışmaya devam eder
     await test('7. Valid accepted offer flow continues to work seamlessly', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      const master1Db = testEnv.authenticatedContext('prov_master1').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
+      const master1Db = phoneUser('prov_master1').firestore();
       // Customer reads their contact
       await assertSucceeds(getDoc(doc(aliceDb, 'requestContacts', 'req_alice_01')));
       // Accepted provider reads customer contact
@@ -755,7 +760,7 @@ async function runTestSuite() {
     const convId = 'conv_req_alice_01';
 
     await test('Customer can create conversation with selected provider', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'conversations', convId), {
           id: convId,
@@ -768,12 +773,12 @@ async function runTestSuite() {
     });
 
     await test('Unrelated third party cannot read conversation', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(getDoc(doc(bobDb, 'conversations', convId)));
     });
 
     await test('Participant can send message in conversation', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, `conversations/${convId}/messages`, 'msg_001'), {
           id: 'msg_001',
@@ -789,7 +794,7 @@ async function runTestSuite() {
     });
 
     await test('Unrelated user cannot send message into conversation', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         setDoc(doc(bobDb, `conversations/${convId}/messages`, 'msg_attacker'), {
           id: 'msg_attacker',
@@ -813,7 +818,7 @@ async function runTestSuite() {
     const createdAtIso = new Date().toISOString();
 
     await test('Customer can create appointment with proposedBy = customer', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'appointments', apptId), {
           id: apptId,
@@ -832,7 +837,7 @@ async function runTestSuite() {
     });
 
     await test('Customer cannot mutate providerId or customerId on appointment update', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         updateDoc(doc(aliceDb, 'appointments', apptId), {
           providerId: 'hacked_provider',
@@ -846,7 +851,7 @@ async function runTestSuite() {
     });
 
     await test('Mutating appointment id, requestId, providerUserId, or createdAt is rejected', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         updateDoc(doc(aliceDb, 'appointments', apptId), {
           id: 'appointment_hacked',
@@ -870,7 +875,7 @@ async function runTestSuite() {
     });
 
     await test('Injecting unauthorized or unexpected fields into appointment update is rejected', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         updateDoc(doc(aliceDb, 'appointments', apptId), {
           maliciousInjectedField: 'attack_payload',
@@ -880,7 +885,7 @@ async function runTestSuite() {
     });
 
     await test('Unrelated user cannot update appointment', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         updateDoc(doc(bobDb, 'appointments', apptId), {
           status: 'CANCELLED',
@@ -890,7 +895,7 @@ async function runTestSuite() {
     });
 
     await test('Provider can confirm appointment (PROPOSED -> CONFIRMED)', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
         updateDoc(doc(masterDb, 'appointments', apptId), {
           status: 'CONFIRMED',
@@ -900,7 +905,7 @@ async function runTestSuite() {
     });
 
     await test('Provider can update workStatus linearly (PROVIDER_ON_THE_WAY)', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
         updateDoc(doc(masterDb, 'appointments', apptId), {
           workStatus: 'PROVIDER_ON_THE_WAY',
@@ -911,7 +916,7 @@ async function runTestSuite() {
     });
 
     await test('Invalid appointment status regression is rejected', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       // Cannot regress CONFIRMED back to PROPOSED
       await assertFails(
         updateDoc(doc(masterDb, 'appointments', apptId), {
@@ -928,7 +933,7 @@ async function runTestSuite() {
 
     // Attempt review before request is COMPLETED -> must FAIL
     await test('Customer cannot submit review while request is not COMPLETED', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         setDoc(doc(aliceDb, 'reviews', 'req_alice_01'), {
           id: 'req_alice_01',
@@ -951,7 +956,7 @@ async function runTestSuite() {
     });
 
     await test('Customer can submit review for COMPLETED request with accepted provider', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'reviews', 'req_alice_01'), {
           id: 'req_alice_01',
@@ -989,7 +994,7 @@ async function runTestSuite() {
     });
 
     await test('Provider cannot submit review for themselves on a fresh completed request (Self-Review)', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       // prov_master1 tries to create reviews/req_self_audit_01 for their own service
       await assertFails(
         setDoc(doc(masterDb, 'reviews', 'req_self_audit_01'), {
@@ -1005,7 +1010,7 @@ async function runTestSuite() {
     });
 
     await test('Legitimate customer can review provider on the fresh completed request', async () => {
-      const charlieDb = testEnv.authenticatedContext('user_charlie').firestore();
+      const charlieDb = phoneUser('user_charlie').firestore();
       await assertSucceeds(
         setDoc(doc(charlieDb, 'reviews', 'req_self_audit_01'), {
           id: 'req_self_audit_01',
@@ -1020,7 +1025,7 @@ async function runTestSuite() {
     });
 
     await test('Reviews are strictly immutable (update and delete forbidden)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         updateDoc(doc(aliceDb, 'reviews', 'req_alice_01'), {
           rating: 1,
@@ -1036,7 +1041,7 @@ async function runTestSuite() {
 
     // Branch 1: Customer Self Notification
     await test('Customer can create self notification on owned request (CUSTOMER_OFFER_ACCEPTED)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'notifications', 'notif_alice_self_01'), {
           id: 'notif_alice_self_01',
@@ -1055,7 +1060,7 @@ async function runTestSuite() {
     });
 
     await test('Unrelated user or wrong recipient is denied customer self notification', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         setDoc(doc(bobDb, 'notifications', 'notif_fake_self_01'), {
           id: 'notif_fake_self_01',
@@ -1075,7 +1080,7 @@ async function runTestSuite() {
 
     // Branch 2: Customer to Provider
     await test('Customer can create notification for provider of selected offer (PROVIDER_OFFER_ACCEPTED)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'notifications', 'notif_prov_accept_01'), {
           id: 'notif_prov_accept_01',
@@ -1095,7 +1100,7 @@ async function runTestSuite() {
     });
 
     await test('Customer can create notification for provider who submitted offer (PROVIDER_NEW_MESSAGE)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'notifications', 'notif_prov_msg_01'), {
           id: 'notif_prov_msg_01',
@@ -1115,7 +1120,7 @@ async function runTestSuite() {
     });
 
     await test('Customer is denied sending notification to unrelated provider with no offer or relationship', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         setDoc(doc(aliceDb, 'notifications', 'notif_unrelated_prov_01'), {
           id: 'notif_unrelated_prov_01',
@@ -1134,7 +1139,7 @@ async function runTestSuite() {
     });
 
     await test('Customer is denied using cross-tenant offerId belonging to a different request', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         setDoc(doc(aliceDb, 'notifications', 'notif_cross_offer_01'), {
           id: 'notif_cross_offer_01',
@@ -1155,7 +1160,7 @@ async function runTestSuite() {
 
     // Branch 3: Provider to Customer
     await test('Provider who submitted offer can notify customer (CUSTOMER_NEW_OFFER)', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
         setDoc(doc(masterDb, 'notifications', 'notif_cust_offer_01'), {
           id: 'notif_cust_offer_01',
@@ -1175,7 +1180,7 @@ async function runTestSuite() {
     });
 
     await test('Unrelated provider is denied notifying customer on request where they have no offer', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
       await assertFails(
         setDoc(doc(master2Db, 'notifications', 'notif_unauth_offer_01'), {
           id: 'notif_unauth_offer_01',
@@ -1194,7 +1199,7 @@ async function runTestSuite() {
     });
 
     await test('Notification for non-existent request is denied', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertFails(
         setDoc(doc(masterDb, 'notifications', 'notif_nonexistent_req_01'), {
           id: 'notif_nonexistent_req_01',
@@ -1214,7 +1219,7 @@ async function runTestSuite() {
 
     // Additional coverage for remaining canonical notification types
     await test('Customer can create self notification for review prompt (CUSTOMER_REVIEW_REQUIRED)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'notifications', 'notif_alice_review_01'), {
           id: 'notif_alice_review_01',
@@ -1233,7 +1238,7 @@ async function runTestSuite() {
     });
 
     await test('Provider of selected offer can notify customer on work completed (PROVIDER_WORK_COMPLETED)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'notifications', 'notif_prov_completed_01'), {
           id: 'notif_prov_completed_01',
@@ -1253,7 +1258,7 @@ async function runTestSuite() {
     });
 
     await test('Customer can notify provider when request is cancelled (PROVIDER_REQUEST_CANCELLED)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'notifications', 'notif_prov_cancel_01'), {
           id: 'notif_prov_cancel_01',
@@ -1273,7 +1278,7 @@ async function runTestSuite() {
     });
 
     await test('Notification with invalid or unknown notification type is denied', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertFails(
         setDoc(doc(masterDb, 'notifications', 'notif_invalid_type_01'), {
           id: 'notif_invalid_type_01',
@@ -1292,10 +1297,10 @@ async function runTestSuite() {
     });
 
     await test('All 21 canonical notification types succeed with valid relationship documents and fail with unauthorized actor/mismatched offer', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      const master1Db = testEnv.authenticatedContext('prov_master1').firestore();
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
+      const master1Db = phoneUser('prov_master1').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
 
       // Customer -> Provider Types (Customer creating notification for Provider)
       const custToProvTypes: Array<{ type: any; id: string }> = [
@@ -1469,7 +1474,7 @@ async function runTestSuite() {
       });
     });
 
-    const malloryDb = () => testEnv.authenticatedContext('mallory').firestore();
+    const malloryDb = () => phoneUser('mallory').firestore();
     const baseOffer = (id: string, extra: Record<string, unknown> = {}) => ({
       id,
       requestId: 'req_h_open',
@@ -1521,7 +1526,7 @@ async function runTestSuite() {
     });
 
     await test('Provider cannot create a profile with self-assigned verified / IIN / certificate badges', async () => {
-      const eveDb = testEnv.authenticatedContext('eve').firestore();
+      const eveDb = phoneUser('eve').firestore();
       const base = { id: 'eve', userId: 'eve', name: 'Eve', city: 'almaty', category: 'appliances' };
       await assertFails(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, iinVerified: true }));
       await assertFails(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, verified: true }));
@@ -1538,7 +1543,7 @@ async function runTestSuite() {
       await assertFails(updateDoc(doc(malloryDb(), 'providers', 'mallory'), { description: 'x'.repeat(5001) }));
     });
 
-    const aliceDb = () => testEnv.authenticatedContext('user_alice').firestore();
+    const aliceDb = () => phoneUser('user_alice').firestore();
     const baseRequest = (id: string, extra: Record<string, unknown> = {}) => ({
       id,
       customerId: 'user_alice',
@@ -1614,7 +1619,7 @@ async function runTestSuite() {
       });
     });
 
-    const ctx = (uid: string) => testEnv.authenticatedContext(uid).firestore();
+    const ctx = (uid: string) => phoneUser(uid).firestore();
     const cityQuery = (db: any, cityId: string) =>
       getDocs(query(collection(db, 'requests'), where('cityId', '==', cityId), where('categoryId', '==', 'appliances')));
 
@@ -1645,6 +1650,41 @@ async function runTestSuite() {
 
     await test('Selected provider from another city can still read the request they work on', async () => {
       await assertSucceeds(getDoc(doc(ctx('prov_v_astana'), 'requests', 'req_v_sel')));
+    });
+
+    // =========================================================================
+    // SECTION 13: Phone verification — anonymous accounts can browse but not publish
+    // =========================================================================
+    console.log('\n--- SECTION 13: Phone verification required to publish ---');
+
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      await setDoc(doc(adminContext.firestore(), 'requests', 'req_p_open'), {
+        id: 'req_p_open', customerId: 'cust_p', city: 'Алматы', cityId: 'almaty', category: 'appliances', categoryId: 'appliances', service: 'x', status: 'MATCHING',
+      });
+    });
+
+    await test('Anonymous account cannot create a request', async () => {
+      await assertFails(setDoc(doc(anonymousUser('anon_p').firestore(), 'requests', 'req_p_anon'), {
+        id: 'req_p_anon', customerId: 'anon_p', city: 'Алматы', category: 'appliances', service: 'x', status: 'MATCHING',
+      }));
+    });
+
+    await test('Phone-verified account can create a request', async () => {
+      await assertSucceeds(setDoc(doc(phoneUser('cust_p2').firestore(), 'requests', 'req_p_phone'), {
+        id: 'req_p_phone', customerId: 'cust_p2', city: 'Алматы', category: 'appliances', service: 'x', status: 'MATCHING',
+      }));
+    });
+
+    await test('Anonymous account cannot create a provider profile', async () => {
+      await assertFails(setDoc(doc(anonymousUser('anon_p').firestore(), 'providers', 'anon_p'), {
+        id: 'anon_p', userId: 'anon_p', name: 'Anon', city: 'Алматы', category: 'appliances',
+      }));
+    });
+
+    await test('Anonymous account cannot send an offer', async () => {
+      await assertFails(setDoc(doc(anonymousUser('anon_p').firestore(), 'offers', 'offer_p_anon'), {
+        id: 'offer_p_anon', requestId: 'req_p_open', providerUserId: 'anon_p', providerId: 'anon_p', price: '1 000 ₸', status: 'PENDING',
+      }));
     });
 
   } finally {

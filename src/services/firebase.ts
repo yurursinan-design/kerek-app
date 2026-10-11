@@ -195,6 +195,38 @@ export function createSecondaryFirebaseApp(appName: string) {
   return { app: secondaryApp, auth: secondaryAuth, db: secondaryDb };
 }
 
+/**
+ * Test support, Auth emulator only: gives the signed-in test user a verified phone number, the way
+ * SMS login does in production (publishing requires a phone-verified account). The browser build
+ * never runs this: there `process.env` is empty, so no emulator host is set.
+ */
+export async function attachEmulatorTestPhone(targetAuth: Auth | null = auth): Promise<void> {
+  const host = typeof process !== 'undefined' ? process.env?.FIREBASE_AUTH_EMULATOR_HOST : undefined;
+  const user = targetAuth?.currentUser;
+  // Skip when there is no real signed-in user (some tests stub currentUser with a plain object)
+  if (!host || !user || user.phoneNumber || typeof user.getIdToken !== 'function') return;
+  // Unique, stable number per test user (the emulator rejects one number on two accounts)
+  let hash = 0;
+  for (const ch of user.uid) hash = (hash * 31 + ch.charCodeAt(0)) % 10000000;
+  const phoneNumber = `+7700${String(hash).padStart(7, '0')}`;
+  const res = await fetch(
+    `http://${host}/identitytoolkit.googleapis.com/v1/projects/${firebaseConfig.projectId}/accounts:update`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+      body: JSON.stringify({ localId: user.uid, phoneNumber }),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Auth emulator could not attach a test phone number: ${res.status} ${await res.text()}`);
+  }
+  await user.reload();
+  await user.getIdToken(true);
+}
+
+const autoTestPhone =
+  typeof process !== 'undefined' && process.env?.KEREK_TEST_AUTO_PHONE === '1' && Boolean(process.env?.FIREBASE_AUTH_EMULATOR_HOST);
+
 let authInitPromise: Promise<string | null> | null = null;
 
 /**
@@ -209,6 +241,9 @@ export async function ensureFirebaseAuth(): Promise<string | null> {
     try {
       localStorage.setItem('kerek_current_user_id_v2', auth.currentUser.uid);
     } catch {}
+    if (autoTestPhone && !auth.currentUser.phoneNumber) {
+      await attachEmulatorTestPhone(auth).catch((e) => console.warn('[KEREK Firebase] test phone note:', e?.message || e));
+    }
     return auth.currentUser.uid;
   }
 
@@ -221,6 +256,9 @@ export async function ensureFirebaseAuth(): Promise<string | null> {
             try {
               localStorage.setItem('kerek_current_user_id_v2', cred.user.uid);
             } catch {}
+            if (autoTestPhone) {
+              await attachEmulatorTestPhone(auth).catch((e) => console.warn('[KEREK Firebase] test phone note:', e?.message || e));
+            }
             return cred.user.uid;
           }
         }

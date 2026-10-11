@@ -24,6 +24,12 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid != null;
     }
 
+    // Publishing (requests, offers, provider profiles) needs a phone-verified account (SMS login).
+    // Anonymous accounts can still browse and use the AI analysis.
+    function hasVerifiedPhone() {
+      return isSignedIn() && ('phone_number' in request.auth.token) && request.auth.token.phone_number is string;
+    }
+
     // Optional string field: absent, or a string of at most n characters
     function strMax(m, k, n) {
       return !(k in m) || (m[k] is string && m[k].size() <= n);
@@ -86,7 +92,7 @@ service cloud.firestore {
     match /providers/{providerId} {
       allow get: if isSignedIn() && isValidId(providerId);
       allow list: if false;
-      allow create: if isSignedIn()
+      allow create: if hasVerifiedPhone()
                     && isValidId(providerId)
                     && providerId == request.auth.uid
                     && incoming().id == request.auth.uid
@@ -96,7 +102,7 @@ service cloud.firestore {
                     && incoming().name is string && incoming().name.size() > 0 && incoming().name.size() <= 100
                     && noTrustBadges(incoming())
                     && providerFieldLimits(incoming());
-      allow update: if isSignedIn()
+      allow update: if hasVerifiedPhone()
                     && isValidId(providerId)
                     && providerId == request.auth.uid
                     && existing().userId == request.auth.uid
@@ -141,7 +147,7 @@ service cloud.firestore {
         resource.data.customerId == request.auth.uid ||
         isProviderInCityOf(resource.data)
       );
-      allow create: if isSignedIn()
+      allow create: if hasVerifiedPhone()
                     && isValidId(requestId)
                     && incoming().id == requestId
                     && incoming().customerId == request.auth.uid
@@ -286,7 +292,7 @@ service cloud.firestore {
         (resource.data.requestId is string &&
          get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.customerId == request.auth.uid)
       );
-      allow create: if isSignedIn()
+      allow create: if hasVerifiedPhone()
                     && isValidId(offerId)
                     && incoming().id == offerId
                     && incoming().requestId is string && incoming().requestId.size() <= 64

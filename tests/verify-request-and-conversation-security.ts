@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { db, auth, app, ensureFirebaseAuth, createSecondaryFirebaseApp } from '../src/services/firebase';
+import { db, auth, app, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { deleteApp } from 'firebase/app';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
@@ -29,6 +29,7 @@ async function runSecurityAudit() {
   const selectedProvApp = selectedProvClient.app;
   const selectedProvAuth = selectedProvClient.auth;
   const selectedProvCred = await signInAnonymously(selectedProvAuth);
+  await attachEmulatorTestPhone(selectedProvAuth);
   const selectedProvUid = selectedProvCred.user.uid;
   const selectedProvDb = selectedProvClient.db;
   console.log('✓ [Client 2 - Selected Provider] UID:', selectedProvUid);
@@ -37,6 +38,7 @@ async function runSecurityAudit() {
   const attackerProvApp = attackerProvClient.app;
   const attackerProvAuth = attackerProvClient.auth;
   const attackerProvCred = await signInAnonymously(attackerProvAuth);
+  await attachEmulatorTestPhone(attackerProvAuth);
   const attackerProvUid = attackerProvCred.user.uid;
   const attackerProvDb = attackerProvClient.db;
   console.log('✓ [Client 3 - Unselected / Attacker Provider] UID:', attackerProvUid);
