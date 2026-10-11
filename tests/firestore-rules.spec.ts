@@ -517,14 +517,143 @@ async function runTestSuite() {
       );
     });
 
-    await test('Selected provider can read customer contact info after offer acceptance', async () => {
+    // 1. İsteğin sahibi müşteri iletişim bilgilerini okuyabilir
+    await test('1. Customer owning the request can read their private contact info', async () => {
+      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      await assertSucceeds(getDoc(doc(aliceDb, 'requestContacts', 'req_alice_01')));
+    });
+
+    // 2. Kabul edilmiş teklifin sağlayıcısı okuyabilir
+    await test('2. Provider of an ACCEPTED offer can read customer contact info', async () => {
       const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
       await assertSucceeds(getDoc(doc(masterDb, 'requestContacts', 'req_alice_01')));
     });
 
-    await test('Unselected third-party user cannot read customer phone number', async () => {
+    // Setup isolated test fixtures for pending, rejected, missing, and invalid offer scenarios
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      const adminDb = adminContext.firestore();
+
+      // Scenario 3: Request with a PENDING offer
+      await setDoc(doc(adminDb, 'requests', 'req_pending_contact'), {
+        id: 'req_pending_contact',
+        customerId: 'user_alice',
+        status: 'OFFERS_RECEIVED',
+        selectedOfferId: 'offer_pending_contact',
+      });
+      await setDoc(doc(adminDb, 'offers', 'offer_pending_contact'), {
+        id: 'offer_pending_contact',
+        requestId: 'req_pending_contact',
+        providerUserId: 'prov_master2',
+        price: 7000,
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      });
+      await setDoc(doc(adminDb, 'requestContacts', 'req_pending_contact'), {
+        customerId: 'user_alice',
+        phone: '+7 701 555 2222',
+      });
+
+      // Scenario 4: Request with a REJECTED offer
+      await setDoc(doc(adminDb, 'requests', 'req_rejected_contact'), {
+        id: 'req_rejected_contact',
+        customerId: 'user_alice',
+        status: 'OPEN',
+        selectedOfferId: 'offer_rejected_contact',
+      });
+      await setDoc(doc(adminDb, 'offers', 'offer_rejected_contact'), {
+        id: 'offer_rejected_contact',
+        requestId: 'req_rejected_contact',
+        providerUserId: 'prov_master2',
+        price: 8000,
+        status: 'REJECTED',
+        createdAt: new Date().toISOString(),
+      });
+      await setDoc(doc(adminDb, 'requestContacts', 'req_rejected_contact'), {
+        customerId: 'user_alice',
+        phone: '+7 701 555 3333',
+      });
+
+      // Scenario 6: Request with missing selectedOfferId
+      await setDoc(doc(adminDb, 'requests', 'req_no_selection'), {
+        id: 'req_no_selection',
+        customerId: 'user_alice',
+        status: 'OPEN',
+      });
+      await setDoc(doc(adminDb, 'requestContacts', 'req_no_selection'), {
+        customerId: 'user_alice',
+        phone: '+7 701 555 4444',
+      });
+
+      // Scenario 6: Request with invalid selectedOfferId (non-existent offer)
+      await setDoc(doc(adminDb, 'requests', 'req_invalid_selection'), {
+        id: 'req_invalid_selection',
+        customerId: 'user_alice',
+        status: 'PROVIDER_SELECTED',
+        selectedOfferId: 'offer_nonexistent_xyz',
+      });
+      await setDoc(doc(adminDb, 'requestContacts', 'req_invalid_selection'), {
+        customerId: 'user_alice',
+        phone: '+7 701 555 5555',
+      });
+
+      // Scenario 6: Request where selectedOfferId belongs to a DIFFERENT request
+      await setDoc(doc(adminDb, 'requests', 'req_mismatched_offer'), {
+        id: 'req_mismatched_offer',
+        customerId: 'user_alice',
+        status: 'PROVIDER_SELECTED',
+        selectedOfferId: 'offer_m1_01', // offer_m1_01 has requestId == 'req_alice_01'
+      });
+      await setDoc(doc(adminDb, 'requestContacts', 'req_mismatched_offer'), {
+        customerId: 'user_alice',
+        phone: '+7 701 555 6666',
+      });
+    });
+
+    // 3. "PENDING" durumundaki teklifin sağlayıcısı okuyamaz
+    await test('3. Provider with PENDING offer cannot read customer contact info', async () => {
+      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_pending_contact')));
+    });
+
+    // 4. "REJECTED" durumundaki teklifin sağlayıcısı okuyamaz
+    await test('4. Provider with REJECTED offer cannot read customer contact info', async () => {
+      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_rejected_contact')));
+    });
+
+    // 5. Başka sağlayıcı ve ilgisiz kullanıcı okuyamaz
+    await test('5. Other providers and unrelated users cannot read customer contact info', async () => {
+      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
       const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const unauthDb = testEnv.unauthenticatedContext().firestore();
+      await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_alice_01')));
       await assertFails(getDoc(doc(bobDb, 'requestContacts', 'req_alice_01')));
+      await assertFails(getDoc(doc(unauthDb, 'requestContacts', 'req_alice_01')));
+    });
+
+    // 6. Eksik veya geçersiz "selectedOfferId" durumunda erişim reddedilir
+    await test('6. Access denied when selectedOfferId is missing, invalid, or belongs to another request', async () => {
+      const master1Db = testEnv.authenticatedContext('prov_master1').firestore();
+      // Missing selectedOfferId
+      await assertFails(getDoc(doc(master1Db, 'requestContacts', 'req_no_selection')));
+      // Invalid (non-existent) selectedOfferId
+      await assertFails(getDoc(doc(master1Db, 'requestContacts', 'req_invalid_selection')));
+      // Mismatched offer (offer.requestId does not match request document id)
+      await assertFails(getDoc(doc(master1Db, 'requestContacts', 'req_mismatched_offer')));
+    });
+
+    // 7. Kabul edilmiş geçerli teklif akışı çalışmaya devam eder
+    await test('7. Valid accepted offer flow continues to work seamlessly', async () => {
+      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const master1Db = testEnv.authenticatedContext('prov_master1').firestore();
+      // Customer reads their contact
+      await assertSucceeds(getDoc(doc(aliceDb, 'requestContacts', 'req_alice_01')));
+      // Accepted provider reads customer contact
+      const provSnap = await getDoc(doc(master1Db, 'requestContacts', 'req_alice_01'));
+      await assertSucceeds(getDoc(doc(master1Db, 'requestContacts', 'req_alice_01')));
+      if (provSnap.data()?.phone !== '+7 701 555 1234') {
+        throw new Error('Expected accepted provider to read verified customer contact details');
+      }
     });
 
     // =========================================================================

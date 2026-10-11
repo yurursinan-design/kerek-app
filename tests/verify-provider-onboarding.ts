@@ -3,7 +3,7 @@ import { renderToString } from 'react-dom/server';
 import { ProviderOnboarding } from '../src/components/ProviderOnboarding';
 import { ProviderProfileModal } from '../src/components/ProviderProfileModal';
 import { Provider, ServiceRequest } from '../src/types';
-import { LocalRepository } from '../src/services/localRepository';
+import { LocalRepository, setCurrentUserId } from '../src/services/localRepository';
 import { validateProviderData } from '../src/services/validation';
 import { normalizeCategoryId, normalizeCityId } from '../src/services/taxonomy';
 
@@ -201,6 +201,9 @@ async function runTests() {
   assert('Request transitions to COMPLETED', completedReq?.status === 'COMPLETED');
 
   // Customer creates review for completed request
+  setCurrentUserId('customer-test-999');
+  localStorage.setItem('kerek_current_user_id_v2', 'customer-test-999');
+  localStorage.setItem('kerek_user_id', 'customer-test-999');
   const review = await repo.createReview({
     id: req.id,
     requestId: req.id,

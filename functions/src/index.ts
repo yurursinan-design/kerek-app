@@ -21,159 +21,31 @@ const geminiApiKey = defineSecret('GEMINI_API_KEY');
 
 /**
  * Kaspi.kz Escrow Webhook
- * HTTP endpoint triggered by Kaspi payment system to confirm funds locked in escrow.
  *
- * Expected payload:
- * {
- *   requestId: string,
- *   offerId: string,
- *   status: string (e.g. 'PAID')
- * }
+ * SECURITY AUDIT NOTICE:
+ * Official Kaspi.kz / Kaspi Pay webhook integration specifications (HMAC algorithm, signature header format,
+ * timestamp headers, and replay protection) are neither documented nor present in this repository.
+ * Per security guidelines:
+ * 1. Do NOT invent a synthetic HMAC algorithm or signature scheme.
+ * 2. Prevent the endpoint from modifying real payment status in the database without verified credentials.
+ * 3. Safely reject requests with 501 Not Implemented until official Kaspi merchant integration specifications are provided.
  */
 export const kaspiEscrowWebhook = onRequest(
   {
     secrets: [kaspiWebhookSecret],
   },
   async (req, res) => {
-    // 1. Shared secret header verification using crypto.timingSafeEqual (Server-to-server, no CORS)
-    const signatureHeader = req.headers['x-kaspi-signature'];
-    const signature = Array.isArray(signatureHeader) ? signatureHeader[0] : signatureHeader;
-    const expectedSecret = kaspiWebhookSecret.value();
+    console.warn(
+      '[kaspiEscrowWebhook] Security notice: Official Kaspi payment webhook protocol is unverified in this repository. ' +
+      'Escrow status mutation is safely disabled until official Kaspi merchant integration specifications are provided.'
+    );
 
-    let isValidSignature = false;
-    if (signature && expectedSecret) {
-      const sigBuf = Buffer.from(signature, 'utf8');
-      const expBuf = Buffer.from(expectedSecret, 'utf8');
-      if (sigBuf.length === expBuf.length && crypto.timingSafeEqual(sigBuf, expBuf)) {
-        isValidSignature = true;
-      }
-    }
-
-    if (!isValidSignature) {
-      res.status(401).json({
-        success: false,
-        error: 'Unauthorized: Invalid or missing webhook signature.',
-      });
-      return;
-    }
-
-    try {
-      const payload = req.body || {};
-      const requestId = payload.requestId || req.query.requestId;
-      const offerId = payload.offerId || req.query.offerId;
-      const status = payload.status || req.query.status;
-
-      if (!requestId || !offerId || !status) {
-        res.status(400).json({
-          success: false,
-          error: 'Missing required parameters: requestId, offerId, and status are required.',
-        });
-        return;
-      }
-
-      if (status !== 'PAID') {
-        res.status(200).json({
-          success: true,
-          message: `Status "${status}" received, no escrow hold action required.`,
-        });
-        return;
-      }
-
-      const cleanRequestId = String(requestId).trim();
-      const cleanOfferId = String(offerId).trim();
-      const requestRef = db.collection('requests').doc(cleanRequestId);
-      const offerRef = db.collection('offers').doc(cleanOfferId);
-
-      // Execute within Firestore Transaction
-      await db.runTransaction(async (transaction) => {
-        const [requestDoc, offerDoc] = await Promise.all([
-          transaction.get(requestRef),
-          transaction.get(offerRef),
-        ]);
-
-        if (!requestDoc.exists) {
-          const err: any = new Error(`ServiceRequest with id "${cleanRequestId}" not found.`);
-          err.statusCode = 404;
-          throw err;
-        }
-
-        if (!offerDoc.exists) {
-          const err: any = new Error(`ProviderOffer with id "${cleanOfferId}" not found.`);
-          err.statusCode = 404;
-          throw err;
-        }
-
-        const requestData = requestDoc.data();
-        const offerData = offerDoc.data();
-
-        // Verify offer belongs to the request
-        if (!offerData || offerData.requestId !== cleanRequestId) {
-          const err: any = new Error('offer does not belong to request');
-          err.statusCode = 400;
-          throw err;
-        }
-
-        // Verify request.selectedOfferId matches offerId
-        if (!requestData || requestData.selectedOfferId !== cleanOfferId) {
-          const err: any = new Error('request selectedOfferId does not match offerId');
-          err.statusCode = 400;
-          throw err;
-        }
-
-        // Compare amount if present in payload with offer price
-        if (payload.amount !== undefined && payload.amount !== null) {
-          const payloadAmount =
-            typeof payload.amount === 'number'
-              ? payload.amount
-              : parseFloat(String(payload.amount).replace(/[^0-9.]/g, ''));
-          const offerPrice =
-            typeof offerData.price === 'number'
-              ? offerData.price
-              : parseFloat(String(offerData.price || '').replace(/[^0-9.]/g, ''));
-
-          if (!isNaN(payloadAmount) && !isNaN(offerPrice) && payloadAmount !== offerPrice) {
-            const err: any = new Error(
-              `Payment amount mismatch: expected ${offerPrice}, received ${payloadAmount}`
-            );
-            err.statusCode = 400;
-            throw err;
-          }
-        }
-
-        // Idempotency: if already processed, do not update again
-        if (requestData?.paymentStatus === 'held_in_escrow') {
-          return;
-        }
-
-        const updatedAt = new Date().toISOString();
-        transaction.update(requestRef, {
-          paymentStatus: 'held_in_escrow',
-          updatedAt,
-        });
-        transaction.update(offerRef, {
-          paymentStatus: 'held_in_escrow',
-          updatedAt,
-        });
-      });
-
-      console.log(
-        `[kaspiEscrowWebhook] Successfully held in escrow: requestId=${cleanRequestId}, offerId=${cleanOfferId}`
-      );
-
-      res.status(200).json({
-        success: true,
-        message: 'Funds secured in escrow',
-        requestId: cleanRequestId,
-        offerId: cleanOfferId,
-      });
-    } catch (err: any) {
-      console.error('[kaspiEscrowWebhook] Error processing payment webhook:', err);
-      const statusCode = err?.statusCode || 500;
-      res.status(statusCode).json({
-        success: false,
-        error: err?.message || 'Internal server error processing Kaspi escrow webhook',
-      });
-    }
+    res.status(501).json({
+      success: false,
+      error:
+        'Official Kaspi payment webhook protocol is unverified in this repository. ' +
+        'Escrow status mutation is disabled to prevent unauthorized payment state changes.',
+    });
   }
 );
 

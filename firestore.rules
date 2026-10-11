@@ -169,18 +169,30 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Helper: Verify caller is the provider of an accepted offer for the given request
+    function isAcceptedOfferProvider(reqId) {
+      return exists(/databases/$(database)/documents/requests/$(reqId)) &&
+        ('selectedOfferId' in get(/databases/$(database)/documents/requests/$(reqId)).data) &&
+        get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId is string &&
+        get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId.size() > 0 &&
+        exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId)) &&
+        get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId)).data.requestId == reqId &&
+        get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId)).data.status == 'ACCEPTED' &&
+        (
+          get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId)).data.providerUserId == request.auth.uid ||
+          get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId)).data.providerId == request.auth.uid
+        );
+    }
+
     // =================== Request Contacts Collection ===================
     // Private Contact Info: Customer Phone Number
     // - Only customer and the selected provider (whose offer was accepted) can read customer contact details
     match /requestContacts/{requestId} {
       allow get: if isSignedIn() && isValidId(requestId) && (
         resource.data.customerId == request.auth.uid ||
-        (exists(/databases/$(database)/documents/requests/$(requestId)) &&
-         get(/databases/$(database)/documents/requests/$(requestId)).data.selectedOfferId is string &&
-         exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(requestId)).data.selectedOfferId)) &&
-         (get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(requestId)).data.selectedOfferId)).data.providerUserId == request.auth.uid ||
-          get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(requestId)).data.selectedOfferId)).data.providerId == request.auth.uid))
+        isAcceptedOfferProvider(requestId)
       );
+      allow list: if false;
       allow create, update: if isSignedIn() && isValidId(requestId) && incoming().customerId == request.auth.uid && exists(/databases/$(database)/documents/requests/$(requestId)) && get(/databases/$(database)/documents/requests/$(requestId)).data.customerId == request.auth.uid;
       allow delete: if false;
     }

@@ -67,6 +67,7 @@ async function runCustomerCompletionFlowTests() {
       message: 'Сделаю',
       status: 'ACCEPTED',
     });
+    await localRepository.updateOffer(offer1Id, { status: 'ACCEPTED' });
     await localRepository.updateRequest(req1Id, {
       selectedOfferId: offer1Id,
       status: 'IN_PROGRESS',
