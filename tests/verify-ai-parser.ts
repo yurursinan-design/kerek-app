@@ -111,8 +111,8 @@ async function runTests() {
     validateAndNormalizeCategoryId('home_services') === 'plumbing' || validateAndNormalizeCategoryId('home_services') === 'home_services'
   );
   assert(
-    'cargo_moving canonical ID is valid or normalizes to cleaning_moving',
-    validateAndNormalizeCategoryId('cargo_moving') === 'cleaning_moving' || validateAndNormalizeCategoryId('cargo_moving') === 'cargo_moving'
+    'legacy cargo_moving normalizes to the moving group',
+    validateAndNormalizeCategoryId('cargo_moving') === 'moving'
   );
   assert(
     'Invalid unknown category is rejected (returns null)',

@@ -72,6 +72,8 @@ export interface RequestUnderstanding {
   categoryId?: string;
 
   service?: string;
+  /** Service from the catalogue (src/data/serviceCatalog.ts), when recognised */
+  serviceId?: string;
 
   description: string;
 
@@ -109,6 +111,7 @@ export interface ExtractedNeed {
   cityId?: string;
   category: string;
   categoryId?: string;
+  serviceId?: string;
   service: string;
   date: string;
   budget: string;
@@ -166,6 +169,8 @@ export interface ServiceRequest {
   selectedOfferId?: string;
   // Set when the selected provider reports the job finished; the customer then confirms (COMPLETED)
   providerDoneAt?: string;
+  /** Service from the catalogue, when the customer picked or the app recognised one */
+  serviceId?: string;
   lastOfferId?: string;
   offerId?: string;
   attachments?: RequestAttachment[];

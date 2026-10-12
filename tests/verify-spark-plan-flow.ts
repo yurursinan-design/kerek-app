@@ -48,7 +48,7 @@ async function runSparkPlanTests() {
   assert('cityId is "kyzylorda"', parsedKz.cityId === 'kyzylorda');
   assert('city is "Қызылорда"', parsedKz.city === 'Қызылорда');
   assert('categoryId is "appliances"', parsedKz.categoryId === 'appliances');
-  assert('category is "Тұрмыстық техника жөндеу"', parsedKz.category === 'Тұрмыстық техника жөндеу');
+  assert('category is "Техника жөндеу"', parsedKz.category === 'Техника жөндеу');
   assert(
     'service identifies Samsung washing machine repair',
     parsedKz.service.toLowerCase().includes('samsung') &&
@@ -65,7 +65,7 @@ async function runSparkPlanTests() {
   assert('normalizeCategoryId matches canonical', normalizeCategoryId(parsedKz.category) === 'appliances');
   assert('legacy appliance_repair alias normalizes to canonical', normalizeCategoryId('appliance_repair') === 'appliances');
   assert('getCityDisplayName KZ matches', getCityDisplayName('kyzylorda', 'kz') === 'Қызылорда');
-  assert('getCategoryDisplayName KZ matches', getCategoryDisplayName('appliance_repair', 'kz') === 'Тұрмыстық техника жөндеу');
+  assert('getCategoryDisplayName KZ matches', getCategoryDisplayName('appliance_repair', 'kz') === 'Техника жөндеу');
 
   // --- Step 3: Confirmation UI State Evaluation ---
   console.log('\n--- 3. Confirmation UI Evaluation ---');

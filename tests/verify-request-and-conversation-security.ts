@@ -308,18 +308,19 @@ async function runSecurityAudit() {
     }
 
     // ------------------------------------------------------------------------
-    // LEGITIMATE FLOW 5: Selected provider marks work completed
+    // LEGITIMATE FLOW 5: Selected provider reports the job finished; only the customer closes it
     // ------------------------------------------------------------------------
-    console.log('\n--- LEGITIMATE 5: Selected provider marks work completed (COMPLETED) ---');
+    console.log('\n--- LEGITIMATE 5: Selected provider reports the job finished (providerDoneAt) ---');
+    let providerCompleteDenied = false;
     try {
-      await updateDoc(doc(selectedProvDb, 'requests', testReqId), {
-        status: 'COMPLETED',
-        updatedAt: new Date().toISOString(),
-      });
-      console.log('✅ PASS: Selected provider successfully updated request status to COMPLETED');
+      await updateDoc(doc(selectedProvDb, 'requests', testReqId), { status: 'COMPLETED' });
     } catch (err: any) {
-      console.error('❌ FAIL: Selected provider status update failed:', err.message);
+      providerCompleteDenied = err?.code === 'permission-denied' || String(err).includes('PERMISSION_DENIED');
     }
+    if (!providerCompleteDenied) throw new Error('Selected provider must not be able to mark the request COMPLETED');
+    console.log('✅ PASS: Selected provider cannot close the request alone');
+    await updateDoc(doc(selectedProvDb, 'requests', testReqId), { providerDoneAt: new Date().toISOString() });
+    console.log('✅ PASS: Selected provider reported the job finished (providerDoneAt)');
 
   } finally {
     // Cleanup

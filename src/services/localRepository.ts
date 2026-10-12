@@ -375,6 +375,7 @@ export class LocalRepository implements Repository {
         cityId,
         category,
         categoryId,
+      ...(requestData.serviceId ? { serviceId: requestData.serviceId } : {}),
         service,
         date: requestData.date?.trim() || 'Бүгін',
         budget: requestData.budget?.trim() || 'Келісімді',

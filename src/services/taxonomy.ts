@@ -1,4 +1,5 @@
 import { Language } from '../types';
+import { SERVICE_CATALOG, getGroup } from '../data/serviceCatalog';
 
 export interface CategoryDefinition {
   id: string;
@@ -191,22 +192,23 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
     nameTr: 'Temizlik & Taşıma',
     patterns: [
       /cleaning_moving/i,
-      /cargo_moving/i,
       /cleaning/i,
-      /moving/i,
-      /cargo/i,
-      /жүк тасымалдау/i,
-      /грузоперевозк/i,
-      /переезд/i,
-      /көшу/i,
-      /көшіру/i,
-      /газель/i,
-      /грузчик/i,
       /тазалау/i,
       /клининг/i,
       /уборка/i,
     ],
   },
+  // Groups added with the full service catalogue. They match by id or name here; free text is
+  // matched to them through the catalogue keywords (detectCatalogService).
+  ...SERVICE_CATALOG.filter(
+    (g) =>
+      !['plumbing', 'electrician', 'heating_boiler', 'ac_ventilation', 'appliances', 'furniture_carpentry', 'painting_finishing', 'cleaning_moving'].includes(g.id)
+  ).map((g) => ({
+    id: g.id,
+    nameKz: g.kz,
+    nameRu: g.ru,
+    patterns: [new RegExp(`^${g.id}$`, 'i')],
+  })),
 ];
 
 export const CANONICAL_CITIES: CityDefinition[] = [
@@ -345,12 +347,16 @@ export function normalizeCategoryId(categoryOrId?: string): string {
     return 'home_services';
   }
   if (clean === 'cargo' || clean === 'cargo_moving' || clean === 'moving') {
-    return 'cargo_moving';
+    return 'moving';
   }
 
   // 1. Direct ID match
   const exact = CANONICAL_CATEGORIES.find((c) => c.id === clean);
   if (exact) return exact.id;
+
+  // 1b. Catalogue group names (the current display names)
+  const byGroupName = SERVICE_CATALOG.find((g) => g.kz.toLowerCase() === clean || g.ru.toLowerCase() === clean);
+  if (byGroupName) return byGroupName.id;
 
   // 2. Pattern and name match
   for (const cat of CANONICAL_CATEGORIES) {
@@ -415,9 +421,12 @@ export function getCategoryDisplayName(categoryId: string | undefined, lang: Lan
     } else if (normId === 'home_services' || categoryId === 'home_services') {
       found = CANONICAL_CATEGORIES.find((c) => c.id === 'plumbing');
     } else if (normId === 'cargo_moving' || categoryId === 'cargo_moving') {
-      found = CANONICAL_CATEGORIES.find((c) => c.id === 'cleaning_moving');
+      found = CANONICAL_CATEGORIES.find((c) => c.id === 'moving');
     }
   }
+  // Names from the service catalogue (broader group names) take precedence
+  const group = getGroup(found ? found.id : normId);
+  if (group && lang !== 'tr') return lang === 'kz' ? group.kz : group.ru;
   if (!found) {
     return categoryId;
   }
@@ -485,4 +494,30 @@ export function isCityMatch(city1?: string, city2?: string): boolean {
   const c2 = normalizeCityId(city2);
   if (!c1 || !c2) return false;
   return c1 === c2;
+}
+
+/**
+ * Best catalogue service for a free-text request: the service whose keywords match the most
+ * characters of the text (longer, more specific keywords win). `withinGroup` limits the search.
+ */
+export function detectCatalogService(
+  text: string,
+  withinGroup?: string
+): { groupId: string; serviceId: string } | undefined {
+  const t = ` ${(text || '').toLowerCase()} `;
+  let best: { groupId: string; serviceId: string; score: number } | undefined;
+  for (const group of SERVICE_CATALOG) {
+    if (withinGroup && group.id !== withinGroup) continue;
+    for (const service of group.services) {
+      let score = 0;
+      for (const k of service.keywords || []) {
+        if (t.includes(k)) score += k.trim().length;
+      }
+      for (const name of [service.kz, service.ru]) {
+        if (t.includes(name.toLowerCase())) score += name.length;
+      }
+      if (score > 0 && (!best || score > best.score)) best = { groupId: group.id, serviceId: service.id, score };
+    }
+  }
+  return best ? { groupId: best.groupId, serviceId: best.serviceId } : undefined;
 }

@@ -48,7 +48,7 @@ service cloud.firestore {
       return strMax(m, 'requestText', 5000) && strMax(m, 'description', 5000)
         && strMax(m, 'customerName', 100) && strMax(m, 'budget', 100)
         && strMax(m, 'date', 100) && strMax(m, 'urgency', 20)
-        && strMax(m, 'cityId', 64) && strMax(m, 'categoryId', 64);
+        && strMax(m, 'cityId', 64) && strMax(m, 'categoryId', 64) && strMax(m, 'serviceId', 64);
     }
 
     function offerFieldLimits(m) {
@@ -179,7 +179,7 @@ service cloud.firestore {
           ('selectedOfferId' in existing() && 'selectedOfferId' in incoming() && incoming().selectedOfferId == existing().selectedOfferId)) &&
          changed.hasOnly([
            'requestText', 'description', 'service', 'category', 'categoryId',
-           'city', 'cityId', 'date', 'budget', 'urgency', 'customerName',
+           'city', 'cityId', 'serviceId', 'date', 'budget', 'urgency', 'customerName',
            'attachments', 'location', 'understanding', 'updatedAt'
          ]) &&
          requestFieldLimits(incoming()) &&

@@ -359,6 +359,7 @@ export default function App() {
         cityId,
         category,
         categoryId,
+        ...(updatedNeed.serviceId ? { serviceId: updatedNeed.serviceId } : {}),
         service,
         date: updatedNeed.date?.trim() || (language === 'kz' ? 'Бүгін' : 'Сегодня'),
         budget: updatedNeed.budget?.trim() || (language === 'kz' ? 'Келісімді' : 'Договорная'),

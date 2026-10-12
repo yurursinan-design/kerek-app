@@ -14,6 +14,7 @@ import {
   getCityDisplayName,
   normalizeCategoryId,
   normalizeCityId,
+  detectCatalogService,
 } from './taxonomy';
 
 export interface RequestUnderstandingContext {
@@ -349,6 +350,15 @@ export function analyzeRequestUnderstanding(
     if (detectedCategoryId) break;
   }
 
+  // Full service catalogue (all groups and services) when the primary patterns found nothing
+  if (!detectedCategoryId) {
+    const fromCatalog = detectCatalogService(normalized);
+    if (fromCatalog) {
+      detectedCategoryId = fromCatalog.groupId;
+      detectedCategory = getCategoryDisplayName(fromCatalog.groupId, lang);
+    }
+  }
+
   // Sub-keyword category detection if not caught by primary patterns
   if (!detectedCategoryId) {
     if (
@@ -662,6 +672,7 @@ export function analyzeRequestUnderstanding(
     cityId: effectiveCityId,
     category: detectedCategory,
     categoryId: detectedCategoryId,
+    serviceId: detectCatalogService(normalized, normalizeCategoryId(detectedCategoryId))?.serviceId,
     service,
     description: query,
     urgency,
@@ -748,6 +759,7 @@ export function understandingToExtractedNeed(
     cityId,
     category,
     categoryId,
+    ...(understanding.serviceId ? { serviceId: understanding.serviceId } : {}),
     service: understanding.service || originalQuery || 'Қызмет',
     date: understanding.preferredDate || (lang === 'kz' ? 'Бүгін' : 'Сегодня'),
     budget: lang === 'kz' ? 'Келісімді' : 'Договорная',

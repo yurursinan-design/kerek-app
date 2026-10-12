@@ -61,10 +61,22 @@ export const CANONICAL_CATEGORIES: readonly CanonicalCategory[] = [
   },
   {
     id: 'cleaning_moving',
-    nameRu: 'Уборка и переезд',
-    nameKz: 'Тазалау және көшу',
-    description: 'Уборка квартир, клининг, грузоперевозки, Газель, переезд, грузчики',
+    nameRu: 'Уборка и клининг',
+    nameKz: 'Тазалау',
+    description: 'Уборка квартир и офисов, генеральная уборка, химчистка мебели, стирка ковров, мойка окон, дезинсекция',
   },
+  // Groups from the full service catalogue (src/data/serviceCatalog.ts)
+  { id: 'construction', nameRu: 'Строительство', nameKz: 'Құрылыс', description: 'Кладка, строительство дома, кровля, бетон и фундамент, сварка, окна, двери, фасад, заборы, бани' },
+  { id: 'moving', nameRu: 'Переезд и грузоперевозки', nameKz: 'Көшу және жүк тасымалы', description: 'Квартирный и офисный переезд, Газель, грузчики, курьер и доставка, вывоз мусора' },
+  { id: 'household', nameRu: 'Мастер на час и бытовые услуги', nameKz: 'Сағаттық шебер және тұрмыстық қызметтер', description: 'Мастер на час, замки, повесить полку или карниз, пошив и ремонт одежды, ремонт обуви, ключи, шторы' },
+  { id: 'auto', nameRu: 'Автоуслуги', nameKz: 'Автоқызметтер', description: 'Ремонт авто, эвакуатор, шиномонтаж, автомойка, прикурить, автоэлектрик, диагностика, кузовной ремонт' },
+  { id: 'beauty', nameRu: 'Красота и здоровье', nameKz: 'Сұлулық және денсаулық', description: 'Парикмахер на дом, маникюр, визажист, ресницы и брови, массаж, косметолог, медсестра, тренер' },
+  { id: 'tutoring', nameRu: 'Репетиторы и обучение', nameKz: 'Репетиторлар және оқыту', description: 'Математика, языки, подготовка к ЕНТ и школе, физика, химия, музыка, автоинструктор, программирование' },
+  { id: 'events', nameRu: 'Праздники и мероприятия', nameKz: 'Мерекелер және іс-шаралар', description: 'Фотограф, видеооператор, тамада, организация тоя и свадьбы, кейтеринг, торты, DJ, аниматоры, оформление' },
+  { id: 'it_digital', nameRu: 'Компьютеры и IT', nameKz: 'Компьютер және IT', description: 'Ремонт компьютеров и ноутбуков, Windows, Wi-Fi и роутер, сайты, дизайн, SMM, принтеры' },
+  { id: 'care', nameRu: 'Няни, сиделки, животные', nameKz: 'Бала, қарт және жануар күтімі', description: 'Няня, сиделка, домработница, передержка и выгул собак, груминг, повар на дом' },
+  { id: 'garden', nameRu: 'Сад и двор', nameKz: 'Бақ және аула', description: 'Уход за садом, спил деревьев, уборка снега, ландшафт, скважины, септики, бассейны' },
+  { id: 'business', nameRu: 'Юристы и бухгалтеры', nameKz: 'Заң және бухгалтерия', description: 'Юрист, бухгалтер, регистрация ИП и ТОО, переводы, риелтор' },
 ] as const;
 
 export const CANONICAL_CITIES: readonly CanonicalCity[] = [
@@ -116,14 +128,14 @@ export function validateAndNormalizeCategoryId(rawCategory?: unknown): string | 
   if (clean === 'home_services' || clean === 'home_service' || clean === 'plumber' || clean === 'сантехник') {
     return 'plumbing';
   }
-  if (clean === 'cargo_moving' || clean === 'cargo' || clean === 'moving' || clean === 'грузоперевозки' || clean === 'жүк тасымалдау' || clean === 'cleaning') {
+  if (clean === 'cargo_moving' || clean === 'cargo' || clean === 'грузоперевозки' || clean === 'жүк тасымалдау') {
+    return 'moving';
+  }
+  if (clean === 'cleaning') {
     return 'cleaning_moving';
   }
   if (clean === 'electronics') {
     return 'appliances';
-  }
-  if (clean === 'auto') {
-    return 'plumbing';
   }
   if (clean === 'другое' || clean === 'басқа' || clean === 'misc') {
     return 'other';
