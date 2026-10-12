@@ -22,6 +22,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { logoutToAnonymous, requiresPhoneLogin } from './services/phoneAuth';
 import { deleteMyAccount, RecentLoginRequiredError } from './services/account';
 import { generateRequestId } from './services/ids';
+import { localRepository } from './services/localRepository';
 import {
   auth,
   repository,
@@ -532,6 +533,15 @@ export default function App() {
     const giveUp = setTimeout(() => setRestoringNav(false), 10000);
     (async () => {
       try {
+        // Show the copy kept on this device right away; the request screen then loads the
+        // current version from the cloud by itself
+        if (saved.activeTab === 'home' && saved.currentScreen === 'results' && saved.requestId) {
+          const cached = await localRepository.getRequest(saved.requestId).catch(() => null);
+          if (cached) {
+            handleSelectRequestFromHistory(cached);
+            return;
+          }
+        }
         await auth?.authStateReady?.();
         if (saved.activeTab === 'my-requests') {
           setActiveTab('my-requests');
