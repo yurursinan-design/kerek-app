@@ -162,16 +162,20 @@ service cloud.firestore {
                     && requestFieldLimits(incoming())
                     && (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 15))
                     && (!('location' in incoming()) || (incoming().location is map && ('latitude' in incoming().location) && ('longitude' in incoming().location)));
-      allow update: if isSignedIn() && isValidId(requestId) && (
+      // Which fields an update changes, computed once: diff() walks the whole document (including the
+      // nested understanding map), so repeating it per branch could exceed the 1000-expression limit.
+      function requestUpdateAllowed() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return (
         // 1. Customer updating request details while open (allowlist of editable request fields; cannot change id, customerId, status or selectedOfferId)
         (existing().customerId == request.auth.uid &&
+         incoming().status == existing().status &&
          incoming().customerId == existing().customerId &&
          incoming().id == existing().id &&
          existing().status in ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'] &&
-         incoming().status == existing().status &&
          ((!('selectedOfferId' in existing()) && !('selectedOfferId' in incoming())) ||
           ('selectedOfferId' in existing() && 'selectedOfferId' in incoming() && incoming().selectedOfferId == existing().selectedOfferId)) &&
-         incoming().diff(existing()).affectedKeys().hasOnly([
+         changed.hasOnly([
            'requestText', 'description', 'service', 'category', 'categoryId',
            'city', 'cityId', 'date', 'budget', 'urgency', 'customerName',
            'attachments', 'location', 'understanding', 'updatedAt'
@@ -190,7 +194,7 @@ service cloud.firestore {
          exists(/databases/$(database)/documents/offers/$(incoming().selectedOfferId)) &&
          get(/databases/$(database)/documents/offers/$(incoming().selectedOfferId)).data.requestId == requestId &&
          get(/databases/$(database)/documents/offers/$(incoming().selectedOfferId)).data.status in ['PENDING', 'ACCEPTED'] &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'selectedOfferId', 'updatedAt'])) ||
+         changed.hasOnly(['status', 'selectedOfferId', 'updatedAt'])) ||
         // 3. Customer cancelling request
         (existing().customerId == request.auth.uid &&
          incoming().customerId == existing().customerId &&
@@ -199,14 +203,14 @@ service cloud.firestore {
          incoming().status == 'CANCELLED' &&
          ((!('selectedOfferId' in existing()) && !('selectedOfferId' in incoming())) ||
           ('selectedOfferId' in existing() && 'selectedOfferId' in incoming() && incoming().selectedOfferId == existing().selectedOfferId)) &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])) ||
+         changed.hasOnly(['status', 'updatedAt'])) ||
         // 4. Provider updating status to OFFERS_RECEIVED when submitting an offer
         (existing().customerId != request.auth.uid &&
-         incoming().customerId == existing().customerId &&
-         incoming().id == existing().id &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'lastOfferId', 'offerId']) &&
          incoming().status == 'OFFERS_RECEIVED' &&
          existing().status in ['OPEN', 'MATCHING', 'NEW', 'OFFERS_RECEIVED'] &&
+         incoming().customerId == existing().customerId &&
+         incoming().id == existing().id &&
+         changed.hasOnly(['status', 'updatedAt', 'lastOfferId', 'offerId']) &&
          (
            ('lastOfferId' in incoming() &&
             incoming().lastOfferId is string &&
@@ -225,9 +229,9 @@ service cloud.firestore {
             get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.status == 'PENDING')
          )) ||
         // 5. Selected provider updating job status (in-progress, completed)
-        (incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
-         incoming().status in ['IN_PROGRESS', 'COMPLETED'] &&
+        (incoming().status in ['IN_PROGRESS', 'COMPLETED'] &&
          existing().status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'] &&
+         changed.hasOnly(['status', 'updatedAt']) &&
          ('selectedOfferId' in existing()) && existing().selectedOfferId is string &&
          ('selectedOfferId' in incoming()) && incoming().selectedOfferId == existing().selectedOfferId &&
          exists(/databases/$(database)/documents/offers/$(existing().selectedOfferId)) &&
@@ -241,8 +245,11 @@ service cloud.firestore {
          incoming().status == 'COMPLETED' &&
          ('selectedOfferId' in existing()) && existing().selectedOfferId is string &&
          ('selectedOfferId' in incoming()) && incoming().selectedOfferId == existing().selectedOfferId &&
-         incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']))
-      );
+         changed.hasOnly(['status', 'updatedAt']))
+        );
+      }
+
+      allow update: if isSignedIn() && isValidId(requestId) && requestUpdateAllowed();
       allow delete: if false;
     }
 
@@ -453,6 +460,57 @@ service cloud.firestore {
     }
 
     // =================== Notifications Collection ===================
+    // Each related document is read once through these helpers (missing documents read as an empty
+    // map), which keeps the create rule well under the 1000-expression evaluation limit.
+    function offerOrEmpty(offerId) {
+      return exists(/databases/$(database)/documents/offers/$(offerId))
+        ? get(/databases/$(database)/documents/offers/$(offerId)).data : {};
+    }
+
+    function conversationOrEmpty(conversationId) {
+      return exists(/databases/$(database)/documents/conversations/$(conversationId))
+        ? get(/databases/$(database)/documents/conversations/$(conversationId)).data : {};
+    }
+
+    function appointmentOrEmpty(requestId) {
+      return exists(/databases/$(database)/documents/appointments/$('appointment_' + requestId))
+        ? get(/databases/$(database)/documents/appointments/$('appointment_' + requestId)).data : {};
+    }
+
+    // True when uid is the provider on an offer, conversation or appointment document
+    function isProviderOn(d, uid) {
+      return d.get('providerUserId', '') == uid || d.get('providerId', '') == uid;
+    }
+
+    // Is uid the provider working on this request: the selected offer, the offer named in the
+    // notification, the request's conversation, or its appointment
+    function isProviderOfRequest(n, req, uid) {
+      return (req.get('selectedOfferId', '') is string && req.get('selectedOfferId', '') != ''
+              && isProviderOn(offerOrEmpty(req.get('selectedOfferId', '')), uid))
+        || (('offerId' in n) && isProviderOn(offerOrEmpty(n.offerId), uid))
+        || (('conversationId' in n)
+            && conversationOrEmpty(n.conversationId).get('requestId', '') == n.requestId
+            && conversationOrEmpty(n.conversationId).get('customerId', '') == req.customerId
+            && isProviderOn(conversationOrEmpty(n.conversationId), uid))
+        || (appointmentOrEmpty(n.requestId).get('customerId', '') == req.customerId
+            && isProviderOn(appointmentOrEmpty(n.requestId), uid));
+    }
+
+    function notificationSenderAllowed(n, req) {
+      let uid = request.auth.uid;
+      return (
+        // 1. The customer confirming something to themselves (offer accepted, completion, review prompt)
+        (n.recipientUserId == uid && n.recipientRole == 'customer' && req.customerId == uid
+          && n.type in ['CUSTOMER_OFFER_ACCEPTED', 'CUSTOMER_WORK_COMPLETED', 'CUSTOMER_REVIEW_REQUIRED'])
+        // 2. The customer notifying a provider who works on, or offered for, this request
+        || (req.customerId == uid && n.recipientRole == 'provider' && n.recipientUserId != uid
+          && isProviderOfRequest(n, req, n.recipientUserId))
+        // 3. A provider of this request notifying its customer
+        || (n.recipientUserId == req.customerId && n.recipientRole == 'customer' && n.recipientUserId != uid
+          && isProviderOfRequest(n, req, uid))
+      );
+    }
+
     // Spark MVP In-App Notification System:
     // - Document ID is deterministic/idempotent: notif_{type}_{refId}
     // - Reading & listing is strictly scoped to the recipient (recipientUserId == request.auth.uid)
@@ -488,112 +546,10 @@ service cloud.firestore {
                     && incoming().targetScreen in ['request_detail', 'request_details', 'chat', 'offers_list', 'review_modal']
                     && ('requestId' in incoming()) && incoming().requestId is string && isValidId(incoming().requestId)
                     && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
-                    && (!('offerId' in incoming()) || (incoming().offerId is string && isValidId(incoming().offerId) && exists(/databases/$(database)/documents/offers/$(incoming().offerId)) && get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.requestId == incoming().requestId))
-                    && (
-                      // 1. Legitimate Customer Self-Notification (e.g. accepted offer confirmation or work completion review prompt)
-                      (
-                        incoming().recipientUserId == request.auth.uid &&
-                        incoming().recipientRole == 'customer' &&
-                        get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == request.auth.uid &&
-                        incoming().type in ['CUSTOMER_OFFER_ACCEPTED', 'CUSTOMER_WORK_COMPLETED', 'CUSTOMER_REVIEW_REQUIRED']
-                      ) ||
-                      // 2. Customer notifying verified Provider for this request
-                      (
-                        get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == request.auth.uid &&
-                        incoming().recipientRole == 'provider' &&
-                        incoming().recipientUserId != request.auth.uid &&
-                        (
-                          // 2a. Recipient is provider of selected offer
-                          (
-                            ('selectedOfferId' in get(/databases/$(database)/documents/requests/$(incoming().requestId)).data) &&
-                            get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId is string &&
-                            exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)) &&
-                            (
-                              get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerUserId == incoming().recipientUserId ||
-                              get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerId == incoming().recipientUserId
-                            )
-                          ) ||
-                          // 2b. Recipient is provider of offer submitted for this request
-                          (
-                            ('offerId' in incoming()) &&
-                            incoming().offerId is string &&
-                            exists(/databases/$(database)/documents/offers/$(incoming().offerId)) &&
-                            get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.requestId == incoming().requestId &&
-                            (
-                              get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.providerUserId == incoming().recipientUserId ||
-                              get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.providerId == incoming().recipientUserId
-                            )
-                          ) ||
-                          // 2c. Recipient is provider in active conversation for this request
-                          (
-                            ('conversationId' in incoming()) &&
-                            incoming().conversationId is string &&
-                            exists(/databases/$(database)/documents/conversations/$(incoming().conversationId)) &&
-                            get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.customerId == request.auth.uid &&
-                            (
-                              get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.providerUserId == incoming().recipientUserId ||
-                              get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.providerId == incoming().recipientUserId
-                            )
-                          ) ||
-                          // 2d. Recipient is provider on appointment for this request
-                          (
-                            exists(/databases/$(database)/documents/appointments/$('appointment_' + incoming().requestId)) &&
-                            get(/databases/$(database)/documents/appointments/$('appointment_' + incoming().requestId)).data.customerId == request.auth.uid &&
-                            (
-                              get(/databases/$(database)/documents/appointments/$('appointment_' + incoming().requestId)).data.providerUserId == incoming().recipientUserId ||
-                              get(/databases/$(database)/documents/appointments/$('appointment_' + incoming().requestId)).data.providerId == incoming().recipientUserId
-                            )
-                          )
-                        )
-                      ) ||
-                      // 3. Provider notifying Customer of this request
-                      (
-                        incoming().recipientUserId == get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId &&
-                        incoming().recipientRole == 'customer' &&
-                        incoming().recipientUserId != request.auth.uid &&
-                        (
-                          // 3a. Caller is provider who submitted offer for this request
-                          (
-                            ('offerId' in incoming()) &&
-                            incoming().offerId is string &&
-                            exists(/databases/$(database)/documents/offers/$(incoming().offerId)) &&
-                            get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.requestId == incoming().requestId &&
-                            (
-                              get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.providerUserId == request.auth.uid ||
-                              get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.providerId == request.auth.uid
-                            )
-                          ) ||
-                          // 3b. Caller is provider of selected offer
-                          (
-                            ('selectedOfferId' in get(/databases/$(database)/documents/requests/$(incoming().requestId)).data) &&
-                            get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId is string &&
-                            exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)) &&
-                            (
-                              get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerUserId == request.auth.uid ||
-                              get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerId == request.auth.uid
-                            )
-                          ) ||
-                          // 3c. Caller is provider in active conversation for this request
-                          (
-                            ('conversationId' in incoming()) &&
-                            incoming().conversationId is string &&
-                            exists(/databases/$(database)/documents/conversations/$(incoming().conversationId)) &&
-                            (
-                              get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.providerUserId == request.auth.uid ||
-                              get(/databases/$(database)/documents/conversations/$(incoming().conversationId)).data.providerId == request.auth.uid
-                            )
-                          ) ||
-                          // 3d. Caller is provider on appointment for this request
-                          (
-                            exists(/databases/$(database)/documents/appointments/$('appointment_' + incoming().requestId)) &&
-                            (
-                              get(/databases/$(database)/documents/appointments/$('appointment_' + incoming().requestId)).data.providerUserId == request.auth.uid ||
-                              get(/databases/$(database)/documents/appointments/$('appointment_' + incoming().requestId)).data.providerId == request.auth.uid
-                            )
-                          )
-                        )
-                      )
-                    );
+                    && (!('offerId' in incoming()) || (incoming().offerId is string && isValidId(incoming().offerId)
+                        && offerOrEmpty(incoming().offerId).get('requestId', '') == incoming().requestId))
+                    && (!('conversationId' in incoming()) || (incoming().conversationId is string && isValidId(incoming().conversationId)))
+                    && notificationSenderAllowed(incoming(), get(/databases/$(database)/documents/requests/$(incoming().requestId)).data);
 
       allow update: if isSignedIn()
                     && isValidId(notificationId)

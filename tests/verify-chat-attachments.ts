@@ -276,7 +276,7 @@ async function runTests() {
   const storageContent = fs.readFileSync(storageRulesPath, 'utf8');
   assert(storageContent.includes('match /chat/{conversationId}/{messageId}/{fileName}'), 'storage.rules must protect chat path');
   assert(storageContent.includes('isConversationParticipant(conversationId)'), 'storage.rules must check conversation participant');
-  assert(storageContent.includes('allow delete: if false;'), 'storage.rules must disallow file deletion');
+  assert(storageContent.includes('allow update, delete: if false;'), 'storage.rules must disallow file deletion');
 
   const firestoreRulesPath = path.resolve('firestore.rules');
   const firestoreContent = fs.readFileSync(firestoreRulesPath, 'utf8');

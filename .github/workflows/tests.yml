@@ -1,6 +1,6 @@
 # Runs the test suites on every Pull Request and on main:
 #   - type check
-#   - Firestore security rules tests (emulator)
+#   - Firestore and Storage security rules tests (emulator)
 #   - verify-* tests against the Firestore + Auth emulators
 name: Testler
 
@@ -51,6 +51,9 @@ jobs:
 
       - name: Güvenlik kuralı testleri
         run: npm run test:rules
+
+      - name: Dosya (Storage) kuralı testleri
+        run: npm run test:storage
 
       - name: Uygulama testleri
         run: npm run test:verify

@@ -295,15 +295,35 @@ export default function App() {
       const text = rawText || service;
 
       const targetRequestId = generateRequestId();
+
+      // Create the request first: storage only accepts files for a request that already exists
+      // and belongs to the uploader, so nobody can claim someone else's request folder.
+      let newReq = await repository.createRequest({
+        id: targetRequestId,
+        customerId: currentUserId,
+        requestText: text,
+        description: text,
+        city,
+        cityId,
+        category,
+        categoryId,
+        service,
+        date: updatedNeed.date?.trim() || (language === 'kz' ? 'Бүгін' : 'Сегодня'),
+        budget: updatedNeed.budget?.trim() || (language === 'kz' ? 'Келісімді' : 'Договорная'),
+        urgency: updatedNeed.urgency || 'normal',
+        status: 'OPEN',
+        ...(updatedNeed.location ? { location: updatedNeed.location } : {}),
+        ...(updatedNeed.understanding ? { understanding: updatedNeed.understanding } : {}),
+      });
+
       const uploadedAttachments: RequestAttachment[] = [];
       let failedUploads = 0;
 
-      // Process pending attachments upload
       if (updatedNeed.pendingAttachments && updatedNeed.pendingAttachments.length > 0) {
         for (const item of updatedNeed.pendingAttachments) {
           try {
             const uploaded = await repository.uploadRequestAttachment(
-              targetRequestId,
+              newReq.id,
               {
                 name: item.name,
                 size: item.size,
@@ -319,27 +339,17 @@ export default function App() {
             failedUploads++;
           }
         }
-      }
 
-      // Repository handles ID generation (REQ-000001), storage, and matching demo offers
-      const newReq = await repository.createRequest({
-        id: targetRequestId,
-        customerId: currentUserId,
-        requestText: text,
-        description: text,
-        city,
-        cityId,
-        category,
-        categoryId,
-        service,
-        date: updatedNeed.date?.trim() || (language === 'kz' ? 'Бүгін' : 'Сегодня'),
-        budget: updatedNeed.budget?.trim() || (language === 'kz' ? 'Келісімді' : 'Договорная'),
-        urgency: updatedNeed.urgency || 'normal',
-        status: 'OPEN',
-        ...(uploadedAttachments.length > 0 ? { attachments: uploadedAttachments } : {}),
-        ...(updatedNeed.location ? { location: updatedNeed.location } : {}),
-        ...(updatedNeed.understanding ? { understanding: updatedNeed.understanding } : {}),
-      });
+        if (uploadedAttachments.length > 0) {
+          try {
+            const withFiles = await repository.updateRequest(newReq.id, { attachments: uploadedAttachments });
+            if (withFiles) newReq = withFiles;
+          } catch (attachErr) {
+            console.warn('[App] attaching uploaded files to request failed:', attachErr);
+            failedUploads += uploadedAttachments.length;
+          }
+        }
+      }
 
       setActiveRequest(newReq);
       await refreshData();

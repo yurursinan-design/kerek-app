@@ -495,17 +495,14 @@ export class FirebaseRepository implements Repository {
     const authUid = auth?.currentUser?.uid;
     const effectiveCustId = customerId || authUid || getCurrentUserId();
 
-    // If request already exists, verify current caller is the owner
-    try {
-      const existing = await this.getRequest(cleanId);
-      if (existing && authUid && existing.customerId !== authUid) {
-        throw new Error(`Unauthorized: Only the creator of request ${cleanId} can upload attachments`);
-      }
-    } catch (e: any) {
-      if (e?.message?.startsWith('Unauthorized:')) {
-        throw e;
-      }
-      // If request doc does not exist yet, proceed with upload
+    // Files are attached to a request that already exists and belongs to the caller (storage.rules
+    // enforces the same), so the request is created first and the files are added afterwards.
+    const existing = await this.getRequest(cleanId);
+    if (!existing) {
+      throw new Error(`Validation Error: request ${cleanId} must be created before attaching files`);
+    }
+    if (authUid && existing.customerId !== authUid) {
+      throw new Error(`Unauthorized: Only the creator of request ${cleanId} can upload attachments`);
     }
 
     const validation = validateRequestAttachment(file);

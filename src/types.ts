@@ -525,6 +525,8 @@ export const CHAT_LIMITS = {
   MAX_IMAGE_SIZE_BYTES: 10 * 1024 * 1024, // 10 MB
   MAX_FILE_SIZE_BYTES: 20 * 1024 * 1024,  // 20 MB
   ALLOWED_IMAGE_MIMES: ['image/jpeg', 'image/png', 'image/webp'] as const,
+  // Non-image files are limited to PDF (estimates, invoices); storage.rules enforces the same list
+  ALLOWED_FILE_MIMES: ['application/pdf'] as const,
   DISALLOWED_FILE_EXTENSIONS: [
     'exe', 'bat', 'cmd', 'sh', 'php', 'py', 'pl', 'jar', 'vbs', 'msi', 'com', 'scr', 'bin', 'ps1', 'apk'
   ] as const,
@@ -648,6 +650,9 @@ export function validateChatAttachment(
     }
     const ext = (file.name.split('.').pop() || '').toLowerCase();
     if ((CHAT_LIMITS.DISALLOWED_FILE_EXTENSIONS as readonly string[]).includes(ext)) {
+      return { isValid: false, errorKey: 'chatUnsupportedFileType', type };
+    }
+    if (!(CHAT_LIMITS.ALLOWED_FILE_MIMES as readonly string[]).includes(file.type.toLowerCase())) {
       return { isValid: false, errorKey: 'chatUnsupportedFileType', type };
     }
   }

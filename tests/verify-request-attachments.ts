@@ -352,10 +352,14 @@ async function runTests() {
   assert(storageRulesContent.includes('50 * 1024 * 1024'));
   // Verify audio size limit 20MB
   assert(storageRulesContent.includes('20 * 1024 * 1024'));
-  // Verify executable restrictions
-  assert(storageRulesContent.includes('!request.resource.contentType.matches(\'.*executable.*\')'));
-  // Verify deletion is prohibited in MVP
-  assert(storageRulesContent.includes('allow delete: if false;'));
+  // Only an explicit list of content types is accepted (no HTML, SVG, scripts or executables)
+  assert(storageRulesContent.includes("matches('image/(jpeg|png|webp)')"));
+  assert(!storageRulesContent.includes("matches('application/.*')"));
+  // Uploads require an existing request owned by the uploader
+  assert(storageRulesContent.includes('function isRequestOwner(requestId)'));
+  assert(!storageRulesContent.includes('!firestore.exists('));
+  // Deletion is prohibited
+  assert(storageRulesContent.includes('allow update, delete: if false;'));
 
   console.log('✓ Test 11 Passed: Storage Security Rules correctly configured');
 
