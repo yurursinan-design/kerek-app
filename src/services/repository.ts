@@ -7,7 +7,6 @@ import {
   Provider,
   ProviderOffer,
   RequestAttachment,
-  RequestLocation,
   RequestStatus,
   Review,
   ServiceRequest,

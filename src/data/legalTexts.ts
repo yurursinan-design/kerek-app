@@ -2,7 +2,7 @@
  * Privacy policy and terms of use (draft for legal review).
  *
  * Fill in LEGAL_OPERATOR before publishing; until then the placeholders are shown as is.
- * Kazakh and Russian are the authoritative texts; the Turkish UI shows the Russian text.
+ * Kazakh and Russian are the authoritative texts.
  */
 
 export const LEGAL_VERSION = '2026-10-12';

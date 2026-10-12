@@ -3,7 +3,7 @@ import { auth } from '../services/firebase';
 import React, { useState, useMemo, useEffect } from 'react';
 import { Language, Provider } from '../types';
 import { translations } from '../i18n/translations';
-import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
+import { ALL_CITIES_LIST } from '../services/analyzer';
 import { getService, groupName, serviceName } from '../data/serviceCatalog';
 import { ServicePicker } from './ServicePicker';
 import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';

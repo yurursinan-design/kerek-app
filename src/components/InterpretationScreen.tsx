@@ -123,8 +123,6 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
       setFormError(
         language === 'kz'
           ? 'Қаланы таңдау міндетті'
-          : language === 'tr'
-          ? 'Şehir seçimi zorunludur'
           : 'Необходимо выбрать город'
       );
       setIsEditingManual(true);
@@ -137,8 +135,6 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
       setFormError(
         language === 'kz'
           ? 'Санатты таңдау міндетті'
-          : language === 'tr'
-          ? 'Kategori seçimi zorunludur'
           : 'Необходимо выбрать категорию'
       );
       setIsEditingManual(true);
@@ -599,7 +595,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                     }`}
                   >
                     <option value="">
-                      {language === 'kz' ? '-- Қаланы таңдаңыз --' : language === 'tr' ? '-- Şehir seçiniz --' : '-- Выберите город --'}
+                      {language === 'kz' ? '-- Қаланы таңдаңыз --' : '-- Выберите город --'}
                     </option>
                     {ALL_CITIES_LIST.map((c) => {
                       const cityName = language === 'kz' ? c.kz : c.ru;
@@ -632,7 +628,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                     }`}
                   >
                     <option value="">
-                      {language === 'kz' ? '-- Санатты таңдаңыз --' : language === 'tr' ? '-- Kategori seçiniz --' : '-- Выберите категорию --'}
+                      {language === 'kz' ? '-- Санатты таңдаңыз --' : '-- Выберите категорию --'}
                     </option>
                     {SERVICE_CATALOG.map((g) => {
                       const catName = groupName(g, language);

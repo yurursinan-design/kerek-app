@@ -9,7 +9,6 @@ import {
   ExternalLink,
   X,
   Maximize2,
-  FileText,
 } from 'lucide-react';
 import { safeCoords, safeMediaUrl, safeText } from '../services/safeData';
 
@@ -90,7 +89,7 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
                 <span>{language === 'kz' ? 'Орналасқан жер' : 'Геолокация'}</span>
                 {location.approximate ? (
                   <span className="text-[10px] font-semibold text-sky-700 bg-sky-100/80 px-1.5 py-0.2 rounded">
-                    {language === 'kz' ? '≈1 км, шамамен' : language === 'tr' ? '≈1 km, yaklaşık' : '≈1 км, примерно'}
+                    {language === 'kz' ? '≈1 км, шамамен' : '≈1 км, примерно'}
                   </span>
                 ) : (
                   location.accuracy !== undefined && (

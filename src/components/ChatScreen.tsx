@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ReportButton } from './ReportButton';
 import {
-  ChatAttachment,
   ChatMessage,
   Conversation,
   Language,
@@ -16,11 +15,8 @@ import { auth } from '../services/firebase';
 import {
   ChevronLeft,
   Send,
-  User,
-  Wrench,
   Check,
   CheckCheck,
-  Clock,
   AlertCircle,
   MessageSquare,
   Paperclip,
@@ -28,7 +24,6 @@ import {
   FileText,
   Download,
   X,
-  ExternalLink,
 } from 'lucide-react';
 import { safeMediaUrl } from '../services/safeData';
 

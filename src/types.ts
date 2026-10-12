@@ -1,4 +1,4 @@
-export type Language = 'kz' | 'ru' | 'tr';
+export type Language = 'kz' | 'ru';
 
 export type Urgency = 'high' | 'normal' | 'low';
 
@@ -241,7 +241,6 @@ export function formatOfferDisplayPrice(
     rawPrice.toLowerCase().includes('kesif')
   ) {
     if (language === 'kz') return 'Қарап көрген соң';
-    if (language === 'tr') return 'Keşif sonrası';
     return 'После осмотра';
   }
 
@@ -266,8 +265,6 @@ export function formatOfferDisplayPrice(
     const amount = extractFormattedAmount(rawPrice);
     if (language === 'kz') {
       return `${amount} бастап`;
-    } else if (language === 'tr') {
-      return `${amount}'den başlayan`;
     } else {
       return `от ${amount}`;
     }
@@ -284,8 +281,8 @@ export function formatOfferDisplayPrice(
 
 /**
  * Localizes common dynamic date and availability strings across KZ, RU, and TR:
- * - 'Бүгін' / 'Сегодня' / 'Bugün' -> 'Bugün' (TR), 'Бүгін' (KZ), 'Сегодня' (RU)
- * - 'Ертең' / 'Завтра' / 'Yarın' -> 'Yarın' (TR), 'Ертең' (KZ), 'Завтра' (RU)
+ * - 'Бүгін' / 'Сегодня' (older records may say 'Bugün') -> 'Бүгін' (KZ), 'Сегодня' (RU)
+ * - 'Ертең' / 'Завтра' (older records may say 'Yarın') -> 'Ертең' (KZ), 'Завтра' (RU)
  * - 'Осы аптада' / 'На этой неделе' / 'Bu hafta' -> 'Bu hafta' (TR), 'Осы аптада' (KZ), 'На этой неделе' (RU)
  * - If unmatched, returns the original string or formatted date.
  */
@@ -300,7 +297,6 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
     lower === 'bugün' ||
     lower === 'bugun'
   ) {
-    if (lang === 'tr') return 'Bugün';
     if (lang === 'kz') return 'Бүгін';
     return 'Сегодня';
   }
@@ -312,7 +308,6 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
     lower.startsWith('bugun')
   ) {
     const suffix = clean.replace(/^(бүгін|сегодня|bugün|bugun)[,\s]*/i, '');
-    if (lang === 'tr') return suffix ? `Bugün, ${suffix}` : 'Bugün';
     if (lang === 'kz') return suffix ? `Бүгін, ${suffix}` : 'Бүгін';
     return suffix ? `Сегодня, ${suffix}` : 'Сегодня';
   }
@@ -324,7 +319,6 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
     lower === 'yarın' ||
     lower === 'yarin'
   ) {
-    if (lang === 'tr') return 'Yarın';
     if (lang === 'kz') return 'Ертең';
     return 'Завтра';
   }
@@ -337,7 +331,6 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
     lower.startsWith('yarin')
   ) {
     const suffix = clean.replace(/^(ертең|завтра|ертен|yarın|yarin)[,\s]*/i, '');
-    if (lang === 'tr') return suffix ? `Yarın, ${suffix}` : 'Yarın';
     if (lang === 'kz') return suffix ? `Ертең, ${suffix}` : 'Ертең';
     return suffix ? `Завтра, ${suffix}` : 'Завтра';
   }
@@ -347,7 +340,6 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
     lower.includes('на этой недел') ||
     lower.includes('bu hafta')
   ) {
-    if (lang === 'tr') return 'Bu hafta';
     if (lang === 'kz') return 'Осы аптада';
     return 'На этой неделе';
   }
@@ -357,8 +349,8 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
 
 /**
  * Localizes dynamic budget strings:
- * - Negotiable: 'Келісімді' / 'Договорная' / 'Anlaşmalı' -> 'Anlaşmalı / Belirsiz' (TR), 'Келісімді' (KZ), 'Договорная' (RU)
- * - Inspection: 'После осмотра' / 'Қарап көрген соң' / 'Keşif sonrası' -> 'Keşif sonrası' (TR), 'Қарап көрген соң' (KZ), 'После осмотра' (RU)
+ * - Negotiable: 'Келісімді' / 'Договорная' / 'Anlaşmalı' -> 'Келісімді' (KZ), 'Договорная' (RU)
+ * - Inspection: 'После осмотра' / 'Қарап көрген соң' / 'Keşif sonrası' -> 'Қарап көрген соң' (KZ), 'После осмотра' (RU)
  * - Preserves numeric values (e.g. '15 000 ₸', 'от 10 000 ₸', '10 000 ₸ бастап').
  */
 export function formatDynamicBudget(budgetStr?: string, lang: Language = 'ru'): string {
@@ -375,7 +367,6 @@ export function formatDynamicBudget(budgetStr?: string, lang: Language = 'ru'): 
     lower.includes('anlasma') ||
     lower.includes('belirsiz')
   ) {
-    if (lang === 'tr') return 'Anlaşmalı / Belirsiz';
     if (lang === 'kz') return 'Келісімді';
     return 'Договорная';
   }
@@ -388,7 +379,6 @@ export function formatDynamicBudget(budgetStr?: string, lang: Language = 'ru'): 
     lower.includes('keşif') ||
     lower.includes('kesif')
   ) {
-    if (lang === 'tr') return 'Keşif sonrası';
     if (lang === 'kz') return 'Қарап көрген соң';
     return 'После осмотра';
   }
@@ -403,7 +393,6 @@ export function formatDynamicBudget(budgetStr?: string, lang: Language = 'ru'): 
     const digitsOnly = clean.replace(/[^\d]/g, '');
     if (digitsOnly.length > 0) {
       const spaced = digitsOnly.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-      if (lang === 'tr') return `${spaced} ₸ başlayan`;
       if (lang === 'kz') return `${spaced} ₸ бастап`;
       return `от ${spaced} ₸`;
     }
@@ -443,27 +432,6 @@ export interface Provider {
   updatedAt?: string;
 }
 
-export interface DemoProvider {
-  id: string;
-  name: string;
-  cityId?: string;
-  category: string;
-  categoryId?: string;
-  service: string;
-  approxPrice: string;
-  distance: string;
-  responseTime: string;
-  city: string;
-  rating: number;
-  reviewsCount: number;
-  phone: string;
-  whatsapp: string;
-  verified: boolean;
-  iinVerified?: boolean;
-  hasCertificate?: boolean;
-  addressSnippet: string;
-  district?: string;
-}
 
 // =================== In-App Chat Models ===================
 
@@ -821,13 +789,11 @@ export interface AppNotification {
   title: {
     kz: string;
     ru: string;
-    tr?: string;
   };
 
   body: {
     kz: string;
     ru: string;
-    tr?: string;
   };
 
   requestId?: string;

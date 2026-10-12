@@ -26,27 +26,22 @@ export function getRequestTitle(
 
   let title = stored;
   const reqCategory = normalizeCategoryId(req.categoryId || req.category || '');
-  if (language === 'tr') {
-    // The local engine writes Russian for Turkish; the category name is available in Turkish
-    if (reqCategory) title = getCategoryDisplayName(reqCategory, 'tr');
-  } else {
-    const text = (req.requestText || req.description || '').trim();
-    let rebuilt = '';
-    if (text) {
-      try {
-        const u = analyzeRequestUnderstanding(text, { language });
-        const sameCategory = u.categoryId && reqCategory && normalizeCategoryId(u.categoryId) === reqCategory;
-        // The engine echoes the customer's text when it has no structured title; that is not a title
-        if (sameCategory && u.service && u.service.trim() && u.service.trim() !== text) rebuilt = u.service.trim();
-      } catch {
-        // keep the stored title
-      }
+  const text = (req.requestText || req.description || '').trim();
+  let rebuilt = '';
+  if (text) {
+    try {
+      const u = analyzeRequestUnderstanding(text, { language });
+      const sameCategory = u.categoryId && reqCategory && normalizeCategoryId(u.categoryId) === reqCategory;
+      // The engine echoes the customer's text when it has no structured title; that is not a title
+      if (sameCategory && u.service && u.service.trim() && u.service.trim() !== text) rebuilt = u.service.trim();
+    } catch {
+      // keep the stored title
     }
-    if (rebuilt) {
-      title = rebuilt;
-    } else if (reqCategory && stored && looksLikeOtherLanguage(stored, language)) {
-      title = getCategoryDisplayName(reqCategory, language);
-    }
+  }
+  if (rebuilt) {
+    title = rebuilt;
+  } else if (reqCategory && stored && looksLikeOtherLanguage(stored, language)) {
+    title = getCategoryDisplayName(reqCategory, language);
   }
 
   title = title || stored || getCategoryDisplayName(reqCategory, language);

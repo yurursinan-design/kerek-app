@@ -9,7 +9,7 @@ import { translations } from '../i18n/translations';
 import { getRequestDescription, getRequestTitle } from '../services/requestTitle';
 import { formatShortDate } from '../services/dateFormat';
 import { repository } from '../services';
-import { getCityDisplayName, getCategoryDisplayName } from '../services/taxonomy';
+import { getCityDisplayName } from '../services/taxonomy';
 import { MapPin, Calendar, Wallet, ChevronRight, Plus } from 'lucide-react';
 import { Emoji3D } from './CategoryIcon';
 import { RequestIcon } from './RequestIcon';

@@ -13,7 +13,7 @@ interface LegalModalProps {
 export const LegalModal: React.FC<LegalModalProps> = ({ doc, language, onClose }) => {
   if (!doc) return null;
   const content = getLegalDocument(doc, language);
-  const closeLabel = language === 'kz' ? 'Жабу' : language === 'tr' ? 'Kapat' : 'Закрыть';
+  const closeLabel = language === 'kz' ? 'Жабу' : 'Закрыть';
 
   return (
     <div
@@ -40,9 +40,6 @@ export const LegalModal: React.FC<LegalModalProps> = ({ doc, language, onClose }
           </button>
         </div>
         <div className="overflow-y-auto p-5 pt-3 space-y-4 text-sm text-slate-700 leading-relaxed">
-          {language === 'tr' && (
-            <p className="text-xs text-slate-500">Bu metnin resmî dilleri Kazakça ve Rusçadır.</p>
-          )}
           {content.sections.map((section) => (
             <section key={section.heading} className="space-y-1.5">
               <h3 className="text-sm font-bold text-slate-900">{section.heading}</h3>
@@ -60,8 +57,8 @@ export const LegalModal: React.FC<LegalModalProps> = ({ doc, language, onClose }
 /** "Privacy policy · Terms of use" links that open the documents in place. */
 export const LegalLinks: React.FC<{ language: Language; className?: string }> = ({ language, className }) => {
   const [doc, setDoc] = useState<LegalDocId | null>(null);
-  const privacy = language === 'kz' ? 'Құпиялылық саясаты' : language === 'tr' ? 'Gizlilik politikası' : 'Политика конфиденциальности';
-  const terms = language === 'kz' ? 'Пайдалану шарттары' : language === 'tr' ? 'Kullanım şartları' : 'Условия использования';
+  const privacy = language === 'kz' ? 'Құпиялылық саясаты' : 'Политика конфиденциальности';
+  const terms = language === 'kz' ? 'Пайдалану шарттары' : 'Условия использования';
   return (
     <>
       <span className={className}>

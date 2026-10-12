@@ -5,7 +5,6 @@ export interface CategoryDefinition {
   id: string;
   nameKz: string;
   nameRu: string;
-  nameTr?: string;
   patterns: RegExp[];
 }
 
@@ -13,7 +12,6 @@ export interface CityDefinition {
   id: string;
   nameKz: string;
   nameRu: string;
-  nameTr?: string;
   patterns: RegExp[];
 }
 
@@ -22,7 +20,6 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
     id: 'plumbing',
     nameKz: 'Сантехника және құбырлар',
     nameRu: 'Сантехника и канализация',
-    nameTr: 'Su Tesisatı & Kanalizasyon',
     patterns: [
       /plumbing/i,
       /home_services/i,
@@ -44,7 +41,6 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
     id: 'electrician',
     nameKz: 'Электрик және тоқ желісі',
     nameRu: 'Электрика и монтаж',
-    nameTr: 'Elektrik Tesisatı & Arıza',
     patterns: [
       /electrician/i,
       /электрик/i,
@@ -63,7 +59,6 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
     id: 'heating_boiler',
     nameKz: 'Жылыту және қазандықтар',
     nameRu: 'Отопление и котлы',
-    nameTr: 'Kombi, Şofben & Isıtma',
     patterns: [
       /heating_boiler/i,
       /heating/i,
@@ -93,7 +88,6 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
     id: 'ac_ventilation',
     nameKz: 'Кондиционерлер мен желдету',
     nameRu: 'Кондиционеры и вентиляция',
-    nameTr: 'Klima & Havalandırma',
     patterns: [
       /ac_ventilation/i,
       /кондиционер/i,
@@ -110,7 +104,6 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
     id: 'appliances',
     nameKz: 'Тұрмыстық техника жөндеу',
     nameRu: 'Ремонт бытовой техники',
-    nameTr: 'Beyaz Eşya Tamiri',
     patterns: [
       /appliances?_repair/i,
       /appliances/i,
@@ -145,7 +138,6 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
     id: 'furniture_carpentry',
     nameKz: 'Жиһаз құрастыру',
     nameRu: 'Сборка мебели',
-    nameTr: 'Mobilya Montajı & Marangozluk',
     patterns: [
       /furniture_carpentry/i,
       /furniture/i,
@@ -167,7 +159,6 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
     id: 'painting_finishing',
     nameKz: 'Бояу және жөндеу',
     nameRu: 'Малярные работы и ремонт',
-    nameTr: 'Boya, Badana & Tadilat',
     patterns: [
       /painting_finishing/i,
       /painting/i,
@@ -189,7 +180,6 @@ export const CANONICAL_CATEGORIES: CategoryDefinition[] = [
     id: 'cleaning_moving',
     nameKz: 'Тазалау және көшу',
     nameRu: 'Уборка и переезд',
-    nameTr: 'Temizlik & Taşıma',
     patterns: [
       /cleaning_moving/i,
       /cleaning/i,
@@ -216,112 +206,96 @@ export const CANONICAL_CITIES: CityDefinition[] = [
     id: 'kyzylorda',
     nameKz: 'Қызылорда',
     nameRu: 'Кызылорда',
-    nameTr: 'Kızılorda',
     patterns: [/kyzylord[a-zа-яё]*|kızılord[a-zа-яё]*|kizilord[a-zа-яё]*|қызылорд[а-яёқ]*|кызылорд[а-яё]*|\bкзо\b/i],
   },
   {
     id: 'almaty',
     nameKz: 'Алматы',
     nameRu: 'Алматы',
-    nameTr: 'Almatı',
     patterns: [/almat[a-zа-яё]*|алмат[а-яё]*|алма-ат[а-яё]*/i],
   },
   {
     id: 'astana',
     nameKz: 'Астана',
     nameRu: 'Астана',
-    nameTr: 'Astana',
     patterns: [/astan[a-zа-яё]*|астан[а-яё]*|нур-султан/i],
   },
   {
     id: 'shymkent',
     nameKz: 'Шымкент',
     nameRu: 'Шымкент',
-    nameTr: 'Çimkent',
     patterns: [/shymkent[a-zа-яё]*|шымкент[а-яё]*|чимкент[а-яё]*/i],
   },
   {
     id: 'aktobe',
     nameKz: 'Ақтөбе',
     nameRu: 'Актобе',
-    nameTr: 'Aktöbe',
     patterns: [/aktob[a-zа-яё]*|ақтөб[а-яё]*|актоб[а-яё]*/i],
   },
   {
     id: 'karaganda',
     nameKz: 'Қарағанды',
     nameRu: 'Караганда',
-    nameTr: 'Karaganda',
     patterns: [/karagand[a-zа-яё]*|қарағанд[а-яёқ]*|караганд[а-яё]*/i],
   },
   {
     id: 'taraz',
     nameKz: 'Тараз',
     nameRu: 'Тараз',
-    nameTr: 'Taraz',
     patterns: [/taraz[a-zа-яё]*|тараз[а-яё]*/i],
   },
   {
     id: 'pavlodar',
     nameKz: 'Павлодар',
     nameRu: 'Павлодар',
-    nameTr: 'Pavlodar',
     patterns: [/pavlodar[a-zа-яё]*|павлодар[а-яё]*/i],
   },
   {
     id: 'oskemen',
     nameKz: 'Өскемен',
     nameRu: 'Усть-Каменогорск',
-    nameTr: 'Öskemen',
     patterns: [/oskemen[a-zа-яё]*|өскемен[а-яё]*|усть-каменогорск[а-яё]*/i],
   },
   {
     id: 'semey',
     nameKz: 'Семей',
     nameRu: 'Семей',
-    nameTr: 'Semey',
     patterns: [/semey[a-zа-яё]*|семей[а-яё]*|семипалатинск[а-яё]*/i],
   },
   {
     id: 'atyrau',
     nameKz: 'Атырау',
     nameRu: 'Атырау',
-    nameTr: 'Atırav',
     patterns: [/atyrau[a-zа-яё]*|атырау[а-яё]*/i],
   },
   {
     id: 'aktau',
     nameKz: 'Ақтау',
     nameRu: 'Актау',
-    nameTr: 'Aktav',
     patterns: [/aktau[a-zа-яё]*|ақтау[а-яё]*|актау[а-яё]*/i],
   },
   {
     id: 'kostanay',
     nameKz: 'Қостанай',
     nameRu: 'Костанай',
-    nameTr: 'Kostanay',
     patterns: [/kostana[a-zа-яё]*|қостанай[а-яё]*|костанай[а-яё]*|костанае/i],
   },
   {
     id: 'oral',
     nameKz: 'Орал',
     nameRu: 'Уральск',
-    nameTr: 'Oral',
     patterns: [/oral[a-zа-яё]*|орал[а-яё]*|уральск[а-яё]*/i],
   },
   {
     id: 'turkestan',
     nameKz: 'Түркістан',
     nameRu: 'Туркестан',
-    nameTr: 'Türkistan',
     patterns: [/turkestan[a-zа-яё]*|түркістан[а-яё]*|туркестан[а-яё]*/i],
   },
   {
     id: 'kokshetau',
     nameKz: 'Көкшетау',
     nameRu: 'Кокшетау',
-    nameTr: 'Kökşetav',
     patterns: [/kokshetau[a-zа-яё]*|көкшетау[а-яё]*|кокшетау[а-яё]*/i],
   },
   {
@@ -446,8 +420,7 @@ export function normalizeCategoryId(categoryOrId?: string): string {
   for (const cat of CANONICAL_CATEGORIES) {
     if (
       clean === cat.nameKz.toLowerCase() ||
-      clean === cat.nameRu.toLowerCase() ||
-      (cat.nameTr && clean === cat.nameTr.toLowerCase())
+      clean === cat.nameRu.toLowerCase()
     ) {
       return cat.id;
     }
@@ -494,7 +467,6 @@ export function normalizeCityId(cityOrId?: string): string | undefined {
  */
 export function getCategoryDisplayName(categoryId: string | undefined, lang: Language): string {
   if (!categoryId) {
-    if (lang === 'tr') return 'Genel Hizmet';
     return lang === 'kz' ? 'Жалпы қызмет' : 'Общие услуги';
   }
   const normId = normalizeCategoryId(categoryId);
@@ -510,11 +482,10 @@ export function getCategoryDisplayName(categoryId: string | undefined, lang: Lan
   }
   // Names from the service catalogue (broader group names) take precedence
   const group = getGroup(found ? found.id : normId);
-  if (group && lang !== 'tr') return lang === 'kz' ? group.kz : group.ru;
+  if (group) return lang === 'kz' ? group.kz : group.ru;
   if (!found) {
     return categoryId;
   }
-  if (lang === 'tr') return found.nameTr || found.nameRu;
   return lang === 'kz' ? found.nameKz : found.nameRu;
 }
 
@@ -523,14 +494,12 @@ export function getCategoryDisplayName(categoryId: string | undefined, lang: Lan
  */
 export function getCityDisplayName(cityId: string | undefined, lang: Language): string {
   if (!cityId) {
-    if (lang === 'tr') return 'Belirtilmemiş Şehir';
     return lang === 'kz' ? 'Белгісіз қала' : 'Неуказанный город';
   }
   const normId = normalizeCityId(cityId);
   if (!normId) return cityId;
   const found = CANONICAL_CITIES.find((c) => c.id === normId);
   if (!found) return cityId;
-  if (lang === 'tr') return found.nameTr || found.nameRu;
   return lang === 'kz' ? found.nameKz : found.nameRu;
 }
 

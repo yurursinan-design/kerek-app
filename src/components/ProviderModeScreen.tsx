@@ -17,7 +17,6 @@ import { getRequestDescription, getRequestTitle } from '../services/requestTitle
 import { repository, getCurrentUserId, checkClientRateLimit, getFriendlyErrorMessage, notificationService } from '../services';
 import { isDebugMode } from '../services/debug';
 import { auth } from '../services/firebase';
-import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
 import {
   getCategoryDisplayName,
   getCityDisplayName,
@@ -102,28 +101,15 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [providerReviews, setProviderReviews] = useState<Review[]>([]);
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(null);
 
-  // Registration Form State
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [whatsapp, setWhatsapp] = useState('');
+  // Profile fallbacks used when saving
   const [city, setCity] = useState(
-    language === 'kz' ? 'Қызылорда' : language === 'tr' ? 'Kızılorda' : 'Кызылорда'
-  );
-  const [district, setDistrict] = useState(
-    language === 'kz' ? 'Орталық' : language === 'tr' ? 'Merkez' : 'Центр'
+    language === 'kz' ? 'Қызылорда' : 'Кызылорда'
   );
   const [category, setCategory] = useState(
     language === 'kz'
       ? 'Тұрмыстық техника жөндеу'
-      : language === 'tr'
-      ? 'Beyaz Eşya Tamiri'
       : 'Ремонт бытовой техники'
   );
-  const [services, setServices] = useState('Ремонт стиральных машин, бойлеров');
-  const [priceRange, setPriceRange] = useState('от 8 000 ₸');
-  const [workingHours, setWorkingHours] = useState('09:00 - 20:00');
-  const [experienceYears, setExperienceYears] = useState('5');
-  const [description, setDescription] = useState('Мастер с опытом работы более 5 лет.');
 
   // Requests state (Matching provider's profile)
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
@@ -150,15 +136,11 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [offerTime, setOfferTime] = useState(
     language === 'kz'
       ? 'Бүгін, 40 минут ішінде'
-      : language === 'tr'
-      ? 'Bugün, 40 dakika içinde'
       : 'Сегодня, в течение 40 минут'
   );
   const [offerMessage, setOfferMessage] = useState(
     language === 'kz'
       ? 'Құралдарым дайын, келіп сапалы жөндеп беремін.'
-      : language === 'tr'
-      ? 'Takımlarım hazır, gelip kaliteli şekilde tamir ederim.'
       : 'Готов подъехать со своим инструментом, дам гарантию на работу.'
   );
   // Tab state & Action loading
@@ -200,21 +182,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       if (myProv) {
         if (isMounted) {
           setProvider(myProv);
-          setName(myProv.name);
-          setPhone(myProv.phone);
-          setWhatsapp(myProv.whatsapp);
           setCity(myProv.city);
-          setDistrict(myProv.district);
           setCategory(myProv.category);
-          setServices(myProv.services);
-          setPriceRange(myProv.priceRange);
-          setWorkingHours(myProv.workingHours);
-          setExperienceYears(
-            myProv.experienceYears !== undefined && myProv.experienceYears !== null
-              ? String(myProv.experienceYears)
-              : ''
-          );
-          setDescription(myProv.description);
         }
 
         // Load existing offers sent by this provider
@@ -441,8 +410,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       setErrorMessage(
         language === 'kz'
           ? 'Өз өтінішіңізге ұсыныс жібере алмайсыз'
-          : language === 'tr'
-          ? 'Kendi talebinize teklif gönderemezsiniz'
           : 'Вы не можете отправлять предложение на свою собственную заявку'
       );
       return;
@@ -454,8 +421,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         finalPrice =
           language === 'kz'
             ? 'Қарап көрген соң'
-            : language === 'tr'
-            ? 'Keşif sonrası'
             : 'После осмотра';
       } else {
         const digits = offerPriceAmount.replace(/[^\d]/g, '');
@@ -463,8 +428,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
           setErrorMessage(
             language === 'kz'
               ? 'Бағасын көрсетіңіз'
-              : language === 'tr'
-              ? 'Fiyat belirtin'
               : 'Укажите примерную стоимость'
           );
           return;
@@ -472,7 +435,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         const spaced = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
         if (offerPriceType === 'from') {
           finalPrice =
-            language === 'kz' ? `${spaced} ₸ бастап` : language === 'tr' ? `${spaced} ₸'den başlayan` : `от ${spaced} ₸`;
+            language === 'kz' ? `${spaced} ₸ бастап` : `от ${spaced} ₸`;
         } else {
           finalPrice = `${spaced} ₸`;
         }
@@ -539,11 +502,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     getCurrentUserId() === 'temp-local-user-id'
   );
 
-  console.log(
-    `[ProviderMode] visibleRequests değerlendiriliyor | Toplam talep: ${requests.length} | Usta cityId: "${pCityId}", categoryId: "${pCatId}"`
-  );
-
-  // Status action handlers for "İşe Başla" and "İşi Tamamla"
+  // Status action handlers for "Start work" and "Finish work"
   const handleStartWork = async (requestId: string) => {
     if (!checkClientRateLimit(`start_work_${requestId}`, 800)) return;
     setActionLoadingReqId(requestId);
@@ -556,8 +515,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         setNotification(
           language === 'kz'
             ? 'Жұмыс басталды'
-            : language === 'tr'
-            ? 'İş başlatıldı'
             : 'Работа начата'
         );
         setTimeout(() => setNotification(null), 3500);
@@ -585,8 +542,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         setNotification(
           language === 'kz'
             ? 'Тапсырыс берушіге хабар жіберілді. Ол растағанда жұмыс жабылады.'
-            : language === 'tr'
-            ? 'Müşteriye bildirildi. Onayladığında iş kapanacak.'
             : 'Заказчику отправлено уведомление. Работа закроется после его подтверждения.'
         );
         setTimeout(() => setNotification(null), 4000);
@@ -611,8 +566,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     const norm = normalizeRequestStatus(r.status);
     if (norm !== 'OPEN') return false;
 
-    const rCityId = normalizeCityId(r.cityId || r.city) || r.cityId || 'belirtilmemiş';
-    const rCatId = normalizeCategoryId(r.categoryId || r.category) || 'belirtilmemiş';
+    const rCityId = normalizeCityId(r.cityId || r.city) || r.cityId || 'unknown';
+    const rCatId = normalizeCategoryId(r.categoryId || r.category) || 'unknown';
 
     if (pCityId && pGroupIds.length > 0) {
       if (rCityId !== pCityId) return false;
@@ -642,7 +597,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     return true;
   });
 
-  // 3. Tab: Active Jobs ("Aktif İşlerim")
+  // 3. Tab: Active Jobs
   const activeJobRequests = requests.filter((r) => {
     const offer = sentOffersMap[r.id];
     if (!offer) return false;
@@ -777,8 +732,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         title={
                           language === 'kz'
                             ? 'Профильді көру'
-                            : language === 'tr'
-                            ? 'Profili Görüntüle'
                             : 'Посмотреть профиль'
                         }
                       >
@@ -786,8 +739,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         <span>
                           {language === 'kz'
                             ? 'Профиль'
-                            : language === 'tr'
-                            ? 'Profil'
                             : 'Профиль'}
                         </span>
                       </button>
@@ -801,8 +752,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         <span>
                           {language === 'kz'
                             ? 'Өңдеу'
-                            : language === 'tr'
-                            ? 'Düzenle'
                             : 'Изменить'}
                         </span>
                       </button>
@@ -839,8 +788,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     <strong className="text-slate-700">
                       {language === 'kz'
                         ? 'Уақыты:'
-                        : language === 'tr'
-                        ? 'Saat:'
                         : 'Время:'}
                     </strong>{' '}
                     {provider.workingHours}
@@ -850,8 +797,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                       <strong className="text-slate-700">
                         {language === 'kz'
                           ? 'Тәжірибе:'
-                          : language === 'tr'
-                          ? 'Deneyim:'
                           : 'Опыт:'}
                       </strong>{' '}
                       {provider.experienceYears} {t.experienceYearsUnit}
@@ -874,7 +819,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               >
                 <Briefcase className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">
-                  {language === 'kz' ? 'Жаңа өтініштер' : language === 'tr' ? 'Yeni Talepler' : 'Новые заявки'}
+                  {language === 'kz' ? 'Жаңа өтініштер' : 'Новые заявки'}
                 </span>
                 {newRequests.length > 0 && (
                   <span
@@ -898,7 +843,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               >
                 <Send className="w-3.5 h-3.5 shrink-0" />
                 <span className="truncate">
-                  {language === 'kz' ? 'Ұсыныстарым' : language === 'tr' ? 'Tekliflerim' : 'Мои предложения'}
+                  {language === 'kz' ? 'Ұсыныстарым' : 'Мои предложения'}
                 </span>
                 {myOffersRequests.length > 0 && (
                   <span
@@ -922,7 +867,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               >
                 <Clock className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
                 <span className="truncate">
-                  {language === 'kz' ? 'Белсенді жұмыстар' : language === 'tr' ? 'Aktif İşlerim' : 'Активные заказы'}
+                  {language === 'kz' ? 'Белсенді жұмыстар' : 'Активные заказы'}
                 </span>
                 {activeJobRequests.length > 0 && (
                   <span
@@ -1042,15 +987,11 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     <h4 className="text-base font-bold text-slate-900">
                       {language === 'kz'
                         ? 'Жіберілген ұсыныстар жоқ'
-                        : language === 'tr'
-                        ? 'Henüz teklif gönderilmedi'
                         : 'Нет отправленных предложений'}
                     </h4>
                     <p className="text-[13px] text-slate-500 max-w-xs mx-auto leading-relaxed">
                       {language === 'kz'
                         ? '«Жаңа өтініштер» бөліміндегі сұраныстарға ұсыныс жіберіңіз.'
-                        : language === 'tr'
-                        ? 'Yeni taleplere teklif gönderdiğinizde teklifleriniz burada listelenecektir.'
                         : 'Когда вы отправляете предложения на новые заявки, они будут отображаться здесь.'}
                     </p>
                   </div>
@@ -1117,8 +1058,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
 
                             <div className="text-[11px] text-slate-500 text-center font-medium bg-slate-50 p-2 rounded-lg">
                               {existingOffer.status === 'REJECTED'
-                                ? (language === 'kz' ? 'Клиент басқа маманды таңдады' : language === 'tr' ? 'Müşteri başka usta seçti' : 'Клиент выбрал другого мастера')
-                                : (language === 'kz' ? 'Клиент қарастыруда...' : language === 'tr' ? 'Müşteri değerlendiriyor...' : 'Ожидает ответа клиента...')}
+                                ? (language === 'kz' ? 'Клиент басқа маманды таңдады' : 'Клиент выбрал другого мастера')
+                                : (language === 'kz' ? 'Клиент қарастыруда...' : 'Ожидает ответа клиента...')}
                             </div>
                           </div>
                         )}
@@ -1129,7 +1070,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               </div>
             )}
 
-            {/* TAB 3: Aktif İşlerim */}
+            {/* TAB 3: Active jobs */}
             {activeTab === 'active' && (
               <div className="space-y-3">
                 {activeJobRequests.length === 0 ? (
@@ -1138,15 +1079,11 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     <h4 className="text-base font-bold text-slate-900">
                       {language === 'kz'
                         ? 'Белсенді жұмыстар жоқ'
-                        : language === 'tr'
-                        ? 'Aktif iş bulunmuyor'
                         : 'Нет активных заказов'}
                     </h4>
                     <p className="text-[13px] text-slate-500 max-w-xs mx-auto leading-relaxed">
                       {language === 'kz'
                         ? 'Клиент сіздің ұсынысыңызды қабылдағанда, тапсырыс осы жерге түседі және жұмыс күйін өзгерте аласыз.'
-                        : language === 'tr'
-                        ? 'Müşteri teklifinizi kabul ettiğinde aktif işleriniz burada görünecek ve iş durumunu güncelleyebileceksiniz.'
                         : 'Когда клиент примет ваше предложение, заказ появится здесь, и вы сможете обновлять статус работы.'}
                     </p>
                   </div>
@@ -1172,8 +1109,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                           >
                             <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
                             {normStatus === 'IN_PROGRESS'
-                              ? (language === 'kz' ? 'Жұмыс орындалуда' : language === 'tr' ? 'İş Devam Ediyor' : 'Выполняется')
-                              : (language === 'kz' ? 'Тапсырыс қабылданды' : language === 'tr' ? 'Sipariş Kabul Edildi' : 'Заказ принят')}
+                              ? (language === 'kz' ? 'Жұмыс орындалуда' : 'Выполняется')
+                              : (language === 'kz' ? 'Тапсырыс қабылданды' : 'Заказ принят')}
                           </span>
                         </div>
 
@@ -1223,8 +1160,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         <p className="text-[11px] text-slate-600 leading-relaxed">
                           {language === 'kz'
                             ? 'Төлемді тапсырыс берушіден тікелей аласыз (қолма-қол немесе аударым).'
-                            : language === 'tr'
-                            ? 'Ödemeyi doğrudan müşteriden alırsınız (nakit veya havale).'
                             : 'Оплату вы получаете напрямую от заказчика (наличными или переводом).'}
                         </p>
 
@@ -1274,8 +1209,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                               <Flame className="w-4 h-4" />
                               <span>
                                 {actionLoadingReqId === req.id
-                                  ? (language === 'kz' ? 'Жүктелуде...' : language === 'tr' ? 'Yükleniyor...' : 'Загрузка...')
-                                  : (language === 'kz' ? 'Жұмысты бастау' : language === 'tr' ? 'İşe Başla' : 'Начать работу')}
+                                  ? (language === 'kz' ? 'Жүктелуде...' : 'Загрузка...')
+                                  : (language === 'kz' ? 'Жұмысты бастау' : 'Начать работу')}
                               </span>
                             </button>
                           )}
@@ -1286,8 +1221,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                               <span>
                                 {language === 'kz'
                                   ? 'Тапсырыс берушінің растауы күтілуде'
-                                  : language === 'tr'
-                                  ? 'Müşterinin onayı bekleniyor'
                                   : 'Ожидается подтверждение заказчика'}
                               </span>
                             </div>
@@ -1303,8 +1236,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                               <CheckCircle className="w-4 h-4" />
                               <span>
                                 {actionLoadingReqId === req.id
-                                  ? (language === 'kz' ? 'Жүктелуде...' : language === 'tr' ? 'Yükleniyor...' : 'Загрузка...')
-                                  : (language === 'kz' ? 'Жұмысты аяқтау' : language === 'tr' ? 'İşi Tamamla' : 'Завершить работу')}
+                                  ? (language === 'kz' ? 'Жүктелуде...' : 'Загрузка...')
+                                  : (language === 'kz' ? 'Жұмысты аяқтау' : 'Завершить работу')}
                               </span>
                             </button>
                           )}

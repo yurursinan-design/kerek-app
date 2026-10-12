@@ -1,7 +1,7 @@
 import { auth } from './firebase';
 import { firebaseRepository } from './firebaseRepository';
 import { getCurrentUserId, generateUUID } from './localRepository';
-import { WorkStatus, ProviderOffer } from '../types';
+import { ProviderOffer } from '../types';
 
 export type MutationType =
   | 'createRequest'

@@ -115,31 +115,31 @@ export async function logoutToAnonymous(): Promise<void> {
   await ensureFirebaseAuth();
 }
 
-type Lang = 'kz' | 'ru' | 'tr';
+type Lang = 'kz' | 'ru';
 
 /** Localized message for Firebase phone-auth errors. */
 export function phoneAuthErrorMessage(err: any, lang: Lang): string {
   const code = String(err?.code || '');
-  const m = (kz: string, ru: string, tr: string) => (lang === 'kz' ? kz : lang === 'tr' ? tr : ru);
+  const m = (kz: string, ru: string) => (lang === 'kz' ? kz : ru);
   switch (code) {
     case 'auth/invalid-phone-number':
     case 'auth/missing-phone-number':
-      return m('Телефон нөмірі қате. Мысалы: +7 701 123 45 67', 'Неверный номер. Например: +7 701 123 45 67', 'Telefon numarası hatalı. Örnek: +7 701 123 45 67');
+      return m('Телефон нөмірі қате. Мысалы: +7 701 123 45 67', 'Неверный номер. Например: +7 701 123 45 67');
     case 'auth/invalid-verification-code':
     case 'auth/missing-verification-code':
-      return m('Код қате. Қайта тексеріңіз.', 'Неверный код. Проверьте и попробуйте снова.', 'Kod hatalı. Kontrol edip tekrar deneyin.');
+      return m('Код қате. Қайта тексеріңіз.', 'Неверный код. Проверьте и попробуйте снова.');
     case 'auth/code-expired':
-      return m('Кодтың мерзімі өтті. Жаңа код сұраңыз.', 'Срок действия кода истёк. Запросите новый.', 'Kodun süresi doldu. Yeni kod isteyin.');
+      return m('Кодтың мерзімі өтті. Жаңа код сұраңыз.', 'Срок действия кода истёк. Запросите новый.');
     case 'auth/too-many-requests':
-      return m('Тым көп әрекет. Біраз уақыттан кейін қайталаңыз.', 'Слишком много попыток. Попробуйте позже.', 'Çok fazla deneme. Biraz sonra tekrar deneyin.');
+      return m('Тым көп әрекет. Біраз уақыттан кейін қайталаңыз.', 'Слишком много попыток. Попробуйте позже.');
     case 'auth/quota-exceeded':
-      return m('Бүгінгі SMS шегі таусылды. Кейінірек қайталаңыз.', 'Лимит SMS на сегодня исчерпан. Попробуйте позже.', 'Bugünkü SMS sınırı doldu. Daha sonra tekrar deneyin.');
+      return m('Бүгінгі SMS шегі таусылды. Кейінірек қайталаңыз.', 'Лимит SMS на сегодня исчерпан. Попробуйте позже.');
     case 'auth/operation-not-allowed':
     case 'auth/admin-restricted-operation':
-      return m('SMS арқылы кіру әлі қосылмаған.', 'Вход по SMS ещё не включён.', 'SMS ile giriş henüz açılmadı.');
+      return m('SMS арқылы кіру әлі қосылмаған.', 'Вход по SMS ещё не включён.');
     case 'auth/network-request-failed':
-      return m('Интернет байланысы жоқ сияқты.', 'Похоже, нет подключения к интернету.', 'İnternet bağlantısı yok gibi görünüyor.');
+      return m('Интернет байланысы жоқ сияқты.', 'Похоже, нет подключения к интернету.');
     default:
-      return m('SMS жіберу мүмкін болмады. Қайталап көріңіз.', 'Не удалось отправить SMS. Попробуйте снова.', 'SMS gönderilemedi. Tekrar deneyin.');
+      return m('SMS жіберу мүмкін болмады. Қайталап көріңіз.', 'Не удалось отправить SMS. Попробуйте снова.');
   }
 }

@@ -20,10 +20,10 @@ interface BottomNavProps {
 }
 
 const L = {
-  providerNew: { kz: 'Жаңа өтініштер', ru: 'Новые заявки', tr: 'Yeni talepler' },
-  providerOffers: { kz: 'Ұсыныстарым', ru: 'Мои предложения', tr: 'Tekliflerim' },
-  providerActive: { kz: 'Белсенді жұмыстар', ru: 'Активные заказы', tr: 'Aktif işler' },
-  toCustomer: { kz: 'Маман іздеу', ru: 'Найти мастера', tr: 'Hizmet al' },
+  providerNew: { kz: 'Жаңа өтініштер', ru: 'Новые заявки' },
+  providerOffers: { kz: 'Ұсыныстарым', ru: 'Мои предложения' },
+  providerActive: { kz: 'Белсенді жұмыстар', ru: 'Активные заказы' },
+  toCustomer: { kz: 'Маман іздеу', ru: 'Найти мастера' },
 } as const;
 
 interface ItemProps {
@@ -75,8 +75,8 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   providerCounts,
 }) => {
   const t = translations[language];
-  const lang = language as 'kz' | 'ru' | 'tr';
-  const tx = (entry: { kz: string; ru: string; tr: string }) => entry[lang] || entry.ru;
+  const lang = language;
+  const tx = (entry: { kz: string; ru: string }) => entry[lang] || entry.ru;
   const iconClass = (active: boolean) => `w-5 h-5 ${active ? 'stroke-[2.5]' : ''}`;
 
   return (

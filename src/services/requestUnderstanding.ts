@@ -1,7 +1,6 @@
 import {
   ExtractedNeed,
   Language,
-  PendingAttachment,
   RequestLocation,
   RequestUnderstanding,
   UnderstandingUrgency,
@@ -412,16 +411,16 @@ export function analyzeRequestUnderstanding(
       )
     ) {
       detectedCategoryId = 'electronics';
-      detectedCategory = lang === 'tr' ? 'Электроника и покупка техники' : lang === 'kz' ? 'Электроника және гаджеттер' : 'Электроника и покупка техники';
+      detectedCategory = lang === 'kz' ? 'Электроника және гаджеттер' : 'Электроника и покупка техники';
     } else if (/клининг|уборка|тазалау|пәтер тазалау|кілем жуу|cleaning/i.test(normalized)) {
       detectedCategoryId = 'cleaning';
       detectedCategory = getCategoryDisplayName('cleaning_moving', lang);
     } else if (/эвакуатор|көлік бұзылды|авто|сто|шина|дөңгелек|tow truck|mechanic/i.test(normalized)) {
       detectedCategoryId = 'auto';
-      detectedCategory = lang === 'tr' ? 'Автоуслуги и эвакуатор' : lang === 'kz' ? 'Автокөмек және эвакуатор' : 'Автоуслуги и эвакуатор';
+      detectedCategory = lang === 'kz' ? 'Автокөмек және эвакуатор' : 'Автоуслуги и эвакуатор';
     } else {
       detectedCategoryId = 'other';
-      detectedCategory = lang === 'tr' ? 'Diğer Hizметler' : lang === 'kz' ? 'Басқа қызметтер' : 'Другие услуги';
+      detectedCategory = lang === 'kz' ? 'Басқа қызметтер' : 'Другие услуги';
     }
   }
 

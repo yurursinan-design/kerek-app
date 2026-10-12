@@ -19,58 +19,51 @@ interface PhoneLoginModalProps {
 const RESEND_SECONDS = 60;
 
 const TEXT = {
-  title: { kz: 'Телефон арқылы кіру', ru: 'Вход по телефону', tr: 'Telefonla giriş' },
+  title: { kz: 'Телефон арқылы кіру', ru: 'Вход по телефону' },
   reason: {
     request: {
       kz: 'Өтінішті шеберлерге жіберу үшін телефон нөміріңізді растаңыз. Нөміріңіз тапсырыс қабылданғанға дейін жасырын болады.',
       ru: 'Чтобы отправить заявку мастерам, подтвердите номер телефона. Номер скрыт до принятия заказа.',
-      tr: 'Talebi ustalara göndermek için telefon numaranızı doğrulayın. Numaranız teklif kabul edilene kadar gizli kalır.',
     },
     provider: {
       kz: 'Орындаушы ретінде жұмыс істеу үшін телефон нөміріңізді растаңыз.',
       ru: 'Чтобы работать исполнителем, подтвердите номер телефона.',
-      tr: 'Usta olarak çalışmak için telefon numaranızı doğrulayın.',
     },
     delete: {
       kz: 'Қауіпсіздік үшін аккаунтты жоюдан бұрын нөміріңізді қайта растаңыз.',
       ru: 'В целях безопасности подтвердите номер ещё раз перед удалением аккаунта.',
-      tr: 'Güvenlik için hesabı silmeden önce numaranızı tekrar doğrulayın.',
     },
     header: {
       kz: 'Нөміріңізді растасаңыз, өтініштеріңіз бен профиліңіз кез келген құрылғыда сақталады.',
       ru: 'После подтверждения номера ваши заявки и профиль доступны на любом устройстве.',
-      tr: 'Numaranızı doğruladığınızda talepleriniz ve profiliniz her cihazda erişilebilir olur.',
     },
   },
-  phoneLabel: { kz: 'Телефон нөмірі', ru: 'Номер телефона', tr: 'Telefon numarası' },
-  sendCode: { kz: 'Код жіберу', ru: 'Получить код', tr: 'Kod gönder' },
-  codeLabel: { kz: 'SMS коды', ru: 'Код из SMS', tr: 'SMS kodu' },
-  codeSentTo: { kz: 'Код жіберілді:', ru: 'Код отправлен на', tr: 'Kod gönderildi:' },
-  confirm: { kz: 'Растау', ru: 'Подтвердить', tr: 'Doğrula' },
-  changeNumber: { kz: 'Нөмірді өзгерту', ru: 'Изменить номер', tr: 'Numarayı değiştir' },
-  resendIn: { kz: 'Қайта жіберу:', ru: 'Повторно через', tr: 'Tekrar gönder:' },
-  resend: { kz: 'Кодты қайта жіберу', ru: 'Отправить код ещё раз', tr: 'Kodu tekrar gönder' },
+  phoneLabel: { kz: 'Телефон нөмірі', ru: 'Номер телефона' },
+  sendCode: { kz: 'Код жіберу', ru: 'Получить код' },
+  codeLabel: { kz: 'SMS коды', ru: 'Код из SMS' },
+  codeSentTo: { kz: 'Код жіберілді:', ru: 'Код отправлен на' },
+  confirm: { kz: 'Растау', ru: 'Подтвердить' },
+  changeNumber: { kz: 'Нөмірді өзгерту', ru: 'Изменить номер' },
+  resendIn: { kz: 'Қайта жіберу:', ru: 'Повторно через' },
+  resend: { kz: 'Кодты қайта жіберу', ru: 'Отправить код ещё раз' },
   invalidPhone: {
     kz: 'Қазақстандық ұялы нөмір енгізіңіз. Мысалы: +7 701 123 45 67',
     ru: 'Введите казахстанский мобильный номер. Например: +7 701 123 45 67',
-    tr: 'Telefon numarası hatalı. Örnek: +7 701 123 45 67',
   },
-  close: { kz: 'Жабу', ru: 'Закрыть', tr: 'Kapat' },
+  close: { kz: 'Жабу', ru: 'Закрыть' },
   consent: {
     kz: 'Мен Құпиялылық саясатымен және Пайдалану шарттарымен келісемін, дербес деректерімді өңдеуге келісім беремін. Маған 18 жас толған.',
     ru: 'Я принимаю Политику конфиденциальности и Условия использования и даю согласие на обработку персональных данных. Мне есть 18 лет.',
-    tr: 'Gizlilik politikasını ve Kullanım şartlarını kabul ediyor, kişisel verilerimin işlenmesine onay veriyorum. 18 yaşından büyüğüm.',
   },
   consentRequired: {
     kz: 'Жалғастыру үшін келісім белгісін қойыңыз.',
     ru: 'Чтобы продолжить, отметьте согласие.',
-    tr: 'Devam etmek için onay kutusunu işaretleyin.',
   },
 } as const;
 
 export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language, reason, onSuccess, onCancel }) => {
-  const lang = language as 'kz' | 'ru' | 'tr';
-  const tx = (entry: { kz: string; ru: string; tr: string }) => entry[lang] || entry.ru;
+  const lang = language;
+  const tx = (entry: { kz: string; ru: string }) => entry[lang] || entry.ru;
 
   const [phone, setPhone] = useState('+7 ');
   const [code, setCode] = useState('');

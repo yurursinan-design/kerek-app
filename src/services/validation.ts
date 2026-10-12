@@ -7,8 +7,6 @@ import {
   ServiceRequest,
 } from '../types';
 import {
-  CANONICAL_CATEGORIES,
-  CANONICAL_CITIES,
   getCategoryDisplayName,
   getCityDisplayName,
   normalizeCategoryId,

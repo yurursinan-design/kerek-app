@@ -18,17 +18,13 @@ import {
   AlertCircle,
   RotateCcw,
   X,
-  FileText,
   Send,
   CalendarCheck,
   CalendarX,
-  ChevronDown,
-  ChevronUp,
   Car,
   MapPin,
   Wrench,
   CheckCircle2,
-  ShieldCheck,
 } from 'lucide-react';
 
 interface AppointmentSectionProps {
@@ -344,8 +340,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
             <p className="text-[10px] text-slate-500">
               {language === 'kz'
                 ? 'Тараптардың келісілген уақыты'
-                : language === 'tr'
-                ? 'Karşılıklı mutabık kalınan randevu zamanı'
                 : 'Согласованное время встречи'}
             </p>
           </div>
@@ -361,8 +355,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
           <span>
             {language === 'kz'
               ? 'Жұмыс сәтті аяқталды'
-              : language === 'tr'
-              ? 'İş Başarıyla Tamamlandı'
               : 'Работа успешно завершена'}
           </span>
         </div>
@@ -479,8 +471,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   >
                     {language === 'kz'
                       ? 'Жабу'
-                      : language === 'tr'
-                      ? 'İptal'
                       : 'Отмена'}
                   </button>
                 </div>
@@ -514,8 +504,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               <span className="text-slate-500">
                 {language === 'kz'
                   ? 'Ұсынған'
-                  : language === 'tr'
-                  ? 'Öneren'
                   : 'Предложено'}:
               </span>
               <span className="font-medium text-slate-700">
@@ -662,15 +650,11 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   <p className="font-bold text-slate-800">
                     {language === 'kz'
                       ? 'Кездесу күту күйінде қалды'
-                      : language === 'tr'
-                      ? 'Randevu beklemede kaldı'
                       : 'Встреча осталась в ожидании'}
                   </p>
                   <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
                     {language === 'kz'
                       ? 'Тапсырыс аяқталғандықтан, бұл кездесу ұсынысы бекітілмей күту күйінде қалды және оған әрекет жасау талап етілмейді.'
-                      : language === 'tr'
-                      ? 'İş tamamlandığı için bu randevu önerisi onaylanmadan beklemede kaldı ve artık işlem gerektirmez.'
                       : 'Так как заказ уже завершен, это предложение о встрече осталось без подтверждения и более не требует действий.'}
                   </p>
                 </div>
@@ -747,8 +731,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                 >
                   {language === 'kz'
                     ? 'Жабу'
-                    : language === 'tr'
-                    ? 'İptal'
                     : 'Отмена'}
                 </button>
               </div>
@@ -801,8 +783,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   <span>
                     {language === 'kz'
                       ? 'Жұмыстың аяқталғанын растау'
-                      : language === 'tr'
-                      ? 'İşin Tamamlandığını Onayla'
                       : 'Подтвердить завершение работы'}
                   </span>
                 </button>
@@ -863,8 +843,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
             <p className="text-xs text-slate-500">
               {language === 'kz'
                 ? 'Кездесуді шынымен тоқтатқыңыз келе ме?'
-                : language === 'tr'
-                ? 'Randevuyu gerçekten iptal etmek istiyor musunuz?'
                 : 'Вы действительно хотите отменить назначенную встречу?'}
             </p>
 
@@ -872,8 +850,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
                 {language === 'kz'
                   ? 'Себебі (қалауыңыз бойынша)'
-                  : language === 'tr'
-                  ? 'Neden (İsteğe bağlı)'
                   : 'Причина (необязательно)'}
               </label>
               <input
@@ -881,8 +857,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                 placeholder={
                   language === 'kz'
                     ? 'Мысалы: Басқа уақыт ыңғайлырақ'
-                    : language === 'tr'
-                    ? 'Örn: Başka bir zaman daha uygun'
                     : 'Например: Изменились планы'
                 }
                 value={cancelReason}
@@ -907,8 +881,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               >
                 {language === 'kz'
                   ? 'Жоқ'
-                  : language === 'tr'
-                  ? 'Vazgeç'
                   : 'Назад'}
               </button>
             </div>

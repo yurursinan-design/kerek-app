@@ -335,7 +335,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                 <span>{language === 'kz' ? 'Пікірлер жүктелуде...' : 'Загрузка отзывов...'}</span>
               </div>
             ) : reviewsCount === 0 ? (
-              /* Empty State (Boş durum) */
+              /* Empty State */
               <div className="p-6 bg-slate-50/80 rounded-2xl border border-dashed border-slate-200 text-center space-y-1.5 animate-fadeIn">
                 <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
                   <Star className="w-4 h-4 stroke-1" />

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react';
 import {
   AppNotification,
   ExtractedNeed,
@@ -426,8 +426,6 @@ export default function App() {
         setAppError(
           language === 'kz'
             ? `${failedUploads} файл жүктелмеді. Өтініш файлсыз жіберілді.`
-            : language === 'tr'
-            ? `${failedUploads} dosya yüklenemedi. Talep dosyasız gönderildi.`
             : `Не удалось загрузить файлов: ${failedUploads}. Заявка отправлена без них.`
         );
       }
@@ -689,8 +687,6 @@ export default function App() {
           <div className="sticky top-0 z-50 w-full bg-amber-500 text-slate-950 font-bold text-xs py-1.5 px-4 text-center shadow-xs">
             {language === 'kz'
               ? 'Жергілікті режим: деректер тек осы құрылғыда сақталады'
-              : language === 'tr'
-              ? 'Yerel mod: veriler sadece bu cihazda'
               : 'Локальный режим: данные хранятся только на этом устройстве'}
           </div>
         )}

@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ReportButton } from './ReportButton';
 import {
-  DemoProvider,
   ExtractedNeed,
   formatDynamicBudget,
   formatDynamicDate,
@@ -17,10 +16,9 @@ import {
 import { translations } from '../i18n/translations';
 import { getRequestDescription, getRequestTitle } from '../services/requestTitle';
 import { formatShortDate } from '../services/dateFormat';
-import { getDemoProviders } from '../data/demoProviders';
 import { repository, checkClientRateLimit, getFriendlyErrorMessage, getCurrentUserId } from '../services';
-import { auth, isFirebaseConfigured } from '../services/firebase';
-import { getCategoryDisplayName, getCityDisplayName } from '../services/taxonomy';
+import { auth } from '../services/firebase';
+import { getCityDisplayName } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { ReviewModal } from './ReviewModal';
 import { Emoji3D } from './CategoryIcon';
@@ -28,15 +26,12 @@ import { RequestIcon, requestVisual } from './RequestIcon';
 import { ChatScreen } from './ChatScreen';
 import { AppointmentSection } from './AppointmentSection';
 import {
-  AlertTriangle,
   Clock,
   MapPin,
-  Tag,
   Phone,
   MessageCircle,
   MessageSquare,
   RotateCcw,
-  SlidersHorizontal,
   X,
   CheckCircle,
   UserCheck,
@@ -87,8 +82,6 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   const [offers, setOffers] = useState<ProviderOffer[]>([]);
 
   // Demo directory fallback
-  const demoProviders: DemoProvider[] = getDemoProviders(need, language);
-  const showDemoContent = !isFirebaseConfigured();
 
   // Active contact modal
   const [activeModal, setActiveModal] = useState<{
@@ -425,22 +418,6 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   return (
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col justify-between space-y-4">
       <div className="space-y-4">
-        {/* Demo notice and demo directory: only in demo mode (no real database connected) */}
-        {showDemoContent && (
-        <div className="p-3 bg-amber-50 border border-amber-300 rounded-2xl flex items-start gap-3 shadow-xs">
-          <div className="p-1 bg-amber-100 rounded-xl text-amber-800 shrink-0 mt-0.5">
-            <AlertTriangle className="w-4 h-4 stroke-[2.5]" />
-          </div>
-          <div>
-            <h3 className="text-xs font-bold text-amber-950 leading-tight">
-              {t.demoNotice}
-            </h3>
-            <p className="text-[11px] text-amber-800 mt-0.5 leading-normal">
-              {t.demoNoticeDescription}
-            </p>
-          </div>
-        </div>
-        )}
 
         {/* Action Error Alert */}
         {actionError && (
@@ -472,7 +449,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
             <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-xs">
               <div className="space-y-0.5">
                 <span className="text-[10px] font-semibold text-slate-400 uppercase">
-                  {language === 'kz' ? 'Қала' : language === 'tr' ? 'Şehir' : 'Город'}:
+                  {language === 'kz' ? 'Қала' : 'Город'}:
                 </span>
                 <span className="font-semibold text-slate-800 flex items-center gap-1">
                   <MapPin className="w-3 h-3 text-sky-600" />
@@ -482,7 +459,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
 
               <div className="space-y-0.5">
                 <span className="text-[10px] font-semibold text-slate-400 uppercase">
-                  {language === 'kz' ? 'Бюджет' : language === 'tr' ? 'Bütçe' : 'Бюджет'}:
+                  {language === 'kz' ? 'Бюджет' : 'Бюджет'}:
                 </span>
                 <span className="font-semibold text-slate-800 flex items-center gap-1">
                   <Wallet className="w-3 h-3 text-sky-600" />
@@ -494,8 +471,6 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 <span className="text-[10px] font-semibold text-slate-400 uppercase">
                   {language === 'kz'
                     ? 'Құрылған уақыты'
-                    : language === 'tr'
-                    ? 'Oluşturulma Tarihi'
                     : 'Дата создания'}:
                 </span>
                 <span className="font-medium text-slate-600 flex items-center gap-1">
@@ -508,8 +483,6 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 <span className="text-[10px] font-semibold text-slate-400 uppercase">
                   {language === 'kz'
                     ? 'Ұсыныстар саны'
-                    : language === 'tr'
-                    ? 'Teklif Sayısı'
                     : 'Кол-во предложений'}:
                 </span>
                 <span className="font-bold text-sky-700 flex items-center gap-1">
@@ -517,8 +490,6 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                   {offers.length}{' '}
                   {language === 'kz'
                     ? 'ұсыныс'
-                    : language === 'tr'
-                    ? 'teklif'
                     : 'предл.'}
                 </span>
               </div>
@@ -744,8 +715,6 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 <p className="text-xs text-amber-900 bg-amber-50 p-2.5 rounded-xl border border-amber-300 leading-relaxed font-semibold">
                   {language === 'kz'
                     ? 'Шебер жұмысты аяқтағанын хабарлады. Бәрі дұрыс болса, төмендегі түйме арқылы растаңыз.'
-                    : language === 'tr'
-                    ? 'Usta işi bitirdiğini bildirdi. Her şey yolundaysa aşağıdaki düğmeyle onaylayın.'
                     : 'Мастер сообщил, что работа выполнена. Если всё в порядке, подтвердите кнопкой ниже.'}
                 </p>
               )}
@@ -755,8 +724,6 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 <p className="text-[11px] text-slate-600 leading-relaxed">
                   {language === 'kz'
                     ? 'Төлем шеберге тікелей жасалады (қолма-қол немесе аударым). KEREK төлем қабылдамайды.'
-                    : language === 'tr'
-                    ? 'Ödeme doğrudan ustaya yapılır (nakit veya havale). KEREK ödeme almaz.'
                     : 'Оплата производится мастеру напрямую (наличными или переводом). KEREK не принимает платежи.'}
                 </p>
               )}
@@ -970,96 +937,6 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
           </div>
         )}
 
-        {/* Existing Provider Directory Cards Section (demo mode only) */}
-        {showDemoContent && (
-        <div className="space-y-3 pt-2">
-          <div className="space-y-0.5">
-            <h3 className="text-base font-bold text-slate-900 tracking-tight font-display">
-              {t.resultsTitle}
-            </h3>
-            <p className="text-xs text-slate-500">{t.resultsSubtitle}</p>
-          </div>
-
-          <div className="space-y-3">
-            {demoProviders.map((p) => (
-              <div
-                key={p.id}
-                className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs hover:shadow-xs transition-shadow relative overflow-hidden"
-              >
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div>
-                    <h4 className="font-bold text-slate-900 text-sm leading-tight">
-                      {p.name}
-                    </h4>
-                    <p className="text-xs text-slate-500 mt-0.5 font-medium">
-                      {p.service}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="py-2 border-y border-slate-100 grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <span className="text-slate-400 block text-[11px]">
-                      {t.approxPriceLabel}
-                    </span>
-                    <span className="font-bold text-slate-900 text-sm">
-                      {p.approxPrice}
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-slate-400 block text-[11px]">
-                      {t.distanceLabel}
-                    </span>
-                    <span className="font-semibold text-slate-700">
-                      {p.distance}
-                    </span>
-                  </div>
-
-                  <div className="col-span-2 flex items-center gap-1.5 text-emerald-700 font-medium text-xs pt-0.5">
-                    <Clock className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>{p.responseTime}</span>
-                  </div>
-                </div>
-
-                <div className="pt-2.5 grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setActiveModal({
-                        type: 'call',
-                        title: p.name,
-                        phone: p.phone,
-                        whatsapp: p.whatsapp,
-                      })
-                    }
-                    className="min-h-[44px] px-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs flex items-center justify-center gap-1.5 shadow-xs active:scale-[0.98] transition-all"
-                  >
-                    <Phone className="w-3.5 h-3.5" />
-                    <span>{t.contactButton}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setActiveModal({
-                        type: 'quote',
-                        title: p.name,
-                        phone: p.phone,
-                        whatsapp: p.whatsapp,
-                      })
-                    }
-                    className="min-h-[44px] px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs flex items-center justify-center gap-1.5 border border-slate-200 active:scale-[0.98] transition-all"
-                  >
-                    <MessageCircle className="w-3.5 h-3.5 text-slate-600" />
-                    <span>{t.requestQuoteButton}</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-        )}
       </div>
 
       {/* Bottom Action: New Request */}
@@ -1115,7 +992,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
               </div>
               {/* Demo numbers are not shown: they are placeholders and may belong to real people */}
               <div className="text-slate-600">
-                {language === 'kz' ? 'Демо нөмір көрсетілмейді' : language === 'tr' ? 'Demo numara gösterilmez' : 'Демо-номер не показывается'}
+                {language === 'kz' ? 'Демо нөмір көрсетілмейді' : 'Демо-номер не показывается'}
               </div>
             </div>
 

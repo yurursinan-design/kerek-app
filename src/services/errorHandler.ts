@@ -52,57 +52,48 @@ export function logTechnicalError(context: string, error: unknown): void {
   console.warn(`[KEREK CentralErrorHandler] [${context}]:`, error);
 }
 
-type Msg = { kz: string; ru: string; tr: string };
+type Msg = { kz: string; ru: string };
 
 function pick(msg: Msg, lang: Language): string {
-  return lang === 'kz' ? msg.kz : lang === 'tr' ? msg.tr : msg.ru;
+  return lang === 'kz' ? msg.kz : msg.ru;
 }
 
 const MESSAGES = {
   invalid: {
     kz: 'Өтініш деректері қате толтырылған. Тексеріп, қайта көріңіз.',
     ru: 'Данные заполнены некорректно. Пожалуйста, проверьте поля.',
-    tr: 'Bilgiler hatalı doldurulmuş. Lütfen kontrol edip tekrar deneyin.',
   },
   duplicate: {
     kz: 'Сіз жақында осыған ұқсас сұраныс жібердіңіз.',
     ru: 'Вы недавно уже отправляли похожую заявку.',
-    tr: 'Kısa süre önce benzer bir talep gönderdiniz.',
   },
   rate: {
     kz: 'Тым жиі басылды. Бірнеше секундтан кейін қайталаңыз.',
     ru: 'Слишком частые действия. Подождите пару секунд.',
-    tr: 'Çok sık denendi. Birkaç saniye sonra tekrar deneyin.',
   },
   alreadyAccepted: {
     kz: 'Бұл өтінішке орындаушы таңдалып қойған.',
     ru: 'Для этой заявки исполнитель уже выбран.',
-    tr: 'Bu talep için usta zaten seçildi.',
   },
   offerClosed: {
     kz: 'Бұл ұсыныс енді белсенді емес.',
     ru: 'Это предложение больше не активно.',
-    tr: 'Bu teklif artık geçerli değil.',
   },
   notFound: {
     kz: 'Деректер табылмады. Бетті жаңартып, қайта көріңіз.',
     ru: 'Данные не найдены. Обновите страницу и попробуйте снова.',
-    tr: 'Kayıt bulunamadı. Sayfayı yenileyip tekrar deneyin.',
   },
   denied: {
     kz: 'Бұл әрекетке рұқсат жоқ. Өзгеріс сақталмады. Бетті жаңартып, қайта көріңіз.',
     ru: 'Нет доступа для этого действия. Изменение не сохранено. Обновите страницу и попробуйте снова.',
-    tr: 'Bu işlem için izin yok. Değişiklik kaydedilmedi. Sayfayı yenileyip tekrar deneyin.',
   },
   offline: {
     kz: 'Интернет байланысы жоқ сияқты. Байланысты тексеріп, қайталаңыз.',
     ru: 'Похоже, нет подключения к интернету. Проверьте связь и повторите.',
-    tr: 'İnternet bağlantısı yok gibi görünüyor. Bağlantınızı kontrol edip tekrar deneyin.',
   },
   generic: {
     kz: 'Күтпеген қате орын алды. Қайта көріңіз немесе кейінірек қайталаңыз.',
     ru: 'Произошла ошибка при обработке запроса. Пожалуйста, попробуйте снова.',
-    tr: 'Beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.',
   },
 } satisfies Record<string, Msg>;
 
