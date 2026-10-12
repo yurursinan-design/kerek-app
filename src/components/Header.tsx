@@ -189,17 +189,6 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 RU
               </button>
-              <button
-                type="button"
-                onClick={() => onLanguageChange('tr')}
-                className={`min-h-[36px] px-2.5 text-xs font-semibold rounded-md transition-all ${
-                  language === 'tr'
-                    ? 'bg-white text-sky-700 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                TR
-              </button>
             </div>
 
             {/* SMS login: "log in" when not verified, otherwise the masked number with a log-out option */}

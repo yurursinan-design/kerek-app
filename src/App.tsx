@@ -58,7 +58,8 @@ export default function App() {
   const [language, setLanguage] = useState<Language>(() => {
     try {
       const saved = localStorage.getItem(LANGUAGE_KEY);
-      if (saved === 'kz' || saved === 'ru' || saved === 'tr') return saved;
+      // Kazakh and Russian only (Turkish was removed; a saved Turkish choice falls back to Kazakh)
+      if (saved === 'kz' || saved === 'ru') return saved;
     } catch {}
     return 'kz';
   });
