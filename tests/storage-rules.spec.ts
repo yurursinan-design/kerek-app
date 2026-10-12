@@ -12,7 +12,7 @@ import {
   RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
 import { doc, setDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getBytes } from 'firebase/storage';
+import { ref, uploadBytes, getBytes, deleteObject } from 'firebase/storage';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -109,6 +109,10 @@ async function run() {
   await test('Selected provider from another city reads the photo of their job', () => assertSucceeds(read('sam', 'requests/REQ-S1/photo.jpg')));
   await test("User who isn't a provider can't read request photo", () => assertFails(read('mallory', 'requests/REQ-A1/photo.jpg')));
   await test("Signed-out user can't read request photo", () => assertFails(read(null, 'requests/REQ-A1/photo.jpg')));
+
+  console.log('\n--- Request file deletion (account deletion) ---');
+  await test("Another user can't delete alice's request file", () => assertFails(deleteObject(ref(storageOf('pat'), 'requests/REQ-S1/photo.jpg'))));
+  await test('Owner deletes their own request file, in any request status', () => assertSucceeds(deleteObject(ref(storageOf('alice'), 'requests/REQ-S1/photo.jpg'))));
 
   console.log('\n--- Chat files ---');
   await test('Customer uploads an image to the chat', () => assertSucceeds(put('alice', 'chat/conv_1/m2/a.png', 'image/png')));

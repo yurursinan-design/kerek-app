@@ -19,6 +19,10 @@ interface RequestWizardProps {
 
 type Lang = 'kz' | 'ru';
 const T = {
+  licenseNote: {
+    kz: 'Бұл жұмыс түріне лицензия, рұқсат немесе сертификат қажет болуы мүмкін (мысалы, газ, электр, медициналық күтім, заң қызметі). Келісер алдында маманнан құжаттарын көрсетуді сұраңыз.',
+    ru: 'Для этого вида работ может требоваться лицензия, допуск или сертификат (например, газ, электрика, медицинский уход, юридические услуги). Перед тем как договориться, попросите мастера показать документы.',
+  },
   step: { kz: 'Қадам', ru: 'Шаг' },
   of: { kz: '/', ru: 'из' },
   back: { kz: 'Артқа', ru: 'Назад' },
@@ -431,6 +435,12 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
               <Emoji3D code="2728" size={22} eager />
               <p className="text-xs text-emerald-900 leading-relaxed">{tx(T.freeNote)}</p>
             </div>
+            {group.licensed && (
+              <div className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-amber-50 border border-amber-200">
+                <Emoji3D code="1f4dc" size={22} eager />
+                <p className="text-xs text-amber-900 leading-relaxed">{tx(T.licenseNote)}</p>
+              </div>
+            )}
           </>
         )}
       </div>

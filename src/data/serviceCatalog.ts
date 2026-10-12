@@ -34,7 +34,12 @@ export interface CatalogGroup {
   color: string;
   quick: QuickTag[];
   services: CatalogService[];
+  /** Work that can need a licence, permit or certificate in Kazakhstan: customers see a reminder */
+  licensed?: boolean;
 }
+
+/** Groups whose work can need a licence or certificate (gas, electrical, care, legal/accounting) */
+const LICENSED_GROUPS = ['heating_boiler', 'electrician', 'care', 'business'];
 
 const REPAIR_TAGS: QuickTag[] = [
   { kz: 'Жөндеу', ru: 'Ремонт' },
@@ -490,6 +495,10 @@ export const SERVICE_CATALOG: CatalogGroup[] = [
     ],
   },
 ];
+
+for (const g of SERVICE_CATALOG) {
+  if (LICENSED_GROUPS.includes(g.id)) g.licensed = true;
+}
 
 /** Path of a 3D icon (public/img/3d). */
 export function emojiSrc(code: string): string {

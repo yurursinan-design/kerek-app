@@ -6,6 +6,7 @@ import { isDebugMode } from '../services/debug';
 import { exportLocalData, importLocalData, clearAllKerekLocalStorage, isFirebaseConfigured, resilientRepository, runFirebaseDiagnostics, getLatestDiagnosticReport } from '../services';
 import { NotificationBell } from './NotificationBell';
 import { LegalLinks } from './LegalModal';
+import { SUPPORT_EMAIL, SUPPORT_TELEGRAM } from '../config/support';
 
 interface HeaderProps {
   currentScreen: 'home' | 'interpretation' | 'results';
@@ -276,6 +277,16 @@ export const Header: React.FC<HeaderProps> = ({
                       </div>
                     )}
 
+                    {(SUPPORT_TELEGRAM || SUPPORT_EMAIL) && (
+                      <a
+                        href={SUPPORT_TELEGRAM ? `https://t.me/${SUPPORT_TELEGRAM}` : `mailto:${SUPPORT_EMAIL}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block w-full min-h-[44px] rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 text-center leading-[44px]"
+                      >
+                        {language === 'kz' ? 'Көмек және қолдау' : 'Помощь и поддержка'}
+                      </a>
+                    )}
                     <LegalLinks language={language} className="block text-[10px] text-slate-500 text-center leading-relaxed pt-1" />
                   </div>
                 )}

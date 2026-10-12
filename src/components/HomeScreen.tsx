@@ -630,6 +630,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </>
             )}
           </button>
+          <p className="px-1 text-[11px] text-slate-500 leading-relaxed">
+            {language === 'kz'
+              ? 'Мәтініңізді түсіну үшін оны жасанды интеллект (Google Gemini) өңдейді. Телефон нөмірін, мекенжайды немесе басқа жеке деректерді жазбаңыз.'
+              : 'Чтобы понять ваш текст, его обрабатывает искусственный интеллект (Google Gemini). Не пишите сюда телефон, точный адрес и другие личные данные.'}
+          </p>
         </form>
 
           {/* Phone number privacy */}

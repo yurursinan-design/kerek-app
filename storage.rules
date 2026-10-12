@@ -93,7 +93,9 @@ service firebase.storage {
                         || (request.resource.contentType.matches('video/(mp4|webm|quicktime)') && request.resource.size <= 50 * 1024 * 1024)
                         || (request.resource.contentType.matches('audio/(mpeg|mp4|wav|webm|ogg|x-m4a|aac)(;.*)?') && request.resource.size <= 20 * 1024 * 1024));
 
-      allow update, delete: if false;
+      // Account deletion: the customer removes their own request files
+      allow delete: if isRequestOwner(requestId);
+      allow update: if false;
     }
 
     // Deny all other storage access by default

@@ -23,6 +23,7 @@ import {
   query,
   where,
   writeBatch,
+  deleteField,
 } from 'firebase/firestore';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -1732,6 +1733,59 @@ async function runTestSuite() {
       await assertFails(setDoc(doc(custA(), 'reviews', 'req_r'), { ...review, providerName: 'x'.repeat(101) }));
       await assertFails(setDoc(doc(custA(), 'reviews', 'req_r'), { ...review, verifiedPurchase: true }));
       await assertSucceeds(setDoc(doc(custA(), 'reviews', 'req_r'), { ...review, comment: 'Жақсы' }));
+    });
+
+    // ---------------- 17. Reports ----------------
+    await test('Reports: a verified user files one report per target; only operators can read them', async () => {
+      const db = phoneUser('rep_a').firestore();
+      const id = 'REPORT-rep_a-provider-prov_x';
+      const base = { id, reporterId: 'rep_a', targetType: 'provider', targetId: 'prov_x', reason: 'fraud', createdAt: new Date().toISOString() };
+      // Anonymous accounts cannot report
+      await assertFails(setDoc(doc(anonymousUser('rep_a').firestore(), 'reports', id), base));
+      // Id must be bound to reporter and target, reporter must be the caller, reason from the list
+      await assertFails(setDoc(doc(db, 'reports', 'REPORT-rep_a-provider-other'), base));
+      await assertFails(setDoc(doc(db, 'reports', id), { ...base, reporterId: 'someone' }));
+      await assertFails(setDoc(doc(db, 'reports', id), { ...base, reason: 'whatever' }));
+      await assertFails(setDoc(doc(db, 'reports', id), { ...base, details: 'x'.repeat(1001) }));
+      await assertFails(setDoc(doc(db, 'reports', id), { ...base, status: 'RESOLVED' }));
+      // Checking for an existing report before writing is allowed
+      await assertSucceeds(getDoc(doc(db, 'reports', id)));
+      await assertSucceeds(setDoc(doc(db, 'reports', id), { ...base, details: 'Алдады' }));
+      // Write-once
+      await assertFails(setDoc(doc(db, 'reports', id), { ...base, reason: 'spam' }));
+      await assertFails(deleteDoc(doc(db, 'reports', id)));
+      // Others cannot read it or list reports; an operator can
+      await assertFails(getDoc(doc(phoneUser('prov_x').firestore(), 'reports', id)));
+      await assertFails(getDocs(collection(phoneUser('rep_a').firestore(), 'reports')));
+      const admin = testEnv.authenticatedContext('op_1', { admin: true, phone_number: '+77000000001' }).firestore();
+      await assertSucceeds(getDocs(collection(admin, 'reports')));
+    });
+
+    // ---------------- 18. Account deletion clean-up ----------------
+    await test('Account deletion: customer strips personal data from own request in any status; others cannot', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        await setDoc(doc(db, 'requests', 'req_del'), {
+          id: 'req_del', customerId: 'cust_d', customerName: 'Айгүл', requestText: 'Кран ағады', description: 'd', city: 'Алматы', cityId: 'almaty',
+          category: 'x', service: 'x', status: 'COMPLETED', selectedOfferId: 'OFFER-req_del-prov_d', attachments: [], location: { latitude: 43, longitude: 76 },
+        });
+        await setDoc(doc(db, 'offers', 'OFFER-req_del-prov_d'), {
+          id: 'OFFER-req_del-prov_d', requestId: 'req_del', providerId: 'prov_d', providerUserId: 'prov_d', providerName: 'D', price: '1',
+          providerPhone: '+77011112233', providerWhatsapp: '+77011112233', status: 'ACCEPTED',
+        });
+      });
+      const strip = { customerName: deleteField(), requestText: deleteField(), description: deleteField(), attachments: deleteField(), location: deleteField(), updatedAt: new Date().toISOString() };
+      await assertFails(updateDoc(doc(phoneUser('prov_d').firestore(), 'requests', 'req_del'), strip));
+      // Not a way to rewrite the request: values may only be removed, and status stays
+      await assertFails(updateDoc(doc(phoneUser('cust_d').firestore(), 'requests', 'req_del'), { requestText: 'new text' }));
+      await assertFails(updateDoc(doc(phoneUser('cust_d').firestore(), 'requests', 'req_del'), { ...strip, status: 'OPEN' }));
+      await assertSucceeds(updateDoc(doc(phoneUser('cust_d').firestore(), 'requests', 'req_del'), strip));
+
+      // Provider removes phone numbers from their own accepted offer, nothing else
+      await assertFails(updateDoc(doc(phoneUser('cust_d').firestore(), 'offers', 'OFFER-req_del-prov_d'), { providerPhone: deleteField() }));
+      await assertFails(updateDoc(doc(phoneUser('prov_d').firestore(), 'offers', 'OFFER-req_del-prov_d'), { providerPhone: '+77000000000' }));
+      await assertFails(updateDoc(doc(phoneUser('prov_d').firestore(), 'offers', 'OFFER-req_del-prov_d'), { providerPhone: deleteField(), price: '999' }));
+      await assertSucceeds(updateDoc(doc(phoneUser('prov_d').firestore(), 'offers', 'OFFER-req_del-prov_d'), { providerPhone: deleteField(), providerWhatsapp: deleteField() }));
     });
 
   } finally {

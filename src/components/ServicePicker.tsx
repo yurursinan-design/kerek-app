@@ -84,6 +84,13 @@ export const ServicePicker: React.FC<ServicePickerProps> = ({ language, selected
               </button>
               {isOpen && (
                 <div className="pb-2 px-2">
+                  {group.licensed && (
+                    <p className="mx-1 mb-1 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
+                      {lang === 'kz'
+                        ? 'Бұл жұмыстарға лицензия, рұқсат немесе сертификат қажет болуы мүмкін. Тек құқығыңыз болса таңдаңыз; тапсырыс беруші құжаттарды сұрауы мүмкін.'
+                        : 'Для этих работ может требоваться лицензия, допуск или сертификат. Выбирайте, только если они у вас есть; заказчик может попросить документы.'}
+                    </p>
+                  )}
                   {services.map((s) => {
                     const on = selected.includes(s.id);
                     return (

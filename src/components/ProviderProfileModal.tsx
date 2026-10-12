@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ReportButton } from './ReportButton';
 import { Language, Provider, Review } from '../types';
 import { translations } from '../i18n/translations';
 import { formatShortDate } from '../services/dateFormat';
@@ -393,6 +394,9 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
 
         {/* Footer */}
         <div className="p-4 pt-2 border-t border-slate-100 bg-white">
+          <div className="flex justify-center">
+            <ReportButton language={language} targetType="provider" targetId={provider.userId || provider.id} />
+          </div>
           <button
             type="button"
             onClick={onClose}

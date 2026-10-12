@@ -303,7 +303,16 @@ service cloud.firestore {
          incoming().status == 'COMPLETED' &&
          ('selectedOfferId' in existing()) && existing().selectedOfferId is string &&
          ('selectedOfferId' in incoming()) && incoming().selectedOfferId == existing().selectedOfferId &&
-         changed.hasOnly(['status', 'updatedAt']))
+         changed.hasOnly(['status', 'updatedAt'])) ||
+        // 7. Account deletion: the customer removes their name, text, photos and location from
+        //    their own request in any status (the job record itself stays, without personal data)
+        (existing().customerId == request.auth.uid &&
+         incoming().customerId == existing().customerId &&
+         incoming().status == existing().status &&
+         changed.hasOnly(['customerName', 'requestText', 'description', 'attachments', 'location', 'understanding', 'updatedAt']) &&
+         changed.hasAny(['customerName', 'requestText', 'description', 'attachments', 'location', 'understanding']) &&
+         !('customerName' in incoming()) && !('requestText' in incoming()) && !('description' in incoming()) &&
+         !('attachments' in incoming()) && !('location' in incoming()) && !('understanding' in incoming()))
         );
       }
 
@@ -403,6 +412,12 @@ service cloud.firestore {
           ]) &&
           incoming().price is string && incoming().price.size() <= 50 &&
           offerFieldLimits(incoming())
+        ) ||
+        // Account deletion: the provider removes their phone numbers from their offers in any status
+        (
+          existing().providerUserId == request.auth.uid &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['providerPhone', 'providerWhatsapp', 'updatedAt']) &&
+          !('providerPhone' in incoming()) && !('providerWhatsapp' in incoming())
         ) ||
         // Customer rejecting an offer, or accepting the one the request selects in the same write
         // (so only one offer per request can ever be ACCEPTED)
@@ -682,6 +697,31 @@ service cloud.firestore {
 
       // The recipient can clear their own notifications
       allow delete: if isSignedIn() && isValidId(notificationId) && resource.data.recipientUserId == request.auth.uid;
+    }
+
+    // =================== Reports Collection ===================
+    // "Report" button: a phone-verified user flags a provider, offer, request or chat. One report per
+    // user and target (the id is bound to both), write-once; only operators (admin claim) read them.
+    match /reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId) && (
+        (resource == null && reportId.matches('REPORT-' + request.auth.uid + '-.+')) ||
+        (resource != null && resource.data.reporterId == request.auth.uid) ||
+        request.auth.token.admin == true
+      );
+      allow list: if isSignedIn() && request.auth.token.admin == true;
+      allow create: if hasVerifiedPhone()
+                    && isValidId(reportId)
+                    && incoming().keys().hasOnly(['id', 'reporterId', 'targetType', 'targetId', 'requestId', 'reason', 'details', 'createdAt'])
+                    && incoming().id == reportId
+                    && incoming().reporterId == request.auth.uid
+                    && incoming().targetType in ['provider', 'offer', 'request', 'conversation']
+                    && incoming().targetId is string && isValidId(incoming().targetId)
+                    && reportId == 'REPORT-' + request.auth.uid + '-' + incoming().targetType + '-' + incoming().targetId
+                    && incoming().reason in ['fraud', 'spam', 'rude', 'fake', 'no_show', 'other']
+                    && (!('requestId' in incoming()) || isValidId(incoming().requestId))
+                    && strMax(incoming(), 'details', 1000)
+                    && incoming().createdAt is string && incoming().createdAt.size() >= 10 && incoming().createdAt.size() <= 40;
+      allow update, delete: if false;
     }
 
     // =================== Appointments Collection ===================

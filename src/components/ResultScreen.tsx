@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { ReportButton } from './ReportButton';
 import {
   DemoProvider,
   ExtractedNeed,
@@ -560,6 +561,16 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 ? 'Ұсыныстар келгенде осы жерде пайда болады және қоңырауша арқылы хабарлаймыз.'
                 : 'Предложения появятся здесь, а колокольчик вверху сообщит о новых.'}
             </p>
+            {/* Honest expectations: KEREK is new, so a city may have few providers yet */}
+            <p className="mt-3 text-[12px] text-slate-500 leading-relaxed max-w-xs mx-auto bg-white/70 rounded-2xl border border-slate-100 p-3">
+              {Date.now() - new Date(request.createdAt || Date.now()).getTime() > 24 * 3600 * 1000
+                ? language === 'kz'
+                  ? 'Әзірге ұсыныс жоқ. KEREK жаңа қызмет, сіздің қалаңызда шеберлер әлі аз болуы мүмкін. Өтінішті ашық қалдыра аласыз немесе басқа жолмен маман іздеңіз.'
+                  : 'Пока нет предложений. KEREK — новый сервис, в вашем городе мастеров может быть ещё мало. Можно оставить заявку открытой или поискать мастера другим способом.'
+                : language === 'kz'
+                  ? 'KEREK жаңа қызмет: шеберлер әлі қосылып жатыр, сондықтан жауап бірнеше сағатқа созылуы мүмкін. Хабарландырулар қосымша ашық тұрғанда келеді — кейінірек қайта кіріп тексеріңіз.'
+                  : 'KEREK — новый сервис: мастера ещё подключаются, поэтому ответ может занять несколько часов. Уведомления приходят, пока приложение открыто, — загляните позже.'}
+            </p>
           </div>
         )}
 
@@ -948,6 +959,9 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                           </button>
                         </div>
                       )}
+                    </div>
+                    <div className="flex justify-end -mb-2">
+                      <ReportButton language={language} targetType="offer" targetId={offer.id} requestId={offer.requestId} />
                     </div>
                   </div>
                 );

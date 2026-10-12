@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ReportButton } from './ReportButton';
 import {
   ChatAttachment,
   ChatMessage,
@@ -417,6 +418,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             </div>
           </div>
         </div>
+        {conversation?.id && <ReportButton language={language} targetType="conversation" targetId={conversation.id} requestId={requestId} />}
       </header>
 
       {/* Error Banner */}

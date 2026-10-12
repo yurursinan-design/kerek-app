@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ReportButton } from './ReportButton';
 import {
   formatDynamicBudget,
   formatDynamicDate,
@@ -1356,6 +1357,9 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                 {getRequestDescription(selectedRequestForOffer) && (
                   <span className="line-clamp-1 mt-0.5 block">{getRequestDescription(selectedRequestForOffer)}</span>
                 )}
+              </div>
+              <div className="flex justify-end -my-2">
+                <ReportButton language={language} targetType="request" targetId={selectedRequestForOffer.id} requestId={selectedRequestForOffer.id} />
               </div>
 
               {/* Price Type Selector */}

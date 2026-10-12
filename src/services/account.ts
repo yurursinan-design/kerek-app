@@ -1,6 +1,7 @@
 import { deleteUser } from 'firebase/auth';
-import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
-import { auth, db, isFirebaseConfigured } from './firebase';
+import { collection, deleteDoc, deleteField, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
+import { deleteObject, ref as storageRef } from 'firebase/storage';
+import { auth, db, isFirebaseConfigured, storage } from './firebase';
 import { LEGAL_VERSION } from '../data/legalTexts';
 import { clearPersonalLocalData } from './storage';
 
@@ -37,9 +38,11 @@ export async function recordLegalConsent(): Promise<void> {
 }
 
 /**
- * Deletes the signed-in account: closes open requests, removes their private contact details,
- * the provider profile, the user record and finally the sign-in account itself. Completed jobs,
- * messages and reviews stay without a linked account (see the privacy policy).
+ * Deletes the signed-in account: closes open requests and strips their personal data (contact
+ * details, name, text, files, location), removes phone numbers from sent offers, the account's
+ * notifications, the provider profile, the user record and finally the sign-in account itself.
+ * The bare job records, chat messages and reviews stay without a linked account (see the privacy
+ * policy).
  */
 export async function deleteMyAccount(): Promise<void> {
   const user = auth?.currentUser;
@@ -66,11 +69,32 @@ export async function deleteMyAccount(): Promise<void> {
 
   const requests = await getDocs(query(collection(firestore, 'requests'), where('customerId', '==', uid)));
   for (const snap of requests.docs) {
-    const status = snap.data().status;
-    if (ACTIVE_REQUEST_STATUSES.includes(status)) {
+    const data = snap.data();
+    if (ACTIVE_REQUEST_STATUSES.includes(data.status)) {
       await updateDoc(snap.ref, { status: 'CANCELLED', updatedAt: now });
     }
     await deleteDoc(doc(firestore, 'requestContacts', snap.id));
+    // Photos, videos and voice notes go, then the name, text and location in the request itself
+    await deleteRequestFiles(snap.id, Array.isArray(data.attachments) ? data.attachments.length : 0);
+    const personal = ['customerName', 'requestText', 'description', 'attachments', 'location', 'understanding'].filter((k) => k in data);
+    if (personal.length) {
+      await updateDoc(snap.ref, { ...Object.fromEntries(personal.map((k) => [k, deleteField()])), updatedAt: now });
+    }
+  }
+
+  // Phone numbers in the offers this account sent as a provider
+  const offers = await getDocs(query(collection(firestore, 'offers'), where('providerUserId', '==', uid)));
+  for (const snap of offers.docs) {
+    const data = snap.data();
+    if ('providerPhone' in data || 'providerWhatsapp' in data) {
+      await updateDoc(snap.ref, { providerPhone: deleteField(), providerWhatsapp: deleteField(), updatedAt: now });
+    }
+  }
+
+  // The account's own notifications
+  const notifications = await getDocs(query(collection(firestore, 'notifications'), where('recipientUserId', '==', uid)));
+  for (const snap of notifications.docs) {
+    await deleteDoc(snap.ref);
   }
 
   await deleteIfExists(doc(firestore, 'providers', uid));
@@ -84,6 +108,18 @@ export async function deleteMyAccount(): Promise<void> {
   }
   // The device copy of the account's data goes too
   clearPersonalLocalData();
+}
+
+/** Request files live in fixed slots att0 … att14 (a failed upload can leave gaps); missing slots are skipped. */
+async function deleteRequestFiles(requestId: string, count: number): Promise<void> {
+  if (!storage || count <= 0) return;
+  for (let i = 0; i < 15; i++) {
+    try {
+      await deleteObject(storageRef(storage, `requests/${requestId}/att${i}`));
+    } catch {
+      // already gone, or an older file name: nothing to delete here
+    }
+  }
 }
 
 async function deleteIfExists(ref: ReturnType<typeof doc>): Promise<void> {
