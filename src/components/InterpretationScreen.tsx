@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ExtractedNeed, Language, Urgency, PendingAttachment, RequestLocation } from '../types';
 import { translations } from '../i18n/translations';
-import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
+import { ALL_CITIES_LIST } from '../services/analyzer';
+import { SERVICE_CATALOG, getGroup, groupName } from '../data/serviceCatalog';
 import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { RequestMediaView } from './RequestMediaView';
 import {
@@ -23,6 +24,7 @@ import {
   HelpCircle,
   Send,
   Check,
+  Loader2,
 } from 'lucide-react';
 import { CategoryIcon, Emoji3D } from './CategoryIcon';
 import { requestVisual } from './RequestIcon';
@@ -32,6 +34,8 @@ interface InterpretationScreenProps {
   language: Language;
   onContinue: (updatedNeed: ExtractedNeed) => void;
   onBack: () => void;
+  /** The request is being sent: buttons wait */
+  isSubmitting?: boolean;
 }
 
 export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
@@ -39,6 +43,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
   language,
   onContinue,
   onBack,
+  isSubmitting = false,
 }) => {
   const t = translations[language];
 
@@ -58,7 +63,11 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
   // Editable form state
   const [city, setCity] = useState(initialNeed.city || '');
-  const [category, setCategory] = useState(initialNeed.category || '');
+  // Shown with the catalogue's name for the group, so the list below has it selected
+  const [category, setCategory] = useState(() => {
+    const g = getGroup(normalizeCategoryId(initialNeed.categoryId || initialNeed.category || ''));
+    return g ? groupName(g, language) : initialNeed.category || '';
+  });
   const visual = requestVisual({ serviceId: initialNeed.serviceId, categoryId: initialNeed.categoryId, category: category || initialNeed.category });
   const [service, setService] = useState(initialNeed.service);
   const [date, setDate] = useState(initialNeed.date);
@@ -461,10 +470,12 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <button
                   type="button"
                   onClick={handleProceed}
-                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/25 active:scale-[0.99] transition-all"
+                  disabled={isSubmitting}
+                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/25 active:scale-[0.99] transition-all"
                 >
+                  {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                   <span>{t.aiConfirmBtn}</span>
-                  <ArrowRight className="w-5 h-5 stroke-[2.5]" />
+                  {!isSubmitting && <ArrowRight className="w-5 h-5 stroke-[2.5]" />}
                 </button>
 
                 {/* Secondary: Edit / Customize manually */}
@@ -623,10 +634,10 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                     <option value="">
                       {language === 'kz' ? '-- Санатты таңдаңыз --' : language === 'tr' ? '-- Kategori seçiniz --' : '-- Выберите категорию --'}
                     </option>
-                    {CATEGORIES_LIST.map((cat) => {
-                      const catName = language === 'tr' ? (cat.tr || cat.ru) : language === 'kz' ? cat.kz : cat.ru;
+                    {SERVICE_CATALOG.map((g) => {
+                      const catName = groupName(g, language);
                       return (
-                        <option key={cat.id} value={catName}>
+                        <option key={g.id} value={catName}>
                           {catName}
                         </option>
                       );
@@ -770,8 +781,10 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
               <div className="pt-2 space-y-2">
                 <button
                   type="submit"
-                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all"
+                  disabled={isSubmitting}
+                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all"
                 >
+                  {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                   <span>{t.continueButton}</span>
                   <ArrowRight className="w-5 h-5 stroke-[2.5]" />
                 </button>

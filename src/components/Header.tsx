@@ -112,7 +112,7 @@ export const Header: React.FC<HeaderProps> = ({
             {currentScreen !== 'home' ? (
               <button
                 onClick={onBack}
-                aria-label="Назад"
+                aria-label={language === 'kz' ? 'Артқа' : 'Назад'}
                 className="min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center text-slate-700 hover:text-slate-900 active:scale-95 transition-transform"
               >
                 <ArrowLeft className="w-5 h-5" />
@@ -170,7 +170,8 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => onLanguageChange('kz')}
-                className={`min-h-[36px] px-2.5 text-xs font-semibold rounded-md transition-all ${
+                aria-pressed={language === 'kz'}
+                className={`min-h-[40px] px-3 text-xs font-semibold rounded-md transition-all ${
                   language === 'kz'
                     ? 'bg-white text-sky-700 shadow-xs'
                     : 'text-slate-500 hover:text-slate-800'
@@ -181,7 +182,8 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 type="button"
                 onClick={() => onLanguageChange('ru')}
-                className={`min-h-[36px] px-2.5 text-xs font-semibold rounded-md transition-all ${
+                aria-pressed={language === 'ru'}
+                className={`min-h-[40px] px-3 text-xs font-semibold rounded-md transition-all ${
                   language === 'ru'
                     ? 'bg-white text-sky-700 shadow-xs'
                     : 'text-slate-500 hover:text-slate-800'

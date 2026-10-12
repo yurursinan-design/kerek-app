@@ -98,7 +98,6 @@ export default function App() {
   const [customerRequests, setCustomerRequests] = useState<ServiceRequest[]>([]);
   // False until the customer's requests were loaded once (so "no requests yet" isn't shown while loading)
   const [customerRequestsLoaded, setCustomerRequestsLoaded] = useState(false);
-  const [hasProviderProfile, setHasProviderProfile] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
 
   // SMS login: who is signed in, and the dialog that asks for a verified phone before publishing
@@ -165,10 +164,18 @@ export default function App() {
   const modeNotifications = notifications.filter((n) => (n.recipientRole || 'customer') === (appMode || 'customer'));
   const unreadCount = modeNotifications.filter((n) => !n.isRead).length;
 
+  // Latest language and click handler for the listener, so a language switch doesn't restart it
+  const languageRef = useRef(language);
+  languageRef.current = language;
+  const notificationClickRef = useRef<(n: AppNotification) => void>(() => {});
+
   // Realtime Notifications Listener (Single active subscription for the current authenticated user)
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
     let isMounted = true;
+    // A different account (login, logout): its existing notifications are history, not new alerts
+    isInitialNotifFetchRef.current = true;
+    seenNotifIdsRef.current = new Set();
 
     const setupNotifSubscription = () => {
       const uid = getCurrentUserId();
@@ -191,9 +198,9 @@ export default function App() {
               setActiveToastNotification(latest);
               playNotificationSound();
               showBrowserNotificationIfGranted(
-                localizedText(latest.title, language),
-                localizedText(latest.body, language),
-                () => handleNotificationClick(latest)
+                localizedText(latest.title, languageRef.current),
+                localizedText(latest.body, languageRef.current),
+                () => notificationClickRef.current(latest)
               );
             }
           } else if (isInitialNotifFetchRef.current) {
@@ -224,19 +231,18 @@ export default function App() {
         } catch {}
       }
     };
-  }, [language, authUid]);
+  }, [authUid]);
 
   // Security rule: Customer only sees their own requests!
   const refreshData = useCallback(async () => {
     try {
       const currentUserId = getCurrentUserId();
       const myRequests = await repository.getRequests({ customerId: currentUserId });
-      setCustomerRequests(myRequests);
+      // Newest first
+      setCustomerRequests(
+        [...myRequests].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+      );
       setCustomerRequestsLoaded(true);
-
-      const allProviders = await repository.getProviders();
-      const customProv = allProviders.some((p) => !p.isDemo);
-      setHasProviderProfile(customProv);
     } catch (err) {
       setCustomerRequestsLoaded(true);
       setAppError(getFriendlyErrorMessage(err, language));
@@ -323,6 +329,9 @@ export default function App() {
   };
 
   // Continue from interpretation: creates request in repository with customerId
+  const submittingRequestRef = useRef(false);
+  const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
+
   const handleContinue = async (updatedNeed: ExtractedNeed) => {
     setExtractedNeed(updatedNeed);
     setAppError(null);
@@ -337,6 +346,10 @@ export default function App() {
     if (!checkClientRateLimit(`create_request_${currentUserId}`, 1000)) {
       return;
     }
+    // A second tap while the first request is still being sent (slow network) must not create a copy
+    if (submittingRequestRef.current) return;
+    submittingRequestRef.current = true;
+    setIsSubmittingRequest(true);
 
     try {
       const rawText = (updatedNeed.originalQuery || updatedNeed.service || '').trim();
@@ -423,6 +436,9 @@ export default function App() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       setAppError(getFriendlyErrorMessage(err, language));
+    } finally {
+      submittingRequestRef.current = false;
+      setIsSubmittingRequest(false);
     }
   };
 
@@ -662,6 +678,8 @@ export default function App() {
     }
   };
 
+  notificationClickRef.current = handleNotificationClick;
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-start sm:py-4">
       {/* Mobile Shell Container */}
@@ -750,19 +768,27 @@ export default function App() {
               ⚠️{' '}
               {language === 'kz'
                 ? 'Кейбір өзгерістер жіберілмеді. Қайталап көріңіз.'
-                : language === 'tr'
-                ? 'Bazı değişiklikler gönderilemedi. Tekrar deneyin.'
                 : 'Некоторые изменения не отправлены. Повторите попытку.'}
             </span>
-            <button
-              type="button"
-              onClick={() => {
-                offlineQueueService.processQueue().catch(() => {});
-              }}
-              className="ml-2 px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-medium text-[11px] transition-colors"
-            >
-              {language === 'kz' ? 'Қайта көру' : language === 'tr' ? 'Tekrar dene' : 'Повторить'}
-            </button>
+            <span className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  offlineQueueService.retryFailed().catch(() => {});
+                }}
+                className="ml-2 min-h-[36px] px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-semibold text-[12px] transition-colors"
+              >
+                {language === 'kz' ? 'Қайталау' : 'Повторить'}
+              </button>
+              <button
+                type="button"
+                onClick={() => offlineQueueService.dismissFailed()}
+                aria-label={language === 'kz' ? 'Жабу' : 'Закрыть'}
+                className="min-w-[36px] min-h-[36px] flex items-center justify-center text-rose-500 hover:text-rose-700 font-bold"
+              >
+                ✕
+              </button>
+            </span>
           </div>
         )}
 
@@ -808,6 +834,7 @@ export default function App() {
                   isAnalyzing={isAnalyzing}
                   onOpenProviderMode={() => handleTabChange('provider-mode')}
                   onServiceRequest={(need) => handleContinue(need)}
+                  isSubmitting={isSubmittingRequest}
                 />
               )}
 
@@ -817,6 +844,7 @@ export default function App() {
                   language={language}
                   onContinue={handleContinue}
                   onBack={handleBack}
+                  isSubmitting={isSubmittingRequest}
                 />
               )}
 

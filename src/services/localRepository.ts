@@ -525,6 +525,16 @@ export class LocalRepository implements Repository {
     }
   }
 
+  watchRequestActivity(_requestId: string, onChange: () => void): () => void {
+    // Local mode: another tab of this browser may change the data
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY_REQUESTS || e.key === STORAGE_KEY_OFFERS) onChange();
+    };
+    if (typeof window === 'undefined') return () => {};
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }
+
   subscribeToRequests(
     filter: RequestFilter,
     onData: (requests: ServiceRequest[]) => void,

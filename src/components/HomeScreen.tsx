@@ -36,7 +36,9 @@ interface HomeScreenProps {
   isAnalyzing: boolean;
   onOpenProviderMode: () => void;
   /** A request built step by step from a catalogue service */
-  onServiceRequest: (need: ExtractedNeed) => void;
+  onServiceRequest: (need: ExtractedNeed) => void | Promise<void>;
+  /** The request is being sent */
+  isSubmitting?: boolean;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
@@ -45,6 +47,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   isAnalyzing,
   onOpenProviderMode,
   onServiceRequest,
+  isSubmitting = false,
 }) => {
   const [picked, setPicked] = useState<{ group: CatalogGroup; service: CatalogService } | null>(null);
   const freeTextRef = useRef<HTMLElement>(null);
@@ -383,8 +386,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         group={picked.group}
         service={picked.service}
         onCancel={() => setPicked(null)}
+        submitting={isSubmitting}
+        // The wizard stays open until the request is saved (the app then shows it), so a failed
+        // send can be retried without typing everything again
         onSubmit={(need) => {
-          setPicked(null);
           onServiceRequest(need);
         }}
       />

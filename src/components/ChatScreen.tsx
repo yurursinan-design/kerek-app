@@ -672,7 +672,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               maxLength={2000}
               onChange={(e) => setInputText(e.target.value)}
               placeholder={pendingAttachment ? t.chatSendAttachment : t.chatPlaceholder}
-              className="flex-1 h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white transition-colors disabled:opacity-50"
+              aria-label={t.chatPlaceholder}
+              className="flex-1 h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white transition-colors disabled:opacity-50"
             />
 
             <button

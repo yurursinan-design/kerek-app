@@ -68,10 +68,14 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
 
   const effectiveUserId = currentUserId || auth?.currentUser?.uid || getCurrentUserId();
 
-  // Set default date to today
+  // Default date: today on the phone's own calendar (toISOString would give the UTC date, which
+  // is yesterday in Kazakhstan between midnight and 05:00)
+  const localToday = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    setDateStr(today);
+    setDateStr(localToday);
   }, []);
 
   // Subscribe to appointment changes
@@ -407,6 +411,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                     <input
                       type="date"
                       required
+                      min={localToday}
                       value={dateStr}
                       onChange={(e) => setDateStr(e.target.value)}
                       className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
@@ -696,6 +701,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   <input
                     type="date"
                     required
+                    min={localToday}
                     value={dateStr}
                     onChange={(e) => setDateStr(e.target.value)}
                     className="w-full px-2 py-1.5 rounded-lg border border-sky-200 text-xs bg-white text-slate-800"

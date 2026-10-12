@@ -14,6 +14,15 @@ import { MapPin, Calendar, Wallet, ChevronRight, Plus } from 'lucide-react';
 import { Emoji3D } from './CategoryIcon';
 import { RequestIcon } from './RequestIcon';
 
+/** Russian noun form after a number: 1 заявка, 2 заявки, 5 заявок */
+function ruPlural(n: number, one: string, few: string, many: string): string {
+  const d10 = n % 10;
+  const d100 = n % 100;
+  if (d10 === 1 && d100 !== 11) return one;
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return few;
+  return many;
+}
+
 interface MyRequestsScreenProps {
   requests: ServiceRequest[];
   /** True until the requests were loaded the first time */
@@ -33,23 +42,31 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
   const t = translations[language];
   const [offersCountMap, setOffersCountMap] = useState<Record<string, number>>({});
 
+  // Offer counts, read in parallel, and only again when the list of requests really changes
+  const requestIdsKey = requests.map((r) => r.id).join(',');
   useEffect(() => {
     let isMounted = true;
     const fetchCounts = async () => {
-      const counts: Record<string, number> = {};
-      for (const req of requests) {
-        const offers = await repository.getOffers({ requestId: req.id });
-        counts[req.id] = offers.length;
-      }
+      const entries = await Promise.all(
+        requests.map(async (req) => {
+          try {
+            const offers = await repository.getOffers({ requestId: req.id });
+            return [req.id, offers.length] as const;
+          } catch {
+            return [req.id, 0] as const;
+          }
+        })
+      );
       if (isMounted) {
-        setOffersCountMap(counts);
+        setOffersCountMap(Object.fromEntries(entries));
       }
     };
     fetchCounts();
     return () => {
       isMounted = false;
     };
-  }, [requests]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestIdsKey]);
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col justify-between space-y-5">
@@ -62,7 +79,7 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
               <h2 className="text-lg font-bold text-slate-900 tracking-tight font-display leading-tight">{t.myRequestsTitle}</h2>
               {requests.length > 0 && (
                 <p className="text-xs text-slate-500">
-                  {requests.length} {language === 'kz' ? 'өтініш' : 'заявок'}
+                  {requests.length} {language === 'kz' ? 'өтініш' : ruPlural(requests.length, 'заявка', 'заявки', 'заявок')}
                 </p>
               )}
             </div>

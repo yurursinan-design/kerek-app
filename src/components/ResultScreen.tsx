@@ -131,6 +131,13 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
     }
   };
 
+  // New offers and status changes appear live while the customer looks at the request
+  const [refreshTick, setRefreshTick] = useState(0);
+  useEffect(() => {
+    if (!initialRequest?.id) return;
+    return repository.watchRequestActivity(initialRequest.id, () => setRefreshTick((n) => n + 1));
+  }, [initialRequest?.id]);
+
   // Fetch request and offers via repository
   useEffect(() => {
     let isMounted = true;
@@ -160,7 +167,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [initialRequest, language]);
+  }, [initialRequest, language, refreshTick]);
 
   // Average rating per provider from real reviews (shown on offer cards)
   const [providerRatings, setProviderRatings] = useState<Record<string, { avg: number; count: number }>>({});

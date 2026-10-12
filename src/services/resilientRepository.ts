@@ -280,6 +280,13 @@ export class ResilientRepository implements Repository {
     return await this.localRepo.getRequests(filter);
   }
 
+  watchRequestActivity(requestId: string, onChange: () => void): () => void {
+    if (isFirebaseConfigured() && this.firebaseRepo.isAvailable()) {
+      return this.firebaseRepo.watchRequestActivity(requestId, onChange);
+    }
+    return this.localRepo.watchRequestActivity(requestId, onChange);
+  }
+
   subscribeToRequests(
     filter: RequestFilter,
     onData: (requests: ServiceRequest[]) => void,
@@ -594,11 +601,7 @@ export class ResilientRepository implements Repository {
     const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     if (this.firebaseRepo.isAvailable()) {
       try {
-        const cloudMsg = await this.firebaseRepo.sendMessage(conversationId, messageData);
-        try {
-          await this.localRepo.sendMessage(conversationId, cloudMsg);
-        } catch {}
-        return cloudMsg;
+        return await this.firebaseRepo.sendMessage(conversationId, messageData);
       } catch (err: any) {
         if (isCloudRejection(err)) {
           throw err;
@@ -642,11 +645,7 @@ export class ResilientRepository implements Repository {
     }
   ): Promise<ChatMessage> {
     if (this.firebaseRepo.isAvailable()) {
-      const cloudMsg = await this.firebaseRepo.sendChatMessageWithAttachment(conversationId, messageData);
-      try {
-        await this.localRepo.sendMessage(conversationId, cloudMsg);
-      } catch {}
-      return cloudMsg;
+      return await this.firebaseRepo.sendChatMessageWithAttachment(conversationId, messageData);
     }
     const localMsg = await this.localRepo.sendChatMessageWithAttachment(conversationId, messageData);
     this.getConversation(conversationId).then((conv) => {
@@ -702,15 +701,13 @@ export class ResilientRepository implements Repository {
 
     // 2. If Firebase is available, attach Cloud Firestore realtime listener
     if (this.firebaseRepo.isAvailable()) {
-      let isPollingActive = false;
-
+      // A listener only fails for good (e.g. no access); then the chat is read once more and,
+      // as a light safety net, every 30 seconds while it stays open.
       const startFallbackPolling = () => {
-        if (isPollingActive || isDisposed) return;
-        isPollingActive = true;
-        // Poll every 2.5s to ensure messages sent from other devices/browsers arrive seamlessly
+        if (fallbackPollInterval || isDisposed) return;
         fallbackPollInterval = setInterval(() => {
           refreshMessages();
-        }, 2500);
+        }, 30000);
       };
 
       try {
@@ -718,10 +715,6 @@ export class ResilientRepository implements Repository {
           cleanId,
           (cloudMsgs) => {
             if (isDisposed) return;
-            // Cache received cloud messages into local store so local store is always fresh
-            (cloudMsgs || []).forEach((m) => {
-              this.localRepo.sendMessage(cleanId, m).catch(() => {});
-            });
             onUpdate(cloudMsgs);
           },
           (err) => {

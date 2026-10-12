@@ -60,6 +60,8 @@ export interface Repository {
     onData: (requests: ServiceRequest[]) => void,
     onError?: (error: any) => void
   ): () => void;
+  /** Calls onChange whenever the request or one of its offers changes (live updates on its screen). */
+  watchRequestActivity(requestId: string, onChange: () => void): () => void;
   updateRequest(requestId: string, updates: Partial<ServiceRequest>): Promise<ServiceRequest | null>;
   updateRequestStatus(
     requestId: string,

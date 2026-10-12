@@ -48,6 +48,7 @@ import {
   UserCheck,
   MessageSquare,
 } from 'lucide-react';
+import { requestWhenLabel } from '../services/dateFormat';
 
 export type ProviderTab = 'new' | 'offers' | 'active';
 
@@ -281,7 +282,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         // requests; a job the provider was chosen for is read on its own). The ref also holds
         // offers sent after this screen opened.
         const offersMap = offersMapRef.current;
-        const offeredReqIds = Object.keys(offersMap);
+        // Declined offers lead nowhere: their requests are not read again on every update
+        const offeredReqIds = Object.keys(offersMap).filter((id) => offersMap[id]?.status !== 'REJECTED');
         const existingReqIds = new Set(matchingRequests.map((r) => r.id));
         const missingReqPromises = offeredReqIds
           .filter((id) => !existingReqIds.has(id))
@@ -407,8 +409,23 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   };
 
   // Submit Offer via repository
+  // One send at a time: a second tap on a slow network waits for the first
+  const [sendingOffer, setSendingOffer] = useState(false);
+  const sendingOfferRef = useRef(false);
   const handleSendOffer = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (sendingOfferRef.current) return;
+    sendingOfferRef.current = true;
+    setSendingOffer(true);
+    try {
+      await sendOffer();
+    } finally {
+      sendingOfferRef.current = false;
+      setSendingOffer(false);
+    }
+  };
+
+  const sendOffer = async () => {
     if (!selectedRequestForOffer || !provider) return;
 
     if (!checkClientRateLimit(`send_offer_${selectedRequestForOffer.id}`, 800)) return;
@@ -970,7 +987,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         </span>
                         <span className="flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5 text-sky-600" />
-                          {formatDynamicDate(req.date, language)}
+                          {requestWhenLabel(req.date, req.createdAt, language) || formatDynamicDate(req.date, language)}
                         </span>
                         {req.budget && (
                           <span className="flex items-center gap-1 font-bold text-sky-700">
@@ -1075,7 +1092,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                           </span>
                           <span className="flex items-center gap-1">
                             <Calendar className="w-3.5 h-3.5 text-sky-600" />
-                            {formatDynamicDate(req.date, language)}
+                            {requestWhenLabel(req.date, req.createdAt, language) || formatDynamicDate(req.date, language)}
                           </span>
                           {req.budget && (
                             <span className="flex items-center gap-1 font-bold text-sky-700">
@@ -1181,7 +1198,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                           </span>
                           <span className="flex items-center gap-1">
                             <Calendar className="w-3.5 h-3.5 text-sky-600" />
-                            {formatDynamicDate(req.date, language)}
+                            {requestWhenLabel(req.date, req.createdAt, language) || formatDynamicDate(req.date, language)}
                           </span>
                           {req.budget && (
                             <span className="flex items-center gap-1 font-bold text-sky-700">
@@ -1442,9 +1459,10 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               {/* Submit */}
               <button
                 type="submit"
-                className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-sky-600/20 transition-all flex items-center justify-center gap-2"
+                disabled={sendingOffer}
+                className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-sky-600/20 transition-all flex items-center justify-center gap-2"
               >
-                <Send className="w-4 h-4" />
+                {sendingOffer ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Send className="w-4 h-4" />}
                 <span>{t.btnSendOffer}</span>
               </button>
             </form>

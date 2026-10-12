@@ -13,6 +13,7 @@ import {
   orderBy,
   limit,
   onSnapshot,
+  increment,
   type Firestore,
 } from 'firebase/firestore';
 import {
@@ -60,7 +61,6 @@ import {
   testFirestoreConnection,
 } from './firebase';
 import { matchProviders } from './matchingService';
-import { INITIAL_DEMO_PROVIDERS } from './storage';
 import { notificationService } from './notificationService';
 import {
   validateOfferData,
@@ -86,7 +86,8 @@ export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Rec
       if (key === 'selectedOfferId' && typeof value === 'string' && !value.trim()) {
         continue;
       }
-      if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+      // Only plain objects are cleaned recursively; Firestore values (increment(), timestamps) pass through
+      if (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
         clean[key] = sanitizeForFirestore(value);
       } else {
         clean[key] = value;
@@ -307,15 +308,6 @@ export class FirebaseRepository implements Repository {
           categoryId: rawProv.categoryId || normalizeCategoryId(rawProv.category),
         };
       }
-      // Check seeded demo providers fallback
-      const demo = INITIAL_DEMO_PROVIDERS.find((p) => p.id === providerId);
-      if (demo) {
-        return {
-          ...demo,
-          cityId: demo.cityId || normalizeCityId(demo.city),
-          categoryId: demo.categoryId || normalizeCategoryId(demo.category),
-        };
-      }
       return null;
     } catch (err: any) {
       const code = err?.code || '';
@@ -325,14 +317,6 @@ export class FirebaseRepository implements Repository {
         msg.includes('permission') ||
         msg.includes('Missing or insufficient permissions')
       ) {
-        const demo = INITIAL_DEMO_PROVIDERS.find((p) => p.id === providerId);
-        if (demo) {
-          return {
-            ...demo,
-            cityId: demo.cityId || normalizeCityId(demo.city),
-            categoryId: demo.categoryId || normalizeCategoryId(demo.category),
-          };
-        }
         return null;
       }
       handleFirestoreError(err, OperationType.GET, `providers/${providerId}`);
@@ -388,21 +372,7 @@ export class FirebaseRepository implements Repository {
       }
     }
 
-    // Merge with demo providers for rich experience, respecting canonical filter
-    let demoList = INITIAL_DEMO_PROVIDERS.map((p) => ({
-      ...p,
-      cityId: normalizeCityId(p.cityId || p.city) || p.cityId,
-      categoryId: normalizeCategoryId(p.categoryId || p.category),
-    }));
-
-    if (targetCityId) {
-      demoList = demoList.filter((p) => (normalizeCityId(p.cityId || p.city) || p.cityId) === targetCityId);
-    }
-    if (targetCatId) {
-      demoList = demoList.filter((p) => isCategoryMatch(p.categoryId, targetCatId));
-    }
-
-    providers.push(...demoList);
+    // Real data only: the made-up demo providers belong to the offline demo mode
     return providers;
   }
 
@@ -1025,6 +995,40 @@ export class FirebaseRepository implements Repository {
       if (onError) onError(err);
       return () => {};
     }
+  }
+
+  watchRequestActivity(requestId: string, onChange: () => void): () => void {
+    if (!db || !requestId) return () => {};
+    const firestore = db;
+    // Several changes often arrive together (offer + request status): report them once
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const changed = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(onChange, 300);
+    };
+    const unsubs: Array<() => void> = [];
+    let first = { offers: true, request: true };
+    const quiet = (err: unknown) => console.warn('[FirebaseRepository] watchRequestActivity note:', (err as any)?.code || err);
+    unsubs.push(
+      onSnapshot(query(collection(firestore, 'offers'), where('requestId', '==', requestId)), () => {
+        if (first.offers) first = { ...first, offers: false };
+        else changed();
+      }, quiet)
+    );
+    unsubs.push(
+      onSnapshot(doc(firestore, 'requests', requestId), () => {
+        if (first.request) first = { ...first, request: false };
+        else changed();
+      }, quiet)
+    );
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubs.forEach((u) => {
+        try {
+          u();
+        } catch {}
+      });
+    };
   }
 
   async updateRequest(
@@ -1967,9 +1971,8 @@ export class FirebaseRepository implements Repository {
           lastMessageSenderId: authUid,
           lastMessageAt: now,
           updatedAt: now,
-          ...(isCustomer
-            ? { unreadCountProvider: (conv.unreadCountProvider || 0) + 1 }
-            : { unreadCountCustomer: (conv.unreadCountCustomer || 0) + 1 }),
+          // Counted on the server, so two quick messages can't overwrite each other's count
+          ...(isCustomer ? { unreadCountProvider: increment(1) } : { unreadCountCustomer: increment(1) }),
         })
       );
 
@@ -2158,7 +2161,8 @@ export class FirebaseRepository implements Repository {
 
     try {
       const msgsCol = collection(db, 'conversations', cleanId, 'messages');
-      const q = query(msgsCol, orderBy('createdAt', 'asc'), limit(50));
+      // The newest 50 messages (a listener on the oldest 50 stopped receiving new ones in long chats)
+      const q = query(msgsCol, orderBy('createdAt', 'desc'), limit(50));
 
       const unsubscribe = onSnapshot(
         q,
@@ -2167,6 +2171,8 @@ export class FirebaseRepository implements Repository {
           snapshot.forEach((d) => {
             msgs.push(d.data() as ChatMessage);
           });
+          // Oldest first on screen
+          msgs.reverse();
           onUpdate(msgs);
         },
         (err) => {
@@ -2296,19 +2302,12 @@ export class FirebaseRepository implements Repository {
       const q = query(notifsCol, where('recipientUserId', '==', cleanUid));
       const snapshot = await getDocs(q);
 
-      const batch = writeBatch(db);
-      let count = 0;
       const now = new Date().toISOString();
-
-      snapshot.forEach((d) => {
-        const data = d.data() as AppNotification;
-        if (!data.isRead) {
-          batch.update(d.ref, { isRead: true, readAt: now });
-          count++;
-        }
-      });
-
-      if (count > 0) {
+      const unread = snapshot.docs.filter((d) => !(d.data() as AppNotification).isRead);
+      // A batch holds at most 500 writes
+      for (let i = 0; i < unread.length; i += 400) {
+        const batch = writeBatch(db);
+        unread.slice(i, i + 400).forEach((d) => batch.update(d.ref, { isRead: true, readAt: now }));
         await batch.commit();
       }
     } catch (error) {
@@ -2438,8 +2437,9 @@ export class FirebaseRepository implements Repository {
         createdAt: existing.createdAt,
         updatedAt: new Date().toISOString(),
       };
-      const cleanData = sanitizeForFirestore(updated);
-      await setDoc(doc(db, 'appointments', docId), cleanData, { merge: true });
+      // Only the changed fields are written, so a change the other side made meanwhile is kept
+      const { id: _i, requestId: _r, customerId: _c, providerId: _p, providerUserId: _u, createdAt: _cr, ...changes } = updates;
+      await updateDoc(doc(db, 'appointments', docId), sanitizeForFirestore({ ...changes, updatedAt: updated.updatedAt }));
       return updated;
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `appointments/${docId}`);

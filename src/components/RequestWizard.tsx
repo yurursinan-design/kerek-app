@@ -13,6 +13,8 @@ interface RequestWizardProps {
   defaultCityId?: string;
   onCancel: () => void;
   onSubmit: (need: ExtractedNeed) => void;
+  /** The request is being sent */
+  submitting?: boolean;
 }
 
 type Lang = 'kz' | 'ru';
@@ -80,7 +82,7 @@ const BUDGET_OPTIONS: { id: string; kz: string; ru: string }[] = [
 const STEPS = 5;
 
 /** Step-by-step request for a chosen service: details → when → city → budget → review. */
-export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, service, defaultCityId, onCancel, onSubmit }) => {
+export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, service, defaultCityId, onCancel, onSubmit, submitting = false }) => {
   const lang: Lang = language === 'kz' ? 'kz' : 'ru';
   const tx = (e: { kz: string; ru: string }) => e[lang];
 
@@ -448,10 +450,11 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
           <button
             type="button"
             onClick={submit}
-            className="press relative overflow-hidden w-full min-h-[54px] rounded-2xl bg-linear-to-r from-emerald-500 to-teal-600 text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25"
+            disabled={submitting}
+            className="press relative overflow-hidden w-full min-h-[54px] rounded-2xl bg-linear-to-r from-emerald-500 to-teal-600 disabled:opacity-80 text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25"
           >
             <span className="absolute inset-0 animate-shimmer" aria-hidden="true" />
-            <Check className="relative w-5 h-5" strokeWidth={3} />
+            {submitting ? <Loader2 className="relative w-5 h-5 animate-spin" /> : <Check className="relative w-5 h-5" strokeWidth={3} />}
             <span className="relative">{tx(T.send)}</span>
           </button>
         )}
