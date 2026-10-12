@@ -12,7 +12,7 @@ import {
   ServiceRequest,
 } from '../types';
 import { translations } from '../i18n/translations';
-import { getRequestTitle } from '../services/requestTitle';
+import { getRequestDescription, getRequestTitle } from '../services/requestTitle';
 import { repository, getCurrentUserId, checkClientRateLimit, getFriendlyErrorMessage, notificationService } from '../services';
 import { isDebugMode } from '../services/debug';
 import { auth } from '../services/firebase';
@@ -29,7 +29,9 @@ import { ProviderOnboarding } from './ProviderOnboarding';
 import { ChatScreen } from './ChatScreen';
 import { AppointmentSection } from './AppointmentSection';
 import { RequestMediaView } from './RequestMediaView';
-import { providerGroupIds } from '../data/serviceCatalog';
+import { getGroup, groupName, providerGroupIds } from '../data/serviceCatalog';
+import { Emoji3D } from './CategoryIcon';
+import { RequestIcon } from './RequestIcon';
 import {
   Briefcase,
   CheckCircle,
@@ -45,8 +47,6 @@ import {
   Star,
   UserCheck,
   MessageSquare,
-  ShieldCheck,
-  Info,
 } from 'lucide-react';
 
 export type ProviderTab = 'new' | 'offers' | 'active';
@@ -801,20 +801,21 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     </div>
                   )}
 
+                {providerGroupIds(provider).length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {providerGroupIds(provider).map((gid) => {
+                      const g = getGroup(normalizeCategoryId(gid));
+                      return (
+                        <span key={gid} className="inline-flex items-center gap-1 h-7 pl-1 pr-2.5 rounded-full bg-slate-100 text-[11px] font-semibold text-slate-700">
+                          {g && <Emoji3D code={g.emoji} size={18} />}
+                          {g ? groupName(g, language) : getCategoryDisplayName(gid, language)}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <div className="text-xs text-slate-600 pt-1 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-1">
-                  <span>
-                    <strong className="text-slate-700">ID:</strong> {provider.id}
-                  </span>
-                  <span>
-                    <strong className="text-slate-700">
-                      {language === 'kz'
-                        ? 'Санат:'
-                        : language === 'tr'
-                        ? 'Kategori:'
-                        : 'Категория:'}
-                    </strong>{' '}
-                    {getCategoryDisplayName(provider.categoryId || provider.category, language) || provider.category}
-                  </span>
                   <span>
                     <strong className="text-slate-700">
                       {language === 'kz'
@@ -840,19 +841,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                 </div>
               </div>
             )}
-
-            {/* Anonymous Session Notice Banner */}
-            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-slate-600 shadow-2xs">
-              <Info className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
-              <div className="space-y-0.5">
-                <p className="font-bold text-slate-800 text-[11px] leading-tight">
-                  {t.sessionNoticeTitle}
-                </p>
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  {t.sessionNoticeDesc}
-                </p>
-              </div>
-            </div>
 
             {/* Provider Tabs Navigation (hidden when the bottom navigation picks the tab) */}
             <div className={`${tab ? 'hidden' : 'flex'} items-center p-1 bg-slate-100 rounded-2xl gap-1`}>
@@ -933,58 +921,46 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
             {activeTab === 'new' && (
               <div className="space-y-3">
                 {newRequests.length === 0 ? (
-                  <div className="p-8 bg-white rounded-3xl border border-dashed border-slate-300 text-center space-y-3">
-                    <Clock className="w-10 h-10 text-slate-400 mx-auto" />
-                    <h4 className="text-sm font-bold text-slate-800">
-                      {t.noMatchingRequests}
+                  <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
+                    <Emoji3D code="1f4e5" size={84} className="mx-auto animate-float" />
+                    <h4 className="text-base font-bold text-slate-900">
+                      {language === 'kz' ? 'Әзірге жаңа өтініш жоқ' : 'Пока новых заявок нет'}
                     </h4>
-                    <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                    <p className="text-[13px] text-slate-500 max-w-xs mx-auto leading-relaxed">
                       {language === 'kz'
-                        ? 'Сіздің қалаңыз бен санатыңызға сәйкес клиент сұраныс берген бойда, осы жерде ұсыныс жасау түймесі шығады.'
-                        : language === 'tr'
-                        ? 'Şehrinizde ve kategorinizde yeni bir talep açıldığında burada anında fiyat ve varış süresi teklifi gönderebilirsiniz.'
-                        : 'Когда клиенты оформят заявку в вашем городе и категории, вы сможете моментально отправить им цену и время выезда.'}
+                        ? 'Қалаңыздағы клиенттер сіздің қызметтеріңізге өтініш қалдырғанда, олар осында шығады.'
+                        : 'Когда клиенты вашего города оставят заявку на ваши услуги, она появится здесь.'}
                     </p>
                   </div>
                 ) : (
                   newRequests.map((req) => (
                     <div
                       key={req.id}
-                      className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs space-y-3"
+                      className="bg-white rounded-3xl border border-slate-200/80 p-4 shadow-sm shadow-slate-200/60 space-y-3 animate-fadeUp"
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[11px] font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
-                              {req.id}
-                            </span>
+                        <div className="flex items-start gap-3 min-w-0">
+                          <RequestIcon request={req} />
+                          <div className="min-w-0">
+                            <h4 className="text-[15px] font-bold text-slate-900 leading-snug">
+                              {getRequestTitle(req, language)}
+                            </h4>
                             {req.urgency === 'high' && (
-                              <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                              <span className="mt-1 text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                                 <Flame className="w-3 h-3 text-amber-600" />
                                 {t.urgencyHigh}
                               </span>
                             )}
                           </div>
-                          <h4 className="text-sm font-bold text-slate-900 mt-1">
-                            {getRequestTitle(req, language)}
-                          </h4>
                         </div>
 
-                        {req.budget && (
-                          <div className="text-right">
-                            <span className="text-xs text-slate-400 block">
-                              {t.fieldBudget}
-                            </span>
-                            <span className="text-xs font-bold text-sky-700">
-                              {formatDynamicBudget(req.budget, language)}
-                            </span>
-                          </div>
-                        )}
                       </div>
 
-                      <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-700 italic">
-                        «{req.requestText}»
-                      </div>
+                      {getRequestDescription(req) && (
+                        <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 text-[13px] text-slate-700 leading-relaxed">
+                          {getRequestDescription(req)}
+                        </div>
+                      )}
 
                       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
                         <span className="flex items-center gap-1">
@@ -995,6 +971,12 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                           <Calendar className="w-3.5 h-3.5 text-sky-600" />
                           {formatDynamicDate(req.date, language)}
                         </span>
+                        {req.budget && (
+                          <span className="flex items-center gap-1 font-bold text-sky-700">
+                            <Wallet className="w-3.5 h-3.5" />
+                            {formatDynamicBudget(req.budget, language)}
+                          </span>
+                        )}
                       </div>
 
                       {Boolean(req.attachments?.length || req.location) && (
@@ -1036,16 +1018,16 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
             {activeTab === 'offers' && (
               <div className="space-y-3">
                 {myOffersRequests.length === 0 ? (
-                  <div className="p-8 bg-white rounded-3xl border border-dashed border-slate-300 text-center space-y-3">
-                    <Send className="w-10 h-10 text-slate-400 mx-auto" />
-                    <h4 className="text-sm font-bold text-slate-800">
+                  <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
+                    <Emoji3D code="1f4e4" size={84} className="mx-auto animate-float" />
+                    <h4 className="text-base font-bold text-slate-900">
                       {language === 'kz'
                         ? 'Жіберілген ұсыныстар жоқ'
                         : language === 'tr'
                         ? 'Henüz teklif gönderilmedi'
                         : 'Нет отправленных предложений'}
                     </h4>
-                    <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                    <p className="text-[13px] text-slate-500 max-w-xs mx-auto leading-relaxed">
                       {language === 'kz'
                         ? '«Жаңа өтініштер» бөліміндегі сұраныстарға ұсыныс жіберіңіз.'
                         : language === 'tr'
@@ -1059,41 +1041,31 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     return (
                       <div
                         key={req.id}
-                        className="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs space-y-3"
+                        className="bg-white rounded-3xl border border-slate-200/80 p-4 shadow-sm shadow-slate-200/60 space-y-3 animate-fadeUp"
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-[11px] font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
-                                {req.id}
-                              </span>
+                          <div className="flex items-start gap-3 min-w-0">
+                            <RequestIcon request={req} />
+                            <div className="min-w-0">
+                              <h4 className="text-[15px] font-bold text-slate-900 leading-snug">
+                                {getRequestTitle(req, language)}
+                              </h4>
                               {req.urgency === 'high' && (
-                                <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                <span className="mt-1 text-[11px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
                                   <Flame className="w-3 h-3 text-amber-600" />
                                   {t.urgencyHigh}
                                 </span>
                               )}
                             </div>
-                            <h4 className="text-sm font-bold text-slate-900 mt-1">
-                              {getRequestTitle(req, language)}
-                            </h4>
                           </div>
 
-                          {req.budget && (
-                            <div className="text-right">
-                              <span className="text-xs text-slate-400 block">
-                                {t.fieldBudget}
-                              </span>
-                              <span className="text-xs font-bold text-sky-700">
-                                {formatDynamicBudget(req.budget, language)}
-                              </span>
-                            </div>
-                          )}
                         </div>
 
-                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-700 italic">
-                          «{req.requestText}»
-                        </div>
+                        {getRequestDescription(req) && (
+                          <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 text-[13px] text-slate-700 leading-relaxed">
+                            {getRequestDescription(req)}
+                          </div>
+                        )}
 
                         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
                           <span className="flex items-center gap-1">
@@ -1104,6 +1076,12 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                             <Calendar className="w-3.5 h-3.5 text-sky-600" />
                             {formatDynamicDate(req.date, language)}
                           </span>
+                          {req.budget && (
+                            <span className="flex items-center gap-1 font-bold text-sky-700">
+                              <Wallet className="w-3.5 h-3.5" />
+                              {formatDynamicBudget(req.budget, language)}
+                            </span>
+                          )}
                         </div>
 
                         {existingOffer && (
@@ -1136,16 +1114,16 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
             {activeTab === 'active' && (
               <div className="space-y-3">
                 {activeJobRequests.length === 0 ? (
-                  <div className="p-8 bg-white rounded-3xl border border-dashed border-slate-300 text-center space-y-3">
-                    <CheckCircle className="w-10 h-10 text-slate-400 mx-auto" />
-                    <h4 className="text-sm font-bold text-slate-800">
+                  <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
+                    <Emoji3D code="1f4bc" size={84} className="mx-auto animate-float" />
+                    <h4 className="text-base font-bold text-slate-900">
                       {language === 'kz'
                         ? 'Белсенді жұмыстар жоқ'
                         : language === 'tr'
                         ? 'Aktif iş bulunmuyor'
                         : 'Нет активных заказов'}
                     </h4>
-                    <p className="text-xs text-slate-500 max-w-xs mx-auto">
+                    <p className="text-[13px] text-slate-500 max-w-xs mx-auto leading-relaxed">
                       {language === 'kz'
                         ? 'Клиент сіздің ұсынысыңызды қабылдағанда, тапсырыс осы жерге түседі және жұмыс күйін өзгерте аласыз.'
                         : language === 'tr'
@@ -1161,13 +1139,11 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     return (
                       <div
                         key={req.id}
-                        className="bg-white rounded-2xl border border-emerald-200 p-4 shadow-2xs space-y-3 relative overflow-hidden"
+                        className="bg-white rounded-3xl border border-emerald-200 p-4 shadow-sm shadow-emerald-100 space-y-3 relative overflow-hidden animate-fadeUp"
                       >
                         {/* Status Header Badge */}
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
-                            {req.id}
-                          </span>
+                          <RequestIcon request={req} size="sm" />
                           <span
                             className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1 ${
                               normStatus === 'IN_PROGRESS'
@@ -1189,21 +1165,13 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                             </h4>
                           </div>
 
-                          {req.budget && (
-                            <div className="text-right">
-                              <span className="text-xs text-slate-400 block">
-                                {t.fieldBudget}
-                              </span>
-                              <span className="text-xs font-bold text-sky-700">
-                                {formatDynamicBudget(req.budget, language)}
-                              </span>
-                            </div>
-                          )}
                         </div>
 
-                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-700 italic">
-                          «{req.requestText}»
-                        </div>
+                        {getRequestDescription(req) && (
+                          <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 text-[13px] text-slate-700 leading-relaxed">
+                            {getRequestDescription(req)}
+                          </div>
+                        )}
 
                         <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 font-medium">
                           <span className="flex items-center gap-1">
@@ -1214,6 +1182,12 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                             <Calendar className="w-3.5 h-3.5 text-sky-600" />
                             {formatDynamicDate(req.date, language)}
                           </span>
+                          {req.budget && (
+                            <span className="flex items-center gap-1 font-bold text-sky-700">
+                              <Wallet className="w-3.5 h-3.5" />
+                              {formatDynamicBudget(req.budget, language)}
+                            </span>
+                          )}
                         </div>
 
                         {Boolean(req.attachments?.length || req.location) && (
@@ -1336,9 +1310,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
           <div className="bg-white rounded-3xl p-5 max-w-sm w-full shadow-2xl space-y-4 border border-slate-200">
             <div className="flex items-start justify-between">
               <div>
-                <span className="text-[10px] font-mono font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded">
-                  {selectedRequestForOffer.id}
-                </span>
+                <RequestIcon request={selectedRequestForOffer} size="sm" />
                 <h3 className="text-base font-bold text-slate-900 mt-1">
                   {t.sendOfferModalTitle}
                 </h3>
@@ -1363,9 +1335,9 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                   ) || selectedRequestForOffer.city}
                   )
                 </span>
-                <span className="italic line-clamp-1 mt-0.5 block">
-                  «{selectedRequestForOffer.requestText}»
-                </span>
+                {getRequestDescription(selectedRequestForOffer) && (
+                  <span className="line-clamp-1 mt-0.5 block">{getRequestDescription(selectedRequestForOffer)}</span>
+                )}
               </div>
 
               {/* Price Type Selector */}

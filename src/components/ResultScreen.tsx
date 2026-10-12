@@ -14,7 +14,7 @@ import {
   ServiceRequest,
 } from '../types';
 import { translations } from '../i18n/translations';
-import { getRequestTitle } from '../services/requestTitle';
+import { getRequestDescription, getRequestTitle } from '../services/requestTitle';
 import { formatShortDate } from '../services/dateFormat';
 import { getDemoProviders } from '../data/demoProviders';
 import { repository, checkClientRateLimit, getFriendlyErrorMessage, getCurrentUserId } from '../services';
@@ -22,6 +22,8 @@ import { auth, isFirebaseConfigured } from '../services/firebase';
 import { getCategoryDisplayName, getCityDisplayName } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { ReviewModal } from './ReviewModal';
+import { Emoji3D } from './CategoryIcon';
+import { RequestIcon, requestVisual } from './RequestIcon';
 import { ChatScreen } from './ChatScreen';
 import { AppointmentSection } from './AppointmentSection';
 import {
@@ -42,8 +44,6 @@ import {
   XCircle,
   Inbox,
   Star,
-  ShieldCheck,
-  Award,
 } from 'lucide-react';
 
 interface ResultScreenProps {
@@ -359,29 +359,32 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
       case 'MATCHING':
       case 'OFFERS_RECEIVED':
         return (
-          <span className="px-2.5 py-1 bg-sky-50 text-sky-800 font-bold rounded-lg text-xs flex items-center gap-1.5 border border-sky-200">
-            <span className="w-2 h-2 rounded-full bg-sky-500 animate-ping" />
+          <span className="inline-flex px-2.5 py-1 bg-sky-50 text-sky-800 font-bold rounded-full text-xs items-center gap-1.5 border border-sky-200">
+            <span className="relative flex w-2 h-2">
+              <span className="absolute inset-0 rounded-full bg-sky-400 opacity-75 animate-ping" />
+              <span className="relative w-2 h-2 rounded-full bg-sky-500" />
+            </span>
             {t.status_OPEN}
           </span>
         );
       case 'PROVIDER_SELECTED':
       case 'ACCEPTED':
         return (
-          <span className="px-2.5 py-1 bg-purple-50 text-purple-800 font-bold rounded-lg text-xs border border-purple-200 flex items-center gap-1">
+          <span className="inline-flex px-2.5 py-1 bg-purple-50 text-purple-800 font-bold rounded-full text-xs border border-purple-200 items-center gap-1">
             <CheckCircle className="w-3.5 h-3.5 text-purple-600" />
             {t.status_PROVIDER_SELECTED}
           </span>
         );
       case 'IN_PROGRESS':
         return (
-          <span className="px-2.5 py-1 bg-blue-50 text-blue-800 font-bold rounded-lg text-xs border border-blue-200 flex items-center gap-1">
+          <span className="inline-flex px-2.5 py-1 bg-blue-50 text-blue-800 font-bold rounded-full text-xs border border-blue-200 items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
             {t.status_IN_PROGRESS}
           </span>
         );
       case 'COMPLETED':
         return (
-          <span className="px-2.5 py-1 bg-emerald-100 text-emerald-900 font-bold rounded-lg text-xs flex items-center gap-1 border border-emerald-300">
+          <span className="inline-flex px-2.5 py-1 bg-emerald-100 text-emerald-900 font-bold rounded-full text-xs items-center gap-1 border border-emerald-300">
             <CheckCircle className="w-3.5 h-3.5 text-emerald-700" />
             {t.status_COMPLETED}
           </span>
@@ -389,7 +392,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
       case 'REJECTED':
       case 'CANCELLED':
         return (
-          <span className="px-2.5 py-1 bg-rose-50 text-rose-700 font-bold rounded-lg text-xs border border-rose-200">
+          <span className="inline-flex px-2.5 py-1 bg-rose-50 text-rose-700 font-bold rounded-full text-xs border border-rose-200">
             {t.status_CANCELLED}
           </span>
         );
@@ -443,26 +446,18 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
 
         {/* Customer Request Details Header: Request ID, Status, Created date, City, Service, Budget, Offers count */}
         {request && (
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  {t.requestIdLabel}
-                </span>
-                <span className="text-lg font-extrabold text-slate-900 font-mono tracking-tight">
-                  {request.id}
-                </span>
+          <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-sm shadow-slate-200/60 space-y-3 animate-fadeUp">
+            <div className="flex items-start gap-3">
+              <RequestIcon request={request} size="lg" />
+              <div className="min-w-0 flex-1 space-y-1">
+                <div>{renderStatusBadge(request.status)}</div>
+                <h2 className="text-base font-bold text-slate-900 leading-snug">
+                  {getRequestTitle(request, language)}
+                </h2>
+                {getRequestDescription(request) && (
+                  <p className="text-xs text-slate-500 break-words">{getRequestDescription(request)}</p>
+                )}
               </div>
-              <div>{renderStatusBadge(request.status)}</div>
-            </div>
-
-            <div className="pt-2 border-t border-slate-100 space-y-1">
-              <h2 className="text-sm font-bold text-slate-900">
-                {getRequestTitle(request, language)}
-              </h2>
-              <p className="text-xs text-slate-500 italic">
-                «{request.requestText}»
-              </p>
             </div>
 
             {/* Spec: Show Created date, City, Service, Budget, Offers count */}
@@ -539,39 +534,33 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
           </div>
         )}
 
-        {/* Phone Masking & Privacy Guarantee Notice */}
-        <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-emerald-950 shadow-2xs">
-          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="space-y-0.5">
-            <span className="font-bold block text-[11px] uppercase tracking-wider text-emerald-800">
+        {/* Waiting for the first offers */}
+        {request && offers.length === 0 && ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'].includes(request.status) && (
+          <div className="relative overflow-hidden p-6 rounded-3xl bg-linear-to-b from-sky-50 to-white border border-sky-100 text-center animate-fadeUp">
+            <div className="relative mx-auto w-36 h-36 flex items-center justify-center" aria-hidden="true">
+              <span className="absolute inset-0 rounded-full bg-sky-300/40 animate-radar" />
+              <span className="absolute inset-0 rounded-full bg-sky-300/40 animate-radar" style={{ animationDelay: '0.8s' }} />
+              <span className="absolute inset-0 rounded-full bg-sky-300/40 animate-radar" style={{ animationDelay: '1.6s' }} />
+              <span className="relative w-24 h-24 rounded-full bg-white shadow-lg shadow-sky-200 flex items-center justify-center">
+                <Emoji3D code={requestVisual(request).emoji} size={60} eager className="animate-float" />
+              </span>
+            </div>
+            <h3 className="mt-3 text-lg font-bold text-slate-900">
+              {language === 'kz' ? 'Өтініш шеберлерге жіберілді' : 'Заявка отправлена мастерам'}
+            </h3>
+            <p className="mt-1 text-[13px] text-slate-500 leading-relaxed max-w-xs mx-auto">
               {language === 'kz'
-                ? 'Қауіпсіз маркетплейс және құпиялылық'
-                : language === 'tr'
-                ? 'Güvenli Pazar Yeri & Gizlilik'
-                : 'Безопасный маркетплейс и приватность'}
-            </span>
-            <p className="text-emerald-800/90 leading-relaxed text-xs">
-              {t.phoneMaskingGuarantee}
+                ? 'Ұсыныстар келгенде осы жерде пайда болады және қоңырауша арқылы хабарлаймыз.'
+                : 'Предложения появятся здесь, а колокольчик вверху сообщит о новых.'}
             </p>
           </div>
-        </div>
-
-        {/* Risk Category Notice for technical/gas/electric works */}
-        {(need?.category?.toLowerCase().includes('электр') ||
-          need?.category?.toLowerCase().includes('жылыту') ||
-          need?.category?.toLowerCase().includes('отоплен') ||
-          need?.category?.toLowerCase().includes('бойлер') ||
-          need?.category?.toLowerCase().includes('electrician') ||
-          need?.category?.toLowerCase().includes('heating') ||
-          request?.category?.toLowerCase().includes('электр') ||
-          request?.category?.toLowerCase().includes('жылыту') ||
-          request?.category?.toLowerCase().includes('отоплен') ||
-          request?.category?.toLowerCase().includes('бойлер')) && (
-          <div className="p-3 bg-amber-50/80 border border-amber-200/90 rounded-2xl flex items-center gap-2.5 text-xs text-amber-900 shadow-2xs">
-            <Award className="w-4 h-4 text-amber-600 shrink-0" />
-            <span className="leading-snug">{t.riskCategoryNotice}</span>
-          </div>
         )}
+
+        {/* Phone number privacy */}
+        <div className="flex items-start gap-2.5 px-1 text-xs text-slate-600">
+          <Emoji3D code="1f6e1-fe0f" size={22} />
+          <p className="leading-relaxed">{t.phoneMaskingGuarantee}</p>
+        </div>
 
         {/* Selected Provider Contact Banner & Status Workflow */}
         {(request?.status === 'PROVIDER_SELECTED' ||

@@ -1,6 +1,7 @@
 import React from 'react';
-import { Briefcase, Search } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { Language } from '../types';
+import { Emoji3D } from './CategoryIcon';
 
 export type AppMode = 'customer' | 'provider';
 
@@ -10,66 +11,71 @@ interface RoleChooserProps {
 }
 
 const TEXT = {
-  title: { kz: 'Қош келдіңіз!', ru: 'Добро пожаловать!', tr: 'Hoş geldiniz!' },
-  question: { kz: 'Не істегіңіз келеді?', ru: 'Что вы хотите сделать?', tr: 'Ne yapmak istiyorsunuz?' },
-  customer: { kz: 'Маман іздеймін', ru: 'Ищу мастера', tr: 'Hizmet arıyorum' },
+  title: { kz: 'Қош келдіңіз!', ru: 'Добро пожаловать!' },
+  question: { kz: 'Не істегіңіз келеді?', ru: 'Что вы хотите сделать?' },
+  customer: { kz: 'Маман іздеймін', ru: 'Ищу мастера' },
   customerSub: {
     kz: 'Өтініш қалдырып, шеберлерден ұсыныс алыңыз',
     ru: 'Оставьте заявку и получите предложения от мастеров',
-    tr: 'Talep bırakın, ustalardan teklif alın',
   },
-  provider: { kz: 'Қызмет көрсетемін', ru: 'Оказываю услуги', tr: 'Hizmet veriyorum' },
+  provider: { kz: 'Қызмет көрсетемін', ru: 'Оказываю услуги' },
   providerSub: {
     kz: 'Өз қалаңыздан тапсырыстар алып, табыс табыңыз',
     ru: 'Получайте заказы в своём городе и зарабатывайте',
-    tr: 'Şehrinizden iş alın, kazanın',
   },
   later: {
     kz: 'Кейін төменгі мәзірден ауыстыра аласыз.',
     ru: 'Позже можно переключиться в нижнем меню.',
-    tr: 'Daha sonra alttaki menüden değiştirebilirsiniz.',
   },
 } as const;
 
 /** First screen: the visitor picks the customer or the provider side of the app. */
 export const RoleChooser: React.FC<RoleChooserProps> = ({ language, onChoose }) => {
-  const lang = language as 'kz' | 'ru' | 'tr';
-  const tx = (entry: { kz: string; ru: string; tr: string }) => entry[lang] || entry.ru;
+  const lang = language === 'kz' ? 'kz' : 'ru';
+  const tx = (entry: { kz: string; ru: string }) => entry[lang];
+
+  const card = (mode: AppMode) => {
+    const isCustomer = mode === 'customer';
+    return (
+      <button
+        type="button"
+        onClick={() => onChoose(mode)}
+        className={`press relative w-full overflow-hidden text-left p-5 pr-28 rounded-[28px] text-white shadow-xl animate-fadeUp ${
+          isCustomer
+            ? 'bg-linear-to-br from-sky-500 via-sky-600 to-indigo-600 shadow-sky-600/25'
+            : 'bg-linear-to-br from-emerald-500 via-emerald-600 to-teal-700 shadow-emerald-600/25'
+        }`}
+        style={{ animationDelay: isCustomer ? '120ms' : '220ms' }}
+      >
+        <span className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-white/10" aria-hidden="true" />
+        <Emoji3D
+          code={isCustomer ? '1f50d' : '1f9d1-200d-1f527'}
+          size={88}
+          eager
+          className="absolute right-3 top-1/2 -mt-11 animate-float drop-shadow-xl"
+          style={{ ['--tilt' as string]: isCustomer ? '-6deg' : '5deg', animationDelay: isCustomer ? '0s' : '-2s' }}
+        />
+        <span className="relative block text-xl font-bold font-display leading-tight">{tx(isCustomer ? TEXT.customer : TEXT.provider)}</span>
+        <span className={`relative block mt-1.5 text-[13px] leading-snug ${isCustomer ? 'text-sky-50' : 'text-emerald-50'}`}>
+          {tx(isCustomer ? TEXT.customerSub : TEXT.providerSub)}
+        </span>
+        <span className="relative mt-4 inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/20">
+          <ChevronRight className="w-5 h-5" strokeWidth={2.5} />
+        </span>
+      </button>
+    );
+  };
 
   return (
-    <div className="flex-1 w-full max-w-md mx-auto px-4 py-8 flex flex-col justify-center space-y-6">
-      <div className="text-center space-y-1">
-        <h1 className="text-2xl font-extrabold text-slate-900 font-display">{tx(TEXT.title)}</h1>
+    <div className="flex-1 w-full max-w-md mx-auto px-4 py-8 flex flex-col justify-center space-y-5">
+      <div className="text-center space-y-2 animate-fadeUp">
+        <Emoji3D code="1f44b" size={72} eager className="mx-auto animate-float" style={{ ['--tilt' as string]: '12deg' }} />
+        <h1 className="text-[26px] font-bold text-slate-900 font-display">{tx(TEXT.title)}</h1>
         <p className="text-base text-slate-600">{tx(TEXT.question)}</p>
       </div>
 
-      <button
-        type="button"
-        onClick={() => onChoose('customer')}
-        className="w-full text-left p-5 rounded-3xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white shadow-lg shadow-sky-600/20 transition-all flex items-center gap-4"
-      >
-        <span className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
-          <Search className="w-6 h-6" />
-        </span>
-        <span>
-          <span className="block text-lg font-bold">{tx(TEXT.customer)}</span>
-          <span className="block text-sm text-sky-100 leading-snug">{tx(TEXT.customerSub)}</span>
-        </span>
-      </button>
-
-      <button
-        type="button"
-        onClick={() => onChoose('provider')}
-        className="w-full text-left p-5 rounded-3xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white shadow-lg shadow-emerald-600/20 transition-all flex items-center gap-4"
-      >
-        <span className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
-          <Briefcase className="w-6 h-6" />
-        </span>
-        <span>
-          <span className="block text-lg font-bold">{tx(TEXT.provider)}</span>
-          <span className="block text-sm text-emerald-100 leading-snug">{tx(TEXT.providerSub)}</span>
-        </span>
-      </button>
+      {card('customer')}
+      {card('provider')}
 
       <p className="text-center text-xs text-slate-500">{tx(TEXT.later)}</p>
     </div>

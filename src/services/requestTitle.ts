@@ -1,6 +1,7 @@
 import { Language, ServiceRequest } from '../types';
 import { analyzeRequestUnderstanding } from './requestUnderstanding';
 import { getCategoryDisplayName, normalizeCategoryId } from './taxonomy';
+import { getService, serviceName } from '../data/serviceCatalog';
 
 /**
  * Title of a request in the viewer's language. The stored `service` text is written in the
@@ -11,9 +12,13 @@ import { getCategoryDisplayName, normalizeCategoryId } from './taxonomy';
 const cache = new Map<string, string>();
 
 export function getRequestTitle(
-  req: Pick<ServiceRequest, 'id' | 'service' | 'requestText' | 'description' | 'categoryId' | 'category'>,
+  req: Pick<ServiceRequest, 'id' | 'service' | 'requestText' | 'description' | 'categoryId' | 'category' | 'serviceId'>,
   language: Language
 ): string {
+  // Requests made from the catalogue: the service name exists in both languages
+  const catalog = getService(req.serviceId);
+  if (catalog) return serviceName(catalog.service, language);
+
   const stored = (req.service || '').trim();
   const key = `${req.id}|${language}|${stored}`;
   const hit = cache.get(key);
@@ -58,4 +63,19 @@ function looksLikeOtherLanguage(text: string, language: Language): boolean {
   if (!CYRILLIC.test(text)) return false;
   const kazakh = KAZAKH_LETTERS.test(text);
   return language === 'kz' ? !kazakh : kazakh;
+}
+
+/**
+ * The customer's description without the service name that catalogue requests put in front of it
+ * ("Кран және смеситель: …"), since the title already shows the service.
+ */
+export function getRequestDescription(req: Pick<ServiceRequest, 'requestText' | 'description' | 'serviceId'>): string {
+  const text = (req.requestText || req.description || '').trim();
+  const catalog = getService(req.serviceId);
+  if (!catalog) return text;
+  for (const name of [catalog.service.kz, catalog.service.ru]) {
+    if (text === name) return '';
+    if (text.startsWith(name + ':')) return text.slice(name.length + 1).trim();
+  }
+  return text;
 }

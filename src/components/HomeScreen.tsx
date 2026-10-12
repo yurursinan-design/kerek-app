@@ -12,22 +12,19 @@ import {
   Mic,
   MicOff,
   Search,
-  Sparkles,
-  Briefcase,
-  ChevronRight,
   Image as ImageIcon,
   Video as VideoIcon,
   MapPin,
   Square,
   AlertCircle,
   Loader2,
-  ShieldCheck,
 } from 'lucide-react';
 import { LegalLinks } from './LegalModal';
 import { ServiceDiscovery } from './ServiceDiscovery';
 import { RequestWizard } from './RequestWizard';
 import type { CatalogGroup, CatalogService } from '../data/serviceCatalog';
 import { RequestMediaView } from './RequestMediaView';
+import { Emoji3D } from './CategoryIcon';
 
 interface HomeScreenProps {
   language: Language;
@@ -50,6 +47,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onServiceRequest,
 }) => {
   const [picked, setPicked] = useState<{ group: CatalogGroup; service: CatalogService } | null>(null);
+  const freeTextRef = useRef<HTMLElement>(null);
+  const freeTextInputRef = useRef<HTMLTextAreaElement>(null);
   const t = translations[language];
   const [query, setQuery] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -92,11 +91,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     const effectiveQuery =
       cleanText || (language === 'kz' ? 'Медиа файлдармен өтініш' : 'Заявка с медиа файлами');
     onSearch(effectiveQuery, attachments, location);
-  };
-
-  const handleExampleClick = (example: string) => {
-    setQuery(example);
-    onSearch(example, attachments, location);
   };
 
   // 1. Photo Selection
@@ -417,33 +411,44 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         onChange={handleVideoSelect}
       />
 
-      <div className="space-y-5">
-        {/* Search, popular services, all categories, how it works */}
-        <ServiceDiscovery
-          language={language}
-          onPickService={(group, service) => {
-            setPicked({ group, service });
-            window.scrollTo({ top: 0 });
-          }}
-          onFreeText={(text) => onSearch(text, [], undefined)}
-        />
-
+      {/* Search, popular services, all categories, free text, how it works */}
+      <ServiceDiscovery
+        language={language}
+        onPickService={(group, service) => {
+          setPicked({ group, service });
+          window.scrollTo({ top: 0 });
+        }}
+        onFreeText={(text) => onSearch(text, [], undefined)}
+        onDescribeOwn={() => {
+          freeTextRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          window.setTimeout(() => freeTextInputRef.current?.focus({ preventScroll: true }), 350);
+        }}
+        onBecomeProvider={onOpenProviderMode}
+      >
         {/* Free text: describe the need in your own words (analysed by the app) */}
-        <div className="space-y-1 pt-2">
-          <h2 className="text-base font-bold text-slate-900">
-            {language === 'kz' ? 'Немесе өз сөзіңізбен жазыңыз' : 'Или опишите своими словами'}
-          </h2>
-          <p className="text-xs text-slate-500">
-            {language === 'kz'
-              ? 'Жазыңыз немесе айтыңыз, фото мен видео қосыңыз — біз өзіміз түсінеміз'
-              : 'Напишите или наговорите, добавьте фото и видео — мы сами разберёмся'}
-          </p>
-        </div>
+        <section
+          ref={freeTextRef}
+          className="scroll-mt-20 p-4 rounded-3xl bg-linear-to-br from-violet-50 via-white to-sky-50 border border-violet-100 space-y-3"
+        >
+          <div className="flex items-center gap-3">
+            <Emoji3D code="270d-fe0f" size={46} />
+            <div className="min-w-0">
+              <h2 className="text-lg font-extrabold text-slate-900 tracking-tight leading-tight">
+                {language === 'kz' ? 'Өз сөзіңізбен жазыңыз' : 'Опишите своими словами'}
+              </h2>
+              <p className="text-xs text-slate-500 leading-snug mt-0.5">
+                {language === 'kz'
+                  ? 'Жазыңыз немесе айтыңыз, фото мен видео қосыңыз — біз өзіміз түсінеміз'
+                  : 'Напишите или наговорите, добавьте фото и видео — мы сами разберёмся'}
+              </p>
+            </div>
+          </div>
 
         {/* Search & Media Input Box */}
         <form onSubmit={handleSubmit} className="space-y-3">
           <div className="relative bg-white rounded-2xl border-2 border-slate-200 focus-within:border-sky-500 shadow-sm transition-all overflow-hidden">
             <textarea
+              ref={freeTextInputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t.inputPlaceholder}
@@ -474,87 +479,65 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               </button>
             </div>
 
-            {/* Request 2.0 Action Toolbar: Photo, Video, Audio, Location */}
-            <div className="px-3 py-2 bg-slate-50/90 border-t border-slate-100 flex items-center justify-between gap-1 flex-wrap">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {/* 📷 Photo */}
-                <button
-                  type="button"
-                  onClick={() => photoInputRef.current?.click()}
-                  className="px-2.5 py-1.5 bg-white hover:bg-sky-50 border border-slate-200 hover:border-sky-300 rounded-xl text-xs font-semibold text-slate-700 hover:text-sky-700 flex items-center gap-1.5 transition-all shadow-2xs active:scale-95"
-                  title={t.reqAddPhoto}
-                >
-                  <ImageIcon className="w-4 h-4 text-sky-600" />
-                  <span>{t.reqAddPhoto}</span>
-                </button>
-
-                {/* 🎥 Video */}
-                <button
-                  type="button"
-                  onClick={() => videoInputRef.current?.click()}
-                  className="px-2.5 py-1.5 bg-white hover:bg-purple-50 border border-slate-200 hover:border-purple-300 rounded-xl text-xs font-semibold text-slate-700 hover:text-purple-700 flex items-center gap-1.5 transition-all shadow-2xs active:scale-95"
-                  title={t.reqAddVideo}
-                >
-                  <VideoIcon className="w-4 h-4 text-purple-600" />
-                  <span>{t.reqAddVideo}</span>
-                </button>
-
-                {/* 🎤 Voice Recording */}
-                <button
-                  type="button"
-                  onClick={isRecordingAudio ? stopAudioRecording : startAudioRecording}
-                  className={`px-2.5 py-1.5 border rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-2xs active:scale-95 ${
-                    isRecordingAudio
-                      ? 'bg-red-500 border-red-600 text-white animate-pulse'
-                      : 'bg-white hover:bg-emerald-50 border-slate-200 hover:border-emerald-300 text-slate-700 hover:text-emerald-700'
-                  }`}
-                  title={isRecordingAudio ? t.reqStopRecording : t.reqAddAudio}
-                >
-                  {isRecordingAudio ? (
-                    <>
-                      <Square className="w-3.5 h-3.5 fill-current" />
-                      <span>{formatTimer(recordingSeconds)}</span>
-                    </>
+            {/* Photo, video, voice note, location */}
+            <div className="grid grid-cols-4 gap-1 px-2 py-2 bg-slate-50/90 border-t border-slate-100">
+              {[
+                {
+                  key: 'photo',
+                  label: 'Фото',
+                  title: t.reqAddPhoto,
+                  icon: <ImageIcon className="w-5 h-5 text-sky-600" />,
+                  onClick: () => photoInputRef.current?.click(),
+                  active: false,
+                },
+                {
+                  key: 'video',
+                  label: 'Видео',
+                  title: t.reqAddVideo,
+                  icon: <VideoIcon className="w-5 h-5 text-violet-600" />,
+                  onClick: () => videoInputRef.current?.click(),
+                  active: false,
+                },
+                {
+                  key: 'audio',
+                  label: isRecordingAudio ? formatTimer(recordingSeconds) : language === 'kz' ? 'Дауыс' : 'Голос',
+                  title: isRecordingAudio ? t.reqStopRecording : t.reqAddAudio,
+                  icon: isRecordingAudio ? <Square className="w-4 h-4 fill-current text-white" /> : <Mic className="w-5 h-5 text-emerald-600" />,
+                  onClick: isRecordingAudio ? stopAudioRecording : startAudioRecording,
+                  active: isRecordingAudio,
+                },
+                {
+                  key: 'location',
+                  label: location ? (language === 'kz' ? 'Қосылды' : 'Добавлено') : language === 'kz' ? 'Орын' : 'Место',
+                  title: t.reqAddLocation,
+                  icon: isDetectingLocation ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-sky-600" />
                   ) : (
-                    <>
-                      <Mic className="w-4 h-4 text-emerald-600" />
-                      <span>{t.reqAddAudio}</span>
-                    </>
-                  )}
-                </button>
-
-                {/* 📍 Location */}
+                    <MapPin className={`w-5 h-5 ${location ? 'text-blue-700' : 'text-rose-500'}`} />
+                  ),
+                  onClick: handleDetectLocation,
+                  active: false,
+                },
+              ].map((b) => (
                 <button
+                  key={b.key}
                   type="button"
-                  onClick={handleDetectLocation}
-                  disabled={isDetectingLocation}
-                  className={`px-2.5 py-1.5 border rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all shadow-2xs active:scale-95 ${
-                    location
-                      ? 'bg-blue-50 border-blue-300 text-blue-700'
-                      : 'bg-white hover:bg-sky-50 border-slate-200 hover:border-sky-300 text-slate-700 hover:text-sky-700'
+                  onClick={b.onClick}
+                  disabled={b.key === 'location' && isDetectingLocation}
+                  title={b.title}
+                  aria-label={b.title}
+                  className={`press min-h-[52px] rounded-xl flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold transition-colors ${
+                    b.active
+                      ? 'bg-red-500 text-white animate-pulse'
+                      : b.key === 'location' && location
+                      ? 'bg-blue-50 text-blue-800'
+                      : 'text-slate-600 hover:bg-white'
                   }`}
-                  title={t.reqAddLocation}
                 >
-                  {isDetectingLocation ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600" />
-                      <span className="text-[11px]">...</span>
-                    </>
-                  ) : (
-                    <>
-                      <MapPin className={`w-4 h-4 ${location ? 'text-blue-600' : 'text-sky-600'}`} />
-                      <span>{location ? (language === 'kz' ? 'Орналасты' : 'Локация') : t.reqAddLocation}</span>
-                    </>
-                  )}
+                  {b.icon}
+                  <span>{b.label}</span>
                 </button>
-              </div>
-
-              {/* Counter badge for added attachments */}
-              {attachments.length > 0 && (
-                <span className="text-[11px] font-bold text-sky-700 bg-sky-100 px-2 py-0.5 rounded-full">
-                  +{attachments.length}
-                </span>
-              )}
+              ))}
             </div>
           </div>
 
@@ -644,24 +627,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </button>
         </form>
 
-        {/* Phone Masking & Privacy Guarantee Badge */}
-        <div className="p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-emerald-950 shadow-2xs">
-          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-          <div className="space-y-0.5">
-            <span className="font-bold block text-[11px] uppercase tracking-wider text-emerald-800">
-              {language === 'kz'
-                ? 'Қауіпсіз маркетплейс және құпиялылық'
-                : language === 'tr'
-                ? 'Güvenli Pazar Yeri & Gizlilik'
-                : 'Безопасный маркетплейс и приватность'}
-            </span>
-            <p className="text-emerald-800/90 leading-relaxed text-xs">
-              {t.phoneMaskingGuarantee}
-            </p>
+          {/* Phone number privacy */}
+          <div className="flex items-start gap-2.5 text-xs text-slate-600">
+            <Emoji3D code="1f6e1-fe0f" size={22} />
+            <p className="leading-relaxed">{t.phoneMaskingGuarantee}</p>
           </div>
-        </div>
-
-      </div>
+        </section>
+      </ServiceDiscovery>
 
       {/* Footer Info */}
       <footer className="text-center text-xs text-slate-400 py-3 border-t border-slate-100 space-y-1.5">

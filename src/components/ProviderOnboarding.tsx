@@ -26,6 +26,10 @@ import {
   FileText,
   Award,
 } from 'lucide-react';
+import { Emoji3D } from './CategoryIcon';
+
+/** 3D icon next to each onboarding step's title */
+const STEP_EMOJI: Record<number, string> = { 1: '1f9d1-200d-1f527', 2: '1f6e0-fe0f', 3: '1f4bc', 4: '1f680' };
 
 export interface ProviderOnboardingProps {
   language: Language;
@@ -249,8 +253,7 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
       {/* Header & Step Indicator */}
       <div className="bg-white p-5 rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
         <div className="flex items-center justify-between">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-sky-50 text-sky-800 rounded-full text-xs font-bold font-mono">
-            <Sparkles className="w-3.5 h-3.5 text-sky-600" />
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 rounded-full text-xs font-bold">
             <span>
               {`${t.onboardingStepIndicator} ${currentStep} ${t.onboardingStepOf} 4`}
             </span>
@@ -283,9 +286,9 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
                 }}
                 className={`h-2 rounded-full transition-all duration-300 ${
                   isCurrent
-                    ? 'bg-sky-600 shadow-xs'
+                    ? 'bg-emerald-500 shadow-xs'
                     : isCompleted
-                    ? 'bg-emerald-500 cursor-pointer'
+                    ? 'bg-emerald-300 cursor-pointer'
                     : 'bg-slate-200'
                 }`}
                 title={`Step ${stepNum}`}
@@ -295,13 +298,18 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
         </div>
 
         {/* Title and Subtitle */}
-        <div className="pt-1">
-          <h2 className="text-lg font-extrabold text-slate-900 tracking-tight font-display">
-            {stepTitles[currentStep].title}
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-            {stepTitles[currentStep].subtitle}
-          </p>
+        <div key={currentStep} className="pt-1 flex items-center gap-3.5 animate-stepIn">
+          <span className="w-14 h-14 rounded-2xl bg-linear-to-br from-emerald-50 to-teal-100 flex items-center justify-center shrink-0">
+            <Emoji3D code={STEP_EMOJI[currentStep]} size={38} eager className="animate-popIn" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-lg font-extrabold text-slate-900 tracking-tight font-display leading-tight">
+              {stepTitles[currentStep].title}
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+              {stepTitles[currentStep].subtitle}
+            </p>
+          </div>
         </div>
       </div>
 

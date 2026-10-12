@@ -1,9 +1,9 @@
 import React, { useRef, useState } from 'react';
-import { ArrowLeft, Camera, Check, ChevronRight, Loader2, MapPin, X } from 'lucide-react';
+import { ArrowLeft, Camera, Check, ChevronRight, Loader2, X } from 'lucide-react';
 import { ExtractedNeed, Language, PendingAttachment, RequestLocation, Urgency, sanitizeFileName, validateRequestAttachment } from '../types';
 import { CatalogGroup, CatalogService, groupName, serviceName } from '../data/serviceCatalog';
 import { CANONICAL_CITIES } from '../services/taxonomy';
-import { CategoryIcon } from './CategoryIcon';
+import { CategoryIcon, Emoji3D, tone } from './CategoryIcon';
 
 interface RequestWizardProps {
   language: Language;
@@ -25,6 +25,7 @@ const T = {
   send: { kz: 'Өтінішті жіберу', ru: 'Отправить заявку' },
   close: { kz: 'Жабу', ru: 'Закрыть' },
   describeTitle: { kz: 'Не істеу керек?', ru: 'Что нужно сделать?' },
+  quickLabel: { kz: 'Тез таңдау', ru: 'Быстрый выбор' },
   describeHint: {
     kz: 'Қысқаша жазыңыз: не бұзылды, қандай көлем, ерекше тілектер. Фото шеберге бағаны тез айтуға көмектеседі.',
     ru: 'Кратко опишите: что случилось, какой объём, особые пожелания. Фото помогают мастеру быстрее назвать цену.',
@@ -50,19 +51,23 @@ const T = {
   budget: { kz: 'Бюджет', ru: 'Бюджет' },
   photos: { kz: 'Фото', ru: 'Фото' },
   edit: { kz: 'Өзгерту', ru: 'Изменить' },
+  tags: { kz: 'Таңдалғаны', ru: 'Выбрано' },
   freeNote: {
     kz: 'Өтініш тегін. Шеберлер ұсыныс жібереді, сіз өзіңізге ыңғайлысын таңдайсыз.',
     ru: 'Заявка бесплатна. Мастера пришлют предложения, вы выберете подходящее.',
   },
 } as const;
 
-const WHEN_OPTIONS: { id: string; kz: string; ru: string; urgency: Urgency }[] = [
-  { id: 'urgent', kz: 'Шұғыл, қазір', ru: 'Срочно, сейчас', urgency: 'high' },
-  { id: 'today', kz: 'Бүгін', ru: 'Сегодня', urgency: 'high' },
-  { id: 'tomorrow', kz: 'Ертең', ru: 'Завтра', urgency: 'normal' },
-  { id: 'week', kz: 'Осы аптада', ru: 'На этой неделе', urgency: 'normal' },
-  { id: 'flexible', kz: 'Келісім бойынша', ru: 'По договорённости', urgency: 'low' },
+const WHEN_OPTIONS: { id: string; kz: string; ru: string; urgency: Urgency; emoji: string }[] = [
+  { id: 'urgent', kz: 'Шұғыл, қазір', ru: 'Срочно, сейчас', urgency: 'high', emoji: '1f6a8' },
+  { id: 'today', kz: 'Бүгін', ru: 'Сегодня', urgency: 'high', emoji: '2600-fe0f' },
+  { id: 'tomorrow', kz: 'Ертең', ru: 'Завтра', urgency: 'normal', emoji: '1f305' },
+  { id: 'week', kz: 'Осы аптада', ru: 'На этой неделе', urgency: 'normal', emoji: '1f4c5' },
+  { id: 'flexible', kz: 'Келісім бойынша', ru: 'По договорённости', urgency: 'low', emoji: '1f91d' },
 ];
+
+/** 3D icon shown next to each step's title */
+const STEP_EMOJI = ['1f4dd', '23f0', '1f3d9-fe0f', '1f4b0', '1f4cb'];
 
 const BUDGET_OPTIONS: { id: string; kz: string; ru: string }[] = [
   { id: 'negotiable', kz: 'Келісімді', ru: 'Договорная' },
@@ -81,6 +86,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
 
   const [step, setStep] = useState(0);
   const [details, setDetails] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
   const [photos, setPhotos] = useState<PendingAttachment[]>([]);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [when, setWhen] = useState<string | null>(null);
@@ -146,9 +152,12 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
     );
   };
 
+  const tagText = tags.join(', ');
+  const toggleTag = (label: string) => setTags((prev) => (prev.includes(label) ? prev.filter((x) => x !== label) : [...prev, label]));
+
   const submit = () => {
     const cityName = city ? (lang === 'kz' ? city.nameKz : city.nameRu) : '';
-    const text = details.trim();
+    const text = [tagText, details.trim()].filter(Boolean).join('. ');
     onSubmit({
       city: cityName,
       cityId: cityId || undefined,
@@ -166,9 +175,31 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
   };
 
   const chip = (selected: boolean) =>
-    `min-h-[48px] px-4 rounded-2xl border-2 text-sm font-semibold text-left transition-all active:scale-[0.99] ${
-      selected ? 'border-sky-600 bg-sky-50 text-sky-900' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+    `press min-h-[52px] px-4 rounded-2xl border-2 text-[15px] font-semibold text-left transition-colors ${
+      selected ? 'border-sky-500 bg-sky-50 text-sky-900 shadow-sm shadow-sky-100' : 'border-slate-200 bg-white text-slate-700'
     }`;
+
+  const tick = (selected: boolean) => (
+    <span
+      className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all ${
+        selected ? 'bg-sky-600 scale-100' : 'border-2 border-slate-200 scale-90'
+      }`}
+    >
+      {selected && <Check className="w-3.5 h-3.5 text-white animate-popIn" strokeWidth={3.5} />}
+    </span>
+  );
+
+  const heading = (title: string, hint?: string) => (
+    <div className="flex items-center gap-3.5">
+      <span className="w-16 h-16 rounded-3xl bg-linear-to-br from-sky-50 to-indigo-100 flex items-center justify-center shrink-0">
+        <Emoji3D code={STEP_EMOJI[step]} size={44} eager className="animate-popIn" />
+      </span>
+      <div className="min-w-0">
+        <h2 className="text-[22px] leading-tight font-bold text-slate-900 font-display">{title}</h2>
+        {hint && <p className="mt-1 text-[13px] text-slate-500 leading-snug">{hint}</p>}
+      </div>
+    </div>
+  );
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-4 flex-1 flex flex-col">
@@ -180,42 +211,73 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
           type="button"
           onClick={() => (step === 0 ? onCancel() : setStep(step - 1))}
           aria-label={tx(T.back)}
-          className="w-10 h-10 rounded-xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center shrink-0"
+          className="press w-11 h-11 rounded-2xl bg-slate-100 hover:bg-slate-200 flex items-center justify-center shrink-0"
         >
           <ArrowLeft className="w-5 h-5 text-slate-700" />
         </button>
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <CategoryIcon icon={group.icon} color={group.color} size="sm" />
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <CategoryIcon emoji={service.emoji} color={group.color} size="sm" eager />
           <div className="min-w-0">
             <div className="text-sm font-bold text-slate-900 truncate">{svcName}</div>
-            <div className="text-[11px] text-slate-500">
+            <div className="text-[11px] font-semibold text-slate-500">
               {tx(T.step)} {step + 1} {tx(T.of)} {STEPS}
             </div>
           </div>
         </div>
-        <button type="button" onClick={onCancel} aria-label={tx(T.close)} className="w-10 h-10 flex items-center justify-center text-slate-400">
+        <button type="button" onClick={onCancel} aria-label={tx(T.close)} className="w-11 h-11 flex items-center justify-center text-slate-400">
           <X className="w-5 h-5" />
         </button>
       </div>
-      <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden mb-6">
-        <div className="h-full bg-sky-600 rounded-full transition-all duration-300" style={{ width: `${((step + 1) / STEPS) * 100}%` }} />
+      <div className="flex gap-1.5 mb-6" aria-hidden="true">
+        {Array.from({ length: STEPS }, (_, i) => (
+          <span key={i} className="h-1.5 flex-1 rounded-full bg-slate-100 overflow-hidden">
+            <span
+              className="block h-full rounded-full bg-linear-to-r from-sky-500 to-indigo-500 transition-all duration-500 ease-out"
+              style={{ width: i <= step ? '100%' : '0%' }}
+            />
+          </span>
+        ))}
       </div>
 
-      <div className="flex-1 space-y-4">
+      <div key={step} className="flex-1 space-y-5 animate-stepIn">
         {step === 0 && (
           <>
-            <h2 className="text-2xl font-extrabold text-slate-900 font-display">{tx(T.describeTitle)}</h2>
-            <p className="text-sm text-slate-500 leading-relaxed">{tx(T.describeHint)}</p>
+            {heading(tx(T.describeTitle), tx(T.describeHint))}
+            {group.quick.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{tx(T.quickLabel)}</div>
+                <div className="flex flex-wrap gap-2">
+                  {group.quick.map((q) => {
+                    const label = tx(q);
+                    const on = tags.includes(label);
+                    return (
+                      <button
+                        key={q.ru}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => toggleTag(label)}
+                        className={`press h-10 px-4 rounded-full border-2 text-sm font-semibold inline-flex items-center gap-1.5 transition-colors ${
+                          on ? 'border-sky-500 bg-sky-600 text-white' : 'border-slate-200 bg-white text-slate-700'
+                        }`}
+                      >
+                        {on && <Check className="w-4 h-4" strokeWidth={3} />}
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
             <textarea
               value={details}
               onChange={(e) => setDetails(e.target.value.slice(0, 1000))}
-              rows={5}
+              rows={4}
               placeholder={tx(T.describePlaceholder)}
-              className="w-full p-4 bg-white border-2 border-slate-200 focus:border-sky-500 rounded-2xl text-base text-slate-900 outline-none resize-none"
+              className="w-full p-4 bg-white border-2 border-slate-200 focus:border-sky-500 rounded-2xl text-base text-slate-900 outline-none resize-none transition-colors"
             />
             <div className="flex flex-wrap gap-2">
               {photos.map((p) => (
-                <div key={p.id} className="relative w-20 h-20 rounded-xl overflow-hidden border border-slate-200">
+                <div key={p.id} className="relative w-20 h-20 rounded-2xl overflow-hidden border border-slate-200 animate-popIn">
                   <img src={p.previewUrl} alt="" className="w-full h-full object-cover" />
                   <button
                     type="button"
@@ -230,7 +292,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
               <button
                 type="button"
                 onClick={() => photoInput.current?.click()}
-                className="w-20 h-20 rounded-xl border-2 border-dashed border-slate-300 text-slate-500 flex flex-col items-center justify-center gap-1 text-[11px] font-semibold hover:border-sky-400 hover:text-sky-700"
+                className="press w-20 h-20 rounded-2xl border-2 border-dashed border-sky-300 bg-sky-50/60 text-sky-700 flex flex-col items-center justify-center gap-1 text-[11px] font-bold"
               >
                 <Camera className="w-5 h-5" />
                 {tx(T.addPhoto)}
@@ -242,13 +304,14 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
 
         {step === 1 && (
           <>
-            <h2 className="text-2xl font-extrabold text-slate-900 font-display">{tx(T.whenTitle)}</h2>
-            <div className="grid gap-2">
-              {WHEN_OPTIONS.map((w) => (
-                <button key={w.id} type="button" onClick={() => setWhen(w.id)} className={chip(when === w.id)}>
-                  <span className="flex items-center justify-between">
-                    {tx(w)}
-                    {when === w.id && <Check className="w-5 h-5 text-sky-600" />}
+            {heading(tx(T.whenTitle))}
+            <div className="grid gap-2 stagger">
+              {WHEN_OPTIONS.map((w, i) => (
+                <button key={w.id} type="button" onClick={() => setWhen(w.id)} className={chip(when === w.id)} style={{ ['--i' as string]: i }}>
+                  <span className="flex items-center gap-3">
+                    <Emoji3D code={w.emoji} size={30} eager />
+                    <span className="flex-1">{tx(w)}</span>
+                    {tick(when === w.id)}
                   </span>
                 </button>
               ))}
@@ -258,11 +321,20 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
 
         {step === 2 && (
           <>
-            <h2 className="text-2xl font-extrabold text-slate-900 font-display">{tx(T.whereTitle)}</h2>
-            <div className="grid grid-cols-2 gap-2">
-              {CANONICAL_CITIES.map((c) => (
-                <button key={c.id} type="button" onClick={() => setCityId(c.id)} className={chip(cityId === c.id)}>
-                  {lang === 'kz' ? c.nameKz : c.nameRu}
+            {heading(tx(T.whereTitle))}
+            <div className="grid grid-cols-2 gap-2 stagger">
+              {CANONICAL_CITIES.map((c, i) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setCityId(c.id)}
+                  className={chip(cityId === c.id)}
+                  style={{ ['--i' as string]: i }}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="truncate">{lang === 'kz' ? c.nameKz : c.nameRu}</span>
+                    {cityId === c.id && <Check className="w-4.5 h-4.5 text-sky-600 shrink-0 animate-popIn" strokeWidth={3} />}
+                  </span>
                 </button>
               ))}
             </div>
@@ -270,12 +342,13 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
               type="button"
               onClick={detectLocation}
               disabled={locating}
-              className={`w-full min-h-[48px] rounded-2xl border-2 px-4 text-sm font-semibold flex items-center gap-2 ${
-                location ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'
+              className={`press w-full min-h-[56px] rounded-2xl border-2 px-3 text-sm font-semibold flex items-center gap-3 text-left ${
+                location ? 'border-emerald-400 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'
               }`}
             >
-              {locating ? <Loader2 className="w-4 h-4 animate-spin" /> : location ? <Check className="w-4 h-4" /> : <MapPin className="w-4 h-4" />}
-              {location ? tx(T.locationAdded) : tx(T.location)}
+              <Emoji3D code="1f4cd" size={30} eager />
+              <span className="flex-1">{location ? tx(T.locationAdded) : tx(T.location)}</span>
+              {locating ? <Loader2 className="w-5 h-5 animate-spin text-slate-400" /> : location ? <Check className="w-5 h-5 text-emerald-600" strokeWidth={3} /> : null}
             </button>
             <p className="text-xs text-slate-500 leading-relaxed">{tx(T.locationNote)}</p>
             {photoError && <p className="text-xs text-rose-600">{photoError}</p>}
@@ -284,24 +357,28 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
 
         {step === 3 && (
           <>
-            <h2 className="text-2xl font-extrabold text-slate-900 font-display">{tx(T.budgetTitle)}</h2>
-            <div className="grid gap-2">
-              {BUDGET_OPTIONS.map((b) => (
-                <button
-                  key={b.id}
-                  type="button"
-                  onClick={() => {
-                    setBudget(b.id);
-                    setCustomBudget('');
-                  }}
-                  className={chip(budget === b.id && !customBudget.trim())}
-                >
-                  <span className="flex items-center justify-between">
-                    {tx(b)}
-                    {budget === b.id && !customBudget.trim() && <Check className="w-5 h-5 text-sky-600" />}
-                  </span>
-                </button>
-              ))}
+            {heading(tx(T.budgetTitle))}
+            <div className="grid gap-2 stagger">
+              {BUDGET_OPTIONS.map((b, i) => {
+                const on = budget === b.id && !customBudget.trim();
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => {
+                      setBudget(b.id);
+                      setCustomBudget('');
+                    }}
+                    className={chip(on)}
+                    style={{ ['--i' as string]: i }}
+                  >
+                    <span className="flex items-center justify-between gap-3">
+                      {tx(b)}
+                      {tick(on)}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
             <input
               type="text"
@@ -309,37 +386,49 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
               value={customBudget}
               onChange={(e) => setCustomBudget(e.target.value.replace(/[^\d ]/g, '').slice(0, 12))}
               placeholder={tx(T.budgetCustom)}
-              className="w-full h-12 px-4 bg-white border-2 border-slate-200 focus:border-sky-500 rounded-2xl text-base outline-none"
+              className="w-full h-[52px] px-4 bg-white border-2 border-slate-200 focus:border-sky-500 rounded-2xl text-base outline-none transition-colors"
             />
           </>
         )}
 
         {step === 4 && (
           <>
-            <h2 className="text-2xl font-extrabold text-slate-900 font-display">{tx(T.reviewTitle)}</h2>
-            <div className="bg-white border border-slate-200 rounded-2xl divide-y divide-slate-100">
-              {[
-                { label: tx(T.service), value: svcName, to: -1 },
-                { label: tx(T.details), value: details.trim() || '—', to: 0 },
-                { label: tx(T.photos), value: photos.length ? String(photos.length) : '—', to: 0 },
-                { label: tx(T.when), value: whenOpt ? tx(whenOpt) : '—', to: 1 },
-                { label: tx(T.city), value: city ? (lang === 'kz' ? city.nameKz : city.nameRu) : '—', to: 2 },
-                { label: tx(T.budget), value: budgetLabel || '—', to: 3 },
-              ].map((row) => (
-                <div key={row.label} className="flex items-start justify-between gap-3 p-3.5">
-                  <div className="min-w-0">
-                    <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">{row.label}</div>
-                    <div className="text-sm font-semibold text-slate-900 break-words">{row.value}</div>
-                  </div>
-                  {row.to >= 0 && (
+            {heading(tx(T.reviewTitle))}
+            <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm shadow-slate-200/60">
+              <div className={`flex items-center gap-3 p-4 bg-linear-to-br ${tone(group.color).tile}`}>
+                <Emoji3D code={service.emoji} size={52} eager />
+                <div className="min-w-0 flex-1">
+                  <div className="text-base font-bold text-slate-900 leading-tight">{svcName}</div>
+                  <div className={`text-xs font-semibold ${tone(group.color).text}`}>{groupName(group, lang)}</div>
+                </div>
+                <button type="button" onClick={onCancel} className="text-xs font-bold text-sky-700 shrink-0 min-h-[32px]">
+                  {tx(T.edit)}
+                </button>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {[
+                  { label: tx(T.details), value: [tagText, details.trim()].filter(Boolean).join('. ') || '—', to: 0 },
+                  { label: tx(T.photos), value: photos.length ? String(photos.length) : '—', to: 0 },
+                  { label: tx(T.when), value: whenOpt ? tx(whenOpt) : '—', to: 1 },
+                  { label: tx(T.city), value: city ? (lang === 'kz' ? city.nameKz : city.nameRu) : '—', to: 2 },
+                  { label: tx(T.budget), value: budgetLabel || '—', to: 3 },
+                ].map((row) => (
+                  <div key={row.label} className="flex items-start justify-between gap-3 px-4 py-3">
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">{row.label}</div>
+                      <div className="text-sm font-semibold text-slate-900 break-words">{row.value}</div>
+                    </div>
                     <button type="button" onClick={() => setStep(row.to)} className="text-xs font-bold text-sky-700 shrink-0 min-h-[32px]">
                       {tx(T.edit)}
                     </button>
-                  )}
-                </div>
-              ))}
+                  </div>
+                ))}
+              </div>
             </div>
-            <p className="text-xs text-slate-500 text-center">{tx(T.freeNote)}</p>
+            <div className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-emerald-50 border border-emerald-100">
+              <Emoji3D code="2728" size={22} eager />
+              <p className="text-xs text-emerald-900 leading-relaxed">{tx(T.freeNote)}</p>
+            </div>
           </>
         )}
       </div>
@@ -350,19 +439,20 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
             type="button"
             disabled={!canNext}
             onClick={() => setStep(step + 1)}
-            className="w-full min-h-[52px] rounded-2xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg shadow-sky-600/20 transition-all"
+            className="press w-full min-h-[54px] rounded-2xl bg-linear-to-r from-sky-600 to-indigo-600 disabled:from-slate-200 disabled:to-slate-200 disabled:text-slate-400 disabled:shadow-none text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg shadow-sky-600/25"
           >
-            {step === 0 && !details.trim() && photos.length === 0 ? tx(T.skip) : tx(T.next)}
+            {step === 0 && !details.trim() && photos.length === 0 && tags.length === 0 ? tx(T.skip) : tx(T.next)}
             <ChevronRight className="w-5 h-5" />
           </button>
         ) : (
           <button
             type="button"
             onClick={submit}
-            className="w-full min-h-[52px] rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
+            className="press relative overflow-hidden w-full min-h-[54px] rounded-2xl bg-linear-to-r from-emerald-500 to-teal-600 text-white font-bold text-base flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/25"
           >
-            <Check className="w-5 h-5" />
-            {tx(T.send)}
+            <span className="absolute inset-0 animate-shimmer" aria-hidden="true" />
+            <Check className="relative w-5 h-5" strokeWidth={3} />
+            <span className="relative">{tx(T.send)}</span>
           </button>
         )}
       </div>

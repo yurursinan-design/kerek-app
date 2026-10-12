@@ -5,7 +5,6 @@ import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
 import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { RequestMediaView } from './RequestMediaView';
 import {
-  CheckCircle2,
   ArrowRight,
   ArrowLeft,
   MapPin,
@@ -25,6 +24,8 @@ import {
   Send,
   Check,
 } from 'lucide-react';
+import { CategoryIcon, Emoji3D } from './CategoryIcon';
+import { requestVisual } from './RequestIcon';
 
 interface InterpretationScreenProps {
   initialNeed: ExtractedNeed;
@@ -58,6 +59,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
   // Editable form state
   const [city, setCity] = useState(initialNeed.city || '');
   const [category, setCategory] = useState(initialNeed.category || '');
+  const visual = requestVisual({ serviceId: initialNeed.serviceId, categoryId: initialNeed.categoryId, category: category || initialNeed.category });
   const [service, setService] = useState(initialNeed.service);
   const [date, setDate] = useState(initialNeed.date);
   const [budget, setBudget] = useState(initialNeed.budget);
@@ -183,9 +185,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
           <div className="space-y-4 animate-fadeIn">
             {/* Header */}
             <div className="text-center pt-1">
-              <div className="w-12 h-12 rounded-2xl bg-sky-100 text-sky-600 flex items-center justify-center mx-auto mb-2.5 shadow-xs">
-                <Sparkles className="w-6 h-6 stroke-[2.5]" />
-              </div>
+              <Emoji3D code={visual.emoji} size={72} eager className="mx-auto mb-2 animate-popIn" />
               <h2 className="text-2xl font-bold text-slate-900 tracking-tight font-display">
                 {t.aiConfirmTitle}
               </h2>
@@ -195,21 +195,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
             </div>
 
             {/* Structured Card */}
-            <div className="bg-white rounded-2xl border-2 border-sky-100 shadow-sm p-4 space-y-3.5">
-              {/* Badge Bar */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-sky-800">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>{initialNeed.isAiParsed ? 'Gemini AI' : 'КЕРЕК AI'} · {language === 'kz' ? 'Талдау' : 'Анализ'}</span>
-                </div>
-                {initialNeed.confidence !== undefined && (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                    <span>{Math.round(initialNeed.confidence * 100)}% {language === 'kz' ? 'дәлдік' : 'точность'}</span>
-                  </span>
-                )}
-              </div>
-
+            <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm shadow-slate-200/60 p-4 space-y-3.5">
               {/* Items List */}
               <div className="space-y-3">
                 {/* City */}
@@ -229,9 +215,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
                 {/* Category */}
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 mt-0.5">
-                    <Tag className="w-4 h-4 stroke-[2.5]" />
-                  </div>
+                  <CategoryIcon emoji={visual.emoji} color={visual.color} size="xs" />
                   <div>
                     <span className="text-[11px] font-semibold text-slate-400 block uppercase tracking-wider">
                       {t.fieldCategory}
@@ -510,9 +494,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
           <div className="space-y-4 animate-fadeIn">
             {/* Header */}
             <div className="text-center pt-1">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-2.5">
-                <CheckCircle2 className="w-6 h-6 stroke-[2.5]" />
-              </div>
+              <Emoji3D code="1f4dd" size={64} eager className="mx-auto mb-2 animate-popIn" />
               <h2 className="text-2xl font-bold text-slate-900 tracking-tight font-display">
                 {t.interpretationTitle}
               </h2>
