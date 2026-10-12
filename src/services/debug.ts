@@ -1,11 +1,12 @@
 /**
- * Developer mode: diagnostics panel, data import/export and raw debug boxes are hidden from
- * regular users. Open the app once with `?debug=1` to turn it on for this browser, and with
- * `?debug=0` to turn it off again.
+ * Developer mode: diagnostics panel, data import/export and raw debug boxes. Only in local
+ * development builds (`npm run dev`), opened with `?debug=1` and closed with `?debug=0`. The
+ * published site never shows these tools, whatever the address says.
  */
 const DEBUG_KEY = 'kerek_debug_v1';
 
 function readFlag(): boolean {
+  if (!import.meta.env?.DEV) return false;
   try {
     if (typeof window === 'undefined') return false;
     const param = new URLSearchParams(window.location.search).get('debug');

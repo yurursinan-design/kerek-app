@@ -1,7 +1,6 @@
-import * as functions from 'firebase-functions';
 import * as crypto from 'crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { defineSecret } from 'firebase-functions/params';
@@ -22,29 +21,48 @@ const geminiApiKey = defineSecret('GEMINI_API_KEY');
 // (and its KASPI_WEBHOOK_SECRET, which blocked deploying functions while undefined) was removed;
 // add a real integration once the Kaspi merchant specifications are available.
 
-/** Counts calls per key in a one-minute window (rateLimits/{key}); false once max is reached. */
-async function allowCall(key: string, max: number, now: number): Promise<boolean> {
+/**
+ * Counts calls per key in a time window (rateLimits/{key}); false once max is reached.
+ * expireAt lets a Firestore TTL policy on rateLimits delete old counters automatically.
+ */
+async function allowCall(key: string, max: number, now: number, windowMs = 60000): Promise<boolean> {
   const ref = db.collection('rateLimits').doc(key);
+  const expireAt = Timestamp.fromMillis(now + Math.max(windowMs, 60000) + 24 * 3600 * 1000);
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     const data = snap.exists ? snap.data() || {} : {};
     const windowStart = typeof data.windowStart === 'number' ? data.windowStart : 0;
     const count = typeof data.callCount === 'number' ? data.callCount : 0;
-    if (now - windowStart >= 60000) {
-      tx.set(ref, { windowStart: now, callCount: 1, lastCallAt: now });
+    if (now - windowStart >= windowMs) {
+      tx.set(ref, { windowStart: now, callCount: 1, lastCallAt: now, expireAt });
       return true;
     }
     if (count >= max) return false;
-    tx.set(ref, { windowStart, callCount: count + 1, lastCallAt: now });
+    tx.set(ref, { windowStart, callCount: count + 1, lastCallAt: now, expireAt });
     return true;
   });
 }
 
-/** Caller's address as seen by Google's front end (first X-Forwarded-For entry). */
+/**
+ * Caller's address. Google's front end appends the address it saw to X-Forwarded-For, so the last
+ * entry is the real one; earlier entries can be anything the caller sent.
+ */
 function clientIp(req: { ip?: string; headers?: Record<string, string | string[] | undefined> } | undefined): string {
   const fwd = req?.headers?.['x-forwarded-for'];
-  const first = (Array.isArray(fwd) ? fwd[0] : fwd || '').split(',')[0].trim();
-  return first || req?.ip || '';
+  const parts = (Array.isArray(fwd) ? fwd.join(',') : fwd || '').split(',').map((p) => p.trim()).filter(Boolean);
+  return parts[parts.length - 1] || req?.ip || '';
+}
+
+const DAY_MS = 24 * 3600 * 1000;
+
+/** Request text shown to other people: no links or phone numbers, short. */
+function cleanForNotification(text: unknown): string {
+  return String(typeof text === 'string' ? text : '')
+    .replace(/https?:\/\/\S+|www\.\S+/gi, '')
+    .replace(/\+?\d[\d\s()-]{6,}\d/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
 }
 
 /**
@@ -67,6 +85,9 @@ export const parseServiceRequest = onCall<
   {
     region: GEMINI_CONFIG.region,
     secrets: [geminiApiKey],
+    // Hard ceiling on parallel instances and run time, so abuse can't scale the bill
+    maxInstances: 5,
+    timeoutSeconds: 20,
   },
   async (request) => {
     // 1. Authentication check: Caller must be signed in (anonymous or permanent UID)
@@ -78,17 +99,20 @@ export const parseServiceRequest = onCall<
     }
 
     const uid = request.auth.uid;
+    const isAnonymous = (request.auth.token as any)?.firebase?.sign_in_provider === 'anonymous';
 
-    // 2. Server-side rate limits: per account, and per network address so that opening new
-    // anonymous accounts does not get around the account limit
+    // 2. Server-side rate limits: per account (stricter for anonymous visitors), per day, per
+    // network address (so new anonymous accounts don't get around the account limit), and one
+    // overall daily ceiling for the whole app.
     const now = Date.now();
-    if (!(await allowCall(`uid_${uid}`, 10, now))) {
-      throw new HttpsError('resource-exhausted', 'Too many requests. Please wait a moment before trying again.');
-    }
+    const tooMany = () => new HttpsError('resource-exhausted', 'Too many requests. Please wait a moment before trying again.');
+    if (!(await allowCall(`uid_${uid}`, isAnonymous ? 5 : 10, now))) throw tooMany();
+    if (!(await allowCall(`uid_day_${uid}`, isAnonymous ? 30 : 100, now, DAY_MS))) throw tooMany();
     const ip = clientIp(request.rawRequest);
     if (ip && !(await allowCall(`ip_${crypto.createHash('sha256').update(ip).digest('hex').slice(0, 32)}`, 30, now))) {
-      throw new HttpsError('resource-exhausted', 'Too many requests. Please wait a moment before trying again.');
+      throw tooMany();
     }
+    if (!(await allowCall('global_day', 5000, now, DAY_MS))) throw tooMany();
 
     // 3. Input validation: text must be non-empty string <= 500 characters
     const text = request.data?.text;
@@ -118,10 +142,7 @@ export const parseServiceRequest = onCall<
     const apiKey = geminiApiKey.value() || process.env.GEMINI_API_KEY;
     if (!apiKey) {
       console.error('[parseServiceRequest] GEMINI_API_KEY secret is not configured.');
-      throw new HttpsError(
-        'failed-precondition',
-        'Gemini API key is not configured in Secret Manager.'
-      );
+      throw new HttpsError('unavailable', 'The AI parser is not available right now.');
     }
 
     // 4. Parse request with Gemini & validate server-side
@@ -130,11 +151,9 @@ export const parseServiceRequest = onCall<
       // Ensure function NEVER writes to Firestore directly (pure parser)
       return parsed;
     } catch (err: any) {
-      console.error('[parseServiceRequest] Error during AI parsing:', err);
-      throw new HttpsError(
-        'internal',
-        err?.message || 'Failed to parse request with Gemini.'
-      );
+      console.error('[parseServiceRequest] Error during AI parsing:', err?.message || err);
+      // Details stay in the server log; the app falls back to its own analysis
+      throw new HttpsError('internal', 'The AI parser could not read this request.');
     }
   }
 );
@@ -144,7 +163,7 @@ export const parseServiceRequest = onCall<
  * Automatically notifies providers matching the same cityId and categoryId.
  */
 export const onNewRequestNotifyProviders = onDocumentCreated(
-  'requests/{id}',
+  { document: 'requests/{id}', maxInstances: 5 },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
@@ -154,10 +173,18 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
     const cityId = requestData?.cityId;
     const categoryId = requestData?.categoryId;
     const customerId = requestData?.customerId;
-    const serviceTitle = requestData?.service || requestData?.category || 'Жаңа тапсырыс';
+    const serviceTitle = cleanForNotification(requestData?.service) || cleanForNotification(requestData?.category) || 'Жаңа тапсырыс';
 
-    if (!cityId || !categoryId) {
-      console.log(`[onNewRequestNotifyProviders] Request ${requestId} missing cityId or categoryId`);
+    if (!cityId || !categoryId || typeof customerId !== 'string') {
+      console.log(`[onNewRequestNotifyProviders] Request ${requestId} missing cityId, categoryId or customerId`);
+      return;
+    }
+    if (!['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'].includes(requestData?.status)) return;
+
+    // One customer can alert providers for at most 5 new requests an hour (protects providers
+    // from spam and the project from write costs)
+    if (!(await allowCall(`newreq_${customerId}`, 5, Date.now(), 3600 * 1000))) {
+      console.warn(`[onNewRequestNotifyProviders] Skipped alerts for ${requestId}: customer over the hourly limit`);
       return;
     }
 
@@ -165,8 +192,8 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
       // Find matching providers with same cityId and categoryId
       // Providers list every group they work in (categoryIds); older profiles have only categoryId
       const [byList, byMain] = await Promise.all([
-        db.collection('providers').where('cityId', '==', cityId).where('categoryIds', 'array-contains', categoryId).get(),
-        db.collection('providers').where('cityId', '==', cityId).where('categoryId', '==', categoryId).get(),
+        db.collection('providers').where('cityId', '==', cityId).where('categoryIds', 'array-contains', categoryId).limit(300).get(),
+        db.collection('providers').where('cityId', '==', cityId).where('categoryId', '==', categoryId).limit(300).get(),
       ]);
       const seen = new Set<string>();
       const providersSnap = { docs: [...byList.docs, ...byMain.docs].filter((d) => !seen.has(d.id) && (seen.add(d.id), true)) };
@@ -183,8 +210,9 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
         const providerId = doc.id;
         const providerUserId = providerData.userId || providerId;
 
-        // Skip if provider is the customer themselves
+        // Skip the customer themselves, and providers the operator blocked or hid
         if (providerUserId === customerId) continue;
+        if (providerData.blocked === true || providerData.hidden === true) continue;
 
         const notifId = `notif_new_request_${requestId}_${providerId}`;
         const notifRef = db.collection('notifications').doc(notifId);
@@ -199,12 +227,10 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
             title: {
               kz: 'Жаңа сұраныс табылды',
               ru: 'Новая подходящая заявка',
-              tr: 'Yeni uygun talep',
             },
             body: {
               kz: `Сіздің бағытыңыз бойынша жаңа тапсырыс: ${serviceTitle}`,
               ru: `Новый запрос по вашему профилю: ${serviceTitle}`,
-              tr: `Profilinize uygun yeni talep: ${serviceTitle}`,
             },
             requestId,
             targetScreen: 'request_details',

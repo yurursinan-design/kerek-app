@@ -2,6 +2,7 @@ import { deleteUser } from 'firebase/auth';
 import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from './firebase';
 import { LEGAL_VERSION } from '../data/legalTexts';
+import { clearPersonalLocalData } from './storage';
 
 /** Deleting an account needs a recent sign-in (Firebase rule); older sessions confirm by SMS again. */
 export class RecentLoginRequiredError extends Error {
@@ -81,6 +82,8 @@ export async function deleteMyAccount(): Promise<void> {
     if (err?.code === 'auth/requires-recent-login') throw new RecentLoginRequiredError();
     throw err;
   }
+  // The device copy of the account's data goes too
+  clearPersonalLocalData();
 }
 
 async function deleteIfExists(ref: ReturnType<typeof doc>): Promise<void> {

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AppNotification, Language } from '../types';
 import { Bell, ChevronRight, X } from 'lucide-react';
+import { localizedText } from '../services/safeData';
 
 interface InAppToastProps {
   notification: AppNotification | null;
@@ -33,8 +34,8 @@ export const InAppToast: React.FC<InAppToastProps> = ({
 
   if (!notification) return null;
 
-  const title = notification.title[language] || notification.title.ru || notification.title.kz;
-  const body = notification.body[language] || notification.body.ru || notification.body.kz;
+  const title = localizedText(notification.title, language);
+  const body = localizedText(notification.body, language);
 
   return (
     <div

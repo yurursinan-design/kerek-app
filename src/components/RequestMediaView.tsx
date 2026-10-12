@@ -11,6 +11,7 @@ import {
   Maximize2,
   FileText,
 } from 'lucide-react';
+import { safeCoords, safeMediaUrl, safeText } from '../services/safeData';
 
 interface RequestMediaViewProps {
   attachments?: (RequestAttachment | PendingAttachment)[];
@@ -32,8 +33,12 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
   const t = translations[language];
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
 
+  // Values come from other people's documents: keep only well-formed items
+  attachments = Array.isArray(attachments) ? attachments.filter((a) => a && typeof a === 'object') : undefined;
+  const coords = safeCoords(location);
+  location = coords ? { ...(location as RequestLocation), ...coords } : undefined;
   const hasAttachments = Boolean(attachments && attachments.length > 0);
-  const hasLocation = Boolean(location && location.latitude && location.longitude);
+  const hasLocation = Boolean(coords);
 
   if (!hasAttachments && !hasLocation) {
     return null;
@@ -57,21 +62,18 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
   );
 
   const getMediaUrl = (item: RequestAttachment | PendingAttachment): string => {
-    if ('downloadUrl' in item && item.downloadUrl) return item.downloadUrl;
-    if ('previewUrl' in item && item.previewUrl) return item.previewUrl;
+    if ('downloadUrl' in item && item.downloadUrl) return safeMediaUrl(item.downloadUrl);
+    if ('previewUrl' in item && item.previewUrl) return safeMediaUrl(item.previewUrl);
     return '';
   };
 
   const getMediaName = (item: RequestAttachment | PendingAttachment): string => {
-    if ('fileName' in item && item.fileName) return item.fileName;
-    if ('name' in item && item.name) return item.name;
-    return 'Media';
+    return safeText((item as any).fileName) || safeText((item as any).name) || 'Media';
   };
 
   const getMediaSize = (item: RequestAttachment | PendingAttachment): number => {
-    if ('sizeBytes' in item && item.sizeBytes) return item.sizeBytes;
-    if ('size' in item && item.size) return item.size;
-    return 0;
+    const n = Number((item as any).sizeBytes ?? (item as any).size ?? 0);
+    return Number.isFinite(n) ? n : 0;
   };
 
   return (

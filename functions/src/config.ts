@@ -3,8 +3,9 @@
  */
 export const GEMINI_CONFIG = {
   model: 'gemini-flash-latest',
+  fallbackModel: 'gemini-flash-lite-latest',
   region: 'asia-south1',
-  secretName: 'GEMINI_API_KEY',
   maxInputChars: 500,
+  maxOutputTokens: 1024,
   temperature: 0.1,
 } as const;

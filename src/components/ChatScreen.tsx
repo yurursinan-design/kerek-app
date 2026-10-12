@@ -29,6 +29,7 @@ import {
   X,
   ExternalLink,
 } from 'lucide-react';
+import { safeMediaUrl } from '../services/safeData';
 
 interface ChatScreenProps {
   requestId: string;
@@ -487,10 +488,10 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                           return (
                             <div key={att.id} className="relative group overflow-hidden rounded-xl bg-slate-900/10">
                               <img
-                                src={att.downloadUrl}
+                                src={safeMediaUrl(att.downloadUrl)}
                                 alt={att.fileName}
                                 className="w-full max-h-60 object-cover cursor-pointer hover:opacity-95 transition-opacity rounded-xl"
-                                onClick={() => setFullImageViewUrl(att.downloadUrl)}
+                                onClick={() => setFullImageViewUrl(safeMediaUrl(att.downloadUrl))}
                                 loading="lazy"
                               />
                               <div className="flex items-center justify-between text-[10px] mt-1 px-1 opacity-80">
@@ -529,7 +530,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                             </div>
 
                             <a
-                              href={att.downloadUrl}
+                              href={safeMediaUrl(att.downloadUrl) || undefined}
                               target="_blank"
                               rel="noopener noreferrer"
                               download={att.fileName}

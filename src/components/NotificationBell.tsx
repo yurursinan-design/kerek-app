@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { repository } from '../services';
 import { auth } from '../services/firebase';
+import { localizedText } from '../services/safeData';
 
 interface NotificationBellProps {
   notifications: AppNotification[];
@@ -187,8 +188,8 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
               </div>
             ) : (
               notifications.map((notif) => {
-                const titleText = notif.title[language] || notif.title.ru || notif.title.kz;
-                const bodyText = notif.body[language] || notif.body.ru || notif.body.kz;
+                const titleText = localizedText(notif.title, language);
+                const bodyText = localizedText(notif.body, language);
 
                 return (
                   <button

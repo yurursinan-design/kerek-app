@@ -71,6 +71,7 @@ import {
 import { getCurrentUserId } from './localRepository';
 import { generateRequestId, providerOfferId } from './ids';
 import { CANONICAL_CITIES, CANONICAL_CATEGORIES, normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
+import { cleanImageForUpload } from './imageClean';
 
 /**
  * Sanitizes an object before sending to Cloud Firestore.
@@ -564,9 +565,12 @@ export class FirebaseRepository implements Repository {
     } else {
       throw new Error('Attachment payload data is missing or invalid');
     }
+    if (validation.type === 'image' && blobPayload instanceof Blob) {
+      blobPayload = await cleanImageForUpload(blobPayload);
+    }
 
     const metadata = {
-      contentType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mpeg'),
+      contentType: (blobPayload instanceof Blob && blobPayload.type) || file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mpeg'),
       customMetadata: {
         requestId: cleanId,
         uploadedBy: authUid || effectiveCustId,
@@ -2051,10 +2055,13 @@ export class FirebaseRepository implements Repository {
     } else {
       throw new Error('Attachment payload data is missing or invalid');
     }
+    if (blobPayload instanceof Blob && blobPayload.type.startsWith('image/')) {
+      blobPayload = await cleanImageForUpload(blobPayload);
+    }
 
     const fileRef = storageRef(storage, storagePath);
     const metadata = {
-      contentType: file.type || (validation.type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+      contentType: (blobPayload instanceof Blob && blobPayload.type) || file.type || (validation.type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
       customMetadata: {
         conversationId: cleanId,
         uploadedBy: authUid,

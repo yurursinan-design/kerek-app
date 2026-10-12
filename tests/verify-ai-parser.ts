@@ -33,9 +33,9 @@ async function runTests() {
     `Region: ${GEMINI_CONFIG.region}`
   );
   assert(
-    'Secret name is GEMINI_API_KEY',
-    GEMINI_CONFIG.secretName === 'GEMINI_API_KEY',
-    `Secret: ${GEMINI_CONFIG.secretName}`
+    'Model output is capped',
+    GEMINI_CONFIG.maxOutputTokens > 0 && GEMINI_CONFIG.maxOutputTokens <= 2048,
+    `maxOutputTokens: ${GEMINI_CONFIG.maxOutputTokens}`
   );
   assert(
     'Model is not fixed to legacy gemini-1.5-flash',

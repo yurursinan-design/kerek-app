@@ -8,6 +8,7 @@ import {
   signOut,
 } from 'firebase/auth';
 import { auth, ensureFirebaseAuth, isFirebaseConfigured } from './firebase';
+import { clearPersonalLocalData } from './storage';
 
 /**
  * SMS login.
@@ -26,8 +27,9 @@ export function normalizePhone(raw: string): string | null {
     if (digits.length === 11 && digits.startsWith('8')) digits = '7' + digits.slice(1);
     else if (digits.length === 10 && digits.startsWith('7')) digits = '7' + digits;
   }
-  if (digits.length < 10 || digits.length > 15) return null;
-  if (digits.startsWith('7') && digits.length !== 11) return null;
+  // Kazakhstan numbers only (+7 7xx / +7 6xx). +7 is shared with Russia, and limiting SMS to
+  // Kazakhstan also keeps the login from being abused to send paid SMS abroad.
+  if (!/^7[67]\d{9}$/.test(digits)) return null;
   return `+${digits}`;
 }
 
@@ -109,6 +111,7 @@ export async function confirmSmsCode(confirmation: ConfirmationResult, code: str
 export async function logoutToAnonymous(): Promise<void> {
   if (!auth) return;
   await signOut(auth);
+  clearPersonalLocalData();
   await ensureFirebaseAuth();
 }
 

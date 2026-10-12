@@ -16,23 +16,9 @@ const getEnvVar = (viteVal: string | undefined, nodeVal: string | undefined): st
   return undefined;
 };
 
-// Read fallback configuration from root firebase-applet-config.json if present
-let fileConfig: Record<string, any> = {};
-try {
-  const configs = import.meta.glob(
-    ['/firebase-applet-config.json', '../*.json', '../../firebase-applet-config.json'],
-    { eager: true }
-  ) as Record<string, any>;
-  for (const [key, value] of Object.entries(configs)) {
-    if (key.endsWith('firebase-applet-config.json') && value) {
-      fileConfig = ((value as any).default || value) as Record<string, any>;
-      break;
-    }
-  }
-} catch {
-  fileConfig = {};
-}
-const rootConfig = fileConfig.firebaseConfig || fileConfig;
+// Configuration comes only from VITE_* build variables. (An older loader also bundled any JSON
+// file found next to the sources, which could have published a credential file by accident.)
+const rootConfig: Record<string, any> = {};
 
 const getEnvOrFile = (envVal: string | undefined, fieldKey: string): string | undefined => {
   if (envVal && typeof envVal === 'string' && envVal.trim().length > 0) {

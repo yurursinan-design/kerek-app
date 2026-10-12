@@ -47,6 +47,7 @@ import {
   getCategoryDisplayName,
   getCityDisplayName,
 } from './services/taxonomy';
+import { localizedText } from './services/safeData';
 
 const LANGUAGE_KEY = 'kerek_language_v1';
 // Where the user was in this browser tab, so a page refresh reopens the same screen
@@ -190,8 +191,8 @@ export default function App() {
               setActiveToastNotification(latest);
               playNotificationSound();
               showBrowserNotificationIfGranted(
-                latest.title[language] || latest.title.ru,
-                latest.body[language] || latest.body.ru,
+                localizedText(latest.title, language),
+                localizedText(latest.body, language),
                 () => handleNotificationClick(latest)
               );
             }
