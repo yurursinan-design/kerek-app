@@ -8,12 +8,14 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The deploy workflow runs these same tests first and only deploys when they pass
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: tests-${{ github.ref }}
+  group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -48,6 +50,9 @@ jobs:
 
       - name: Tip kontrolü
         run: bun run typecheck
+
+      - name: Cloud Functions derleme kontrolü
+        run: npm --prefix functions ci && npm --prefix functions run build
 
       - name: Güvenlik kuralı testleri
         run: npm run test:rules

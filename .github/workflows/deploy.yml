@@ -35,7 +35,12 @@ env:
   FIREBASE_PROJECT_ID: kerek-9d153
 
 jobs:
+  # Same tests as on Pull Requests; nothing is deployed unless they all pass
+  test:
+    uses: ./.github/workflows/tests.yml
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
