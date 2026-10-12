@@ -1687,6 +1687,54 @@ async function runTestSuite() {
       }));
     });
 
+    // =========================================================================
+    // SECTION 14: Job completion — the provider reports the job finished, only the
+    // customer closes it (COMPLETED)
+    // =========================================================================
+    console.log('\n--- SECTION 14: Job completion needs the customer ---');
+
+    const seedJob = async (id: string, status: string) => {
+      await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+        const db = adminContext.firestore();
+        await setDoc(doc(db, 'offers', `offer_${id}`), {
+          id: `offer_${id}`, requestId: id, providerId: 'prov_job', providerUserId: 'prov_job', status: 'ACCEPTED',
+        });
+        await setDoc(doc(db, 'requests', id), {
+          id, customerId: 'cust_job', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status, selectedOfferId: `offer_${id}`,
+        });
+      });
+    };
+
+    await seedJob('req_job_1', 'IN_PROGRESS');
+    await test('Selected provider cannot mark the request COMPLETED', async () => {
+      await assertFails(updateDoc(doc(phoneUser('prov_job').firestore(), 'requests', 'req_job_1'), { status: 'COMPLETED' }));
+    });
+    await test('Selected provider can report the job finished (providerDoneAt)', async () => {
+      await assertSucceeds(updateDoc(doc(phoneUser('prov_job').firestore(), 'requests', 'req_job_1'), { providerDoneAt: '2026-10-12T10:00:00Z' }));
+    });
+    await test('Another provider cannot report the job finished', async () => {
+      await assertFails(updateDoc(doc(phoneUser('prov_other').firestore(), 'requests', 'req_job_1'), { providerDoneAt: '2026-10-12T10:00:00Z' }));
+    });
+    await test('Customer cannot set providerDoneAt', async () => {
+      await assertFails(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_1'), { providerDoneAt: '2026-10-12T10:00:00Z' }));
+    });
+    await test('Customer confirms completion', async () => {
+      await assertSucceeds(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_1'), { status: 'COMPLETED' }));
+    });
+
+    await seedJob('req_job_2', 'PROVIDER_SELECTED');
+    await test('Selected provider can start the job (IN_PROGRESS)', async () => {
+      await assertSucceeds(updateDoc(doc(phoneUser('prov_job').firestore(), 'requests', 'req_job_2'), { status: 'IN_PROGRESS' }));
+    });
+    await test('Customer can cancel a job in progress', async () => {
+      await assertSucceeds(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_2'), { status: 'CANCELLED' }));
+    });
+
+    await seedJob('req_job_3', 'PROVIDER_SELECTED');
+    await test('Customer can confirm completion straight from PROVIDER_SELECTED', async () => {
+      await assertSucceeds(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_3'), { status: 'COMPLETED' }));
+    });
+
   } finally {
     // Isolated Emulator Cleanup
     console.log('\n--- CLEANUP: Clearing Emulator Data ---');

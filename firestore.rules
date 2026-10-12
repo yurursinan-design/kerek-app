@@ -199,7 +199,7 @@ service cloud.firestore {
         (existing().customerId == request.auth.uid &&
          incoming().customerId == existing().customerId &&
          incoming().id == existing().id &&
-         existing().status in ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED', 'PROVIDER_SELECTED', 'ACCEPTED'] &&
+         existing().status in ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED', 'PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'] &&
          incoming().status == 'CANCELLED' &&
          ((!('selectedOfferId' in existing()) && !('selectedOfferId' in incoming())) ||
           ('selectedOfferId' in existing() && 'selectedOfferId' in incoming() && incoming().selectedOfferId == existing().selectedOfferId)) &&
@@ -228,10 +228,12 @@ service cloud.firestore {
              get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.providerId == request.auth.uid) &&
             get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.status == 'PENDING')
          )) ||
-        // 5. Selected provider updating job status (in-progress, completed)
-        (incoming().status in ['IN_PROGRESS', 'COMPLETED'] &&
-         existing().status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'] &&
-         changed.hasOnly(['status', 'updatedAt']) &&
+        // 5. Selected provider starting the job, or reporting it finished (providerDoneAt).
+        //    Only the customer can mark the request COMPLETED (branch 6).
+        (existing().status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'] &&
+         (incoming().status == existing().status || incoming().status == 'IN_PROGRESS') &&
+         changed.hasOnly(['status', 'providerDoneAt', 'updatedAt']) &&
+         (!('providerDoneAt' in incoming()) || (incoming().providerDoneAt is string && incoming().providerDoneAt.size() <= 40)) &&
          ('selectedOfferId' in existing()) && existing().selectedOfferId is string &&
          ('selectedOfferId' in incoming()) && incoming().selectedOfferId == existing().selectedOfferId &&
          exists(/databases/$(database)/documents/offers/$(existing().selectedOfferId)) &&

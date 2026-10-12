@@ -12,7 +12,7 @@ import {
   ServiceRequest,
 } from '../types';
 import { translations } from '../i18n/translations';
-import { repository, getCurrentUserId, checkClientRateLimit, getFriendlyErrorMessage } from '../services';
+import { repository, getCurrentUserId, checkClientRateLimit, getFriendlyErrorMessage, notificationService } from '../services';
 import { isDebugMode } from '../services/debug';
 import { auth } from '../services/firebase';
 import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
@@ -536,23 +536,26 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     }
   };
 
+  // The provider reports the job finished; the customer confirms it and the request becomes COMPLETED
   const handleCompleteWork = async (requestId: string) => {
     if (!checkClientRateLimit(`complete_work_${requestId}`, 800)) return;
     setActionLoadingReqId(requestId);
     try {
-      const updated = await repository.updateRequestStatus(requestId, 'COMPLETED');
+      const doneAt = new Date().toISOString();
+      const updated = await repository.updateRequest(requestId, { providerDoneAt: doneAt });
       if (updated) {
         setRequests((prev) =>
-          prev.map((r) => (r.id === requestId ? { ...r, status: 'COMPLETED' } : r))
+          prev.map((r) => (r.id === requestId ? { ...r, providerDoneAt: doneAt } : r))
         );
+        notificationService.notifyProviderReportedDone(updated).catch(() => {});
         setNotification(
           language === 'kz'
-            ? 'Жұмыс сәтті аяқталды'
+            ? 'Тапсырыс берушіге хабар жіберілді. Ол растағанда жұмыс жабылады.'
             : language === 'tr'
-            ? 'İş başarıyla tamamlandı'
-            : 'Работа успешно завершена'
+            ? 'Müşteriye bildirildi. Onayladığında iş kapanacak.'
+            : 'Заказчику отправлено уведомление. Работа закроется после его подтверждения.'
         );
-        setTimeout(() => setNotification(null), 3500);
+        setTimeout(() => setNotification(null), 4000);
       }
     } catch (err) {
       setErrorMessage(getFriendlyErrorMessage(err, language));
@@ -1199,19 +1202,14 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                           </div>
                         )}
 
-                        {/* Order / Escrow Confirmation */}
-                        {(req.paymentStatus === 'held_in_escrow' || existingOffer?.paymentStatus === 'held_in_escrow') && (
-                          <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-900 shadow-2xs">
-                            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                            <span>
-                              {language === 'kz'
-                                ? 'Тапсырыс расталды. Жұмысқа сенімді кірісе аласыз.'
-                                : language === 'tr'
-                                ? 'Sipariş onaylandı. İşe güvenle başlayabilirsiniz.'
-                                : 'Заказ подтвержден. Можете смело приступать к работе.'}
-                            </span>
-                          </div>
-                        )}
+                        {/* Payment happens directly between customer and provider */}
+                        <p className="text-[11px] text-slate-600 leading-relaxed">
+                          {language === 'kz'
+                            ? 'Төлемді тапсырыс берушіден тікелей аласыз (қолма-қол немесе аударым).'
+                            : language === 'tr'
+                            ? 'Ödemeyi doğrudan müşteriden alırsınız (nakit veya havale).'
+                            : 'Оплату вы получаете напрямую от заказчика (наличными или переводом).'}
+                        </p>
 
                         {/* Agreed Price */}
                         {existingOffer && (
@@ -1265,7 +1263,20 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                             </button>
                           )}
 
-                          {normStatus === 'IN_PROGRESS' && (
+                          {normStatus === 'IN_PROGRESS' && req.providerDoneAt && (
+                            <div className="w-full p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center gap-2">
+                              <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                              <span>
+                                {language === 'kz'
+                                  ? 'Тапсырыс берушінің растауы күтілуде'
+                                  : language === 'tr'
+                                  ? 'Müşterinin onayı bekleniyor'
+                                  : 'Ожидается подтверждение заказчика'}
+                              </span>
+                            </div>
+                          )}
+
+                          {normStatus === 'IN_PROGRESS' && !req.providerDoneAt && (
                             <button
                               type="button"
                               onClick={() => handleCompleteWork(req.id)}

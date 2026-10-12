@@ -120,6 +120,15 @@ export function normalizeRequestStatus(status?: string): RequestStatus {
   return 'OPEN';
 }
 
+/** Request fields written when the selected provider reports the job finished. */
+function providerDoneUpdate(req: ServiceRequest, now: string): Partial<ServiceRequest> & { updatedAt: string } {
+  return {
+    providerDoneAt: now,
+    updatedAt: now,
+    ...(req.status === 'PROVIDER_SELECTED' || req.status === 'ACCEPTED' ? { status: 'IN_PROGRESS' as const } : {}),
+  };
+}
+
 export class FirebaseRepository implements Repository {
   private isServicePermitted: boolean = true;
   private hasInitializedHealthCheck: boolean = false;
@@ -1040,7 +1049,7 @@ export class FirebaseRepository implements Repository {
           normStatus === 'CANCELLED'
         ) {
           const nonStatusKeys = Object.keys(safeUpdates).filter(
-            (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId'
+            (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId' && k !== 'providerDoneAt'
           );
           if (nonStatusKeys.length > 0) {
             throw new Error(
@@ -2471,10 +2480,14 @@ export class FirebaseRepository implements Repository {
       if (reqSnap.exists()) {
         const reqData = reqSnap.data() as ServiceRequest;
         if (reqData.status !== 'COMPLETED') {
-          transaction.update(reqRef, {
-            status: 'COMPLETED',
-            updatedAt: now,
-          });
+          // Only the customer closes the request; the provider reports the job finished
+          const callerUid = auth?.currentUser?.uid;
+          transaction.update(
+            reqRef,
+            callerUid && callerUid === reqData.customerId
+              ? { status: 'COMPLETED', updatedAt: now }
+              : providerDoneUpdate(reqData, now)
+          );
         }
       }
 
@@ -2536,9 +2549,10 @@ export class FirebaseRepository implements Repository {
         }
 
         if (isMatchingOwnerAndRequest) {
-          // Appointment can ONLY transition to COMPLETED if it was in CONFIRMED or COMPLETED status.
-          // Unconfirmed appointments (PROPOSED, RESCHEDULED) cannot be marked COMPLETED per security rules.
-          if (existingAppt.status === 'CONFIRMED' || existingAppt.status === 'COMPLETED') {
+          // Appointment can ONLY transition to COMPLETED from CONFIRMED (an appointment the provider
+          // already completed is left as is). Unconfirmed appointments (PROPOSED, RESCHEDULED) cannot be
+          // marked COMPLETED per security rules.
+          if (existingAppt.status === 'CONFIRMED') {
             const now = new Date().toISOString();
             const apptUpdates: Partial<Appointment> = {
               status: 'COMPLETED',
@@ -2645,11 +2659,9 @@ export class FirebaseRepository implements Repository {
       if (reqSnap.exists()) {
         const reqData = reqSnap.data() as ServiceRequest;
         if (workStatus === 'WORK_COMPLETED') {
-          if (reqData.status !== 'COMPLETED') {
-            transaction.update(reqRef, {
-              status: 'COMPLETED',
-              updatedAt: now,
-            });
+          // The provider reports the job finished; the customer confirms it (COMPLETED)
+          if (reqData.status !== 'COMPLETED' && reqData.status !== 'CANCELLED') {
+            transaction.update(reqRef, providerDoneUpdate(reqData, now));
           }
         } else if (workStatus === 'WORK_STARTED' || workStatus === 'PROVIDER_ARRIVED' || workStatus === 'PROVIDER_ON_THE_WAY') {
           if (reqData.status === 'PROVIDER_SELECTED' || reqData.status === 'ACCEPTED') {

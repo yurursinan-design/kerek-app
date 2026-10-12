@@ -567,7 +567,7 @@ export class LocalRepository implements Repository {
         normStatus === 'CANCELLED'
       ) {
         const nonStatusKeys = Object.keys(updates).filter(
-          (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId'
+          (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId' && k !== 'providerDoneAt'
         );
         if (nonStatusKeys.length > 0) {
           throw new Error(
@@ -1813,11 +1813,23 @@ export class LocalRepository implements Repository {
     try {
       const req = await this.getRequest(existing.requestId);
       if (req && req.status !== 'COMPLETED') {
-        await this.updateRequestStatus(existing.requestId, 'COMPLETED');
+        // Only the customer closes the request; the provider reports the job finished
+        if (req.customerId === getCurrentUserId()) {
+          await this.updateRequestStatus(existing.requestId, 'COMPLETED');
+        } else {
+          await this.markProviderDone(req);
+        }
       }
     } catch {}
 
     return updatedAppt;
+  }
+
+  private async markProviderDone(req: ServiceRequest): Promise<void> {
+    await this.updateRequest(req.id, {
+      providerDoneAt: new Date().toISOString(),
+      ...(req.status === 'PROVIDER_SELECTED' || req.status === 'ACCEPTED' ? { status: 'IN_PROGRESS' as const } : {}),
+    });
   }
 
   async confirmCustomerCompletion(
@@ -1840,7 +1852,7 @@ export class LocalRepository implements Repository {
         throw new Error('Unauthorized: Appointment does not belong to this request or customer');
       }
       if (isMatching) {
-        if (existingAppt.status === 'CONFIRMED' || existingAppt.status === 'COMPLETED') {
+        if (existingAppt.status === 'CONFIRMED') {
           updatedAppt = await this.updateAppointment(existingAppt.id, {
             status: 'COMPLETED',
             workStatus: 'WORK_COMPLETED',
@@ -1907,8 +1919,8 @@ export class LocalRepository implements Repository {
     try {
       const req = await this.getRequest(existing.requestId);
       if (req) {
-        if (workStatus === 'WORK_COMPLETED' && req.status !== 'COMPLETED') {
-          await this.updateRequestStatus(existing.requestId, 'COMPLETED');
+        if (workStatus === 'WORK_COMPLETED' && req.status !== 'COMPLETED' && req.status !== 'CANCELLED') {
+          await this.markProviderDone(req);
         } else if (
           ['WORK_STARTED', 'PROVIDER_ARRIVED', 'PROVIDER_ON_THE_WAY'].includes(workStatus) &&
           ['PROVIDER_SELECTED', 'ACCEPTED'].includes(req.status)

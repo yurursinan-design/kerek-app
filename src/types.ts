@@ -164,6 +164,8 @@ export interface ServiceRequest {
   status: RequestStatus;
   createdAt: string;
   selectedOfferId?: string;
+  // Set when the selected provider reports the job finished; the customer then confirms (COMPLETED)
+  providerDoneAt?: string;
   lastOfferId?: string;
   offerId?: string;
   attachments?: RequestAttachment[];

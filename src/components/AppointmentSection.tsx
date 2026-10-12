@@ -351,20 +351,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       </div>
 
       {/* Order Status Badges */}
-      {request.paymentStatus === 'held_in_escrow' && request.status !== 'COMPLETED' && (
-        <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-900">
-          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>
-            {language === 'kz'
-              ? 'Тапсырыс келісілді: Сенімді мәміле'
-              : language === 'tr'
-              ? 'Sipariş Onaylandı: Güvenli İşlem'
-              : 'Заказ подтвержден: Безопасная сделка'}
-          </span>
-        </div>
-      )}
-
-      {(request.status === 'COMPLETED' || request.paymentStatus === 'released') && (
+      {request.status === 'COMPLETED' && (
         <div className="p-2.5 bg-teal-50 border border-teal-300 rounded-xl flex items-center gap-2 text-xs font-bold text-teal-900">
           <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
           <span>

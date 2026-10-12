@@ -202,28 +202,21 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   const [isSubmittingCompletion, setIsSubmittingCompletion] = useState(false);
 
   // Status Lifecycle Handlers
-  const handleStartWork = async () => {
-    if (!request) return;
-    try {
-      setActionError(null);
-      const updated = await repository.updateRequestStatus(request.id, 'IN_PROGRESS');
-      if (updated) setRequest(updated);
-    } catch (err) {
-      setActionError(getFriendlyErrorMessage(err, language));
-    }
-  };
+  // The customer closes the job once it is done (the provider may already have reported it finished)
+  const canConfirmCompletion = (status: string | undefined) =>
+    status === 'PROVIDER_SELECTED' || status === 'ACCEPTED' || status === 'IN_PROGRESS';
 
   const handleCompleteWorkClick = () => {
     if (!request || isSubmittingCompletion) return;
     const currentStatus = normalizeRequestStatus(request.status);
-    if (currentStatus !== 'IN_PROGRESS') return;
+    if (!canConfirmCompletion(currentStatus)) return;
     setShowCompletionConfirmModal(true);
   };
 
   const handleConfirmCompleteWork = async () => {
     if (!request || isSubmittingCompletion) return;
     const currentStatus = normalizeRequestStatus(request.status);
-    if (currentStatus !== 'IN_PROGRESS') {
+    if (!canConfirmCompletion(currentStatus)) {
       setShowCompletionConfirmModal(false);
       return;
     }
@@ -713,28 +706,30 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 )}
               </div>
 
+              {canConfirmCompletion(reqStatus) && request?.providerDoneAt && (
+                <p className="text-xs text-amber-900 bg-amber-50 p-2.5 rounded-xl border border-amber-300 leading-relaxed font-semibold">
+                  {language === 'kz'
+                    ? 'Шебер жұмысты аяқтағанын хабарлады. Бәрі дұрыс болса, төмендегі түйме арқылы растаңыз.'
+                    : language === 'tr'
+                    ? 'Usta işi bitirdiğini bildirdi. Her şey yolundaysa aşağıdaki düğmeyle onaylayın.'
+                    : 'Мастер сообщил, что работа выполнена. Если всё в порядке, подтвердите кнопкой ниже.'}
+                </p>
+              )}
+
+              {/* Payment happens directly between customer and provider; the app does not take payments */}
+              {reqStatus !== 'COMPLETED' && (
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  {language === 'kz'
+                    ? 'Төлем шеберге тікелей жасалады (қолма-қол немесе аударым). KEREK төлем қабылдамайды.'
+                    : language === 'tr'
+                    ? 'Ödeme doğrudan ustaya yapılır (nakit veya havale). KEREK ödeme almaz.'
+                    : 'Оплата производится мастеру напрямую (наличными или переводом). KEREK не принимает платежи.'}
+                </p>
+              )}
+
               {/* Status Workflow Action Buttons */}
               <div className="pt-2 border-t border-emerald-200/80 flex flex-wrap gap-2">
-                {reqStatus === 'PROVIDER_SELECTED' && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleStartWork}
-                      className="flex-1 min-h-[40px] px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5"
-                    >
-                      <span>{t.btnStartWork}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCancelRequest}
-                      className="px-3 min-h-[40px] bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 font-semibold text-xs rounded-xl border border-slate-200 transition-colors"
-                    >
-                      {t.btnCancelRequest}
-                    </button>
-                  </>
-                )}
-
-                {reqStatus === 'IN_PROGRESS' && (
+                {canConfirmCompletion(reqStatus) && (
                   <>
                     <button
                       type="button"

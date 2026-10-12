@@ -268,6 +268,37 @@ export const notificationService = {
   /**
    * 4. Lifecycle: Request completed
    */
+  /**
+   * The selected provider reports the job finished: ask the customer to confirm it.
+   */
+  async notifyProviderReportedDone(request: ServiceRequest): Promise<void> {
+    try {
+      const payload: AppNotification = {
+        id: `notif_done_cust_${request.id}`,
+        recipientUserId: request.customerId,
+        recipientRole: 'customer',
+        type: 'CUSTOMER_WORK_COMPLETED',
+        title: {
+          kz: 'Шебер жұмысты аяқтады',
+          ru: 'Мастер завершил работу',
+        },
+        body: {
+          kz: 'Жұмысты тексеріп, аяқталғанын растаңыз.',
+          ru: 'Проверьте работу и подтвердите завершение.',
+        },
+        requestId: request.id,
+        offerId: request.selectedOfferId,
+        targetScreen: 'request_detail',
+        isRead: false,
+        readAt: null,
+        createdAt: new Date().toISOString(),
+      };
+      await resilientRepository.createNotification(payload);
+    } catch (err) {
+      console.warn('[NotificationService] notifyProviderReportedDone note:', err);
+    }
+  },
+
   async notifyWorkCompleted(request: ServiceRequest, providerUserId?: string): Promise<void> {
     // 4a. Notify Customer that work is completed and review is recommended
     try {
@@ -579,8 +610,8 @@ export const notificationService = {
             ru: 'Работа завершена! ✅',
           };
           body = {
-            kz: 'Шебер жұмысты орындап бітті. Нәтижені тексеріп, баға беріңіз.',
-            ru: 'Мастер завершил работу. Пожалуйста, проверьте результат и оцените работу мастера.',
+            kz: 'Шебер жұмысты орындап бітті. Нәтижені тексеріп, аяқталғанын растаңыз.',
+            ru: 'Мастер завершил работу. Проверьте результат и подтвердите завершение.',
           };
           break;
         case 'CANCELLED':
