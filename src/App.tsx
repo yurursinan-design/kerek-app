@@ -46,6 +46,8 @@ import {
 } from './services/taxonomy';
 
 const LANGUAGE_KEY = 'kerek_language_v1';
+// Where the user was in this browser tab, so a page refresh reopens the same screen
+const NAV_KEY = 'kerek_nav_v1';
 
 export default function App() {
   const [language, setLanguage] = useState<Language>(() => {
@@ -413,7 +415,16 @@ export default function App() {
   const handleBackRef = useRef(handleBack);
   handleBackRef.current = handleBack;
 
+  const historyInitRef = useRef(false);
   useEffect(() => {
+    if (!historyInitRef.current) {
+      historyInitRef.current = true;
+      // After a page refresh the browser keeps our extra entry; turn it back into a plain one
+      // instead of stepping back (stepping back would undo the screen restored after the refresh)
+      if (window.history.state && window.history.state.kerekNav) {
+        window.history.replaceState(null, '');
+      }
+    }
     const ownsEntry = Boolean(window.history.state && window.history.state.kerekNav);
     if (!isAtRoot && !ownsEntry) {
       window.history.pushState({ kerekNav: true }, '');
@@ -478,6 +489,60 @@ export default function App() {
     setCurrentScreen('results');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Remember the current screen for this tab (sessionStorage: cleared when the tab is closed)
+  useEffect(() => {
+    try {
+      const { pendingAttachments: _files, ...needWithoutFiles } = extractedNeed || ({} as ExtractedNeed);
+      sessionStorage.setItem(
+        NAV_KEY,
+        JSON.stringify({
+          activeTab,
+          currentScreen,
+          requestId: currentScreen === 'results' ? activeRequest?.id || null : null,
+          need: currentScreen === 'interpretation' && extractedNeed ? needWithoutFiles : null,
+        })
+      );
+    } catch {
+      // storage unavailable: a refresh simply opens the start screen
+    }
+  }, [activeTab, currentScreen, activeRequest?.id, extractedNeed]);
+
+  // After a refresh, reopen the screen the user was on. The saved place is read during the first
+  // render, before the effect above overwrites it with the start screen.
+  const [savedNav] = useState<{ activeTab?: MainTab; currentScreen?: string; requestId?: string | null; need?: ExtractedNeed | null } | null>(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(NAV_KEY) || 'null');
+    } catch {
+      return null;
+    }
+  });
+  const restoredNavRef = useRef(false);
+  useEffect(() => {
+    if (restoredNavRef.current) return;
+    restoredNavRef.current = true;
+    const saved = savedNav;
+    if (!saved) return;
+    (async () => {
+      try {
+        await auth?.authStateReady?.();
+        if (saved.activeTab === 'my-requests') {
+          setActiveTab('my-requests');
+        } else if (saved.activeTab === 'provider-mode') {
+          if (!requiresPhoneLogin()) setActiveTab('provider-mode');
+        } else if (saved.currentScreen === 'results' && saved.requestId) {
+          const req = await repository.getRequest(saved.requestId);
+          if (req) handleSelectRequestFromHistory(req);
+        } else if (saved.currentScreen === 'interpretation' && saved.need) {
+          setExtractedNeed(saved.need);
+          setCurrentScreen('interpretation');
+        }
+      } catch (err) {
+        console.warn('[App] could not reopen the previous screen:', err);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Handle click on notification (from bell drawer or in-app toast)
   const handleNotificationClick = async (notif: AppNotification) => {

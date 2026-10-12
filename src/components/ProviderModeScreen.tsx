@@ -12,6 +12,7 @@ import {
   ServiceRequest,
 } from '../types';
 import { translations } from '../i18n/translations';
+import { getRequestTitle } from '../services/requestTitle';
 import { repository, getCurrentUserId, checkClientRateLimit, getFriendlyErrorMessage, notificationService } from '../services';
 import { isDebugMode } from '../services/debug';
 import { auth } from '../services/firebase';
@@ -942,7 +943,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                             )}
                           </div>
                           <h4 className="text-sm font-bold text-slate-900 mt-1">
-                            {req.service}
+                            {getRequestTitle(req, language)}
                           </h4>
                         </div>
 
@@ -1051,7 +1052,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                               )}
                             </div>
                             <h4 className="text-sm font-bold text-slate-900 mt-1">
-                              {req.service}
+                              {getRequestTitle(req, language)}
                             </h4>
                           </div>
 
@@ -1161,7 +1162,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         <div className="flex items-start justify-between gap-2">
                           <div>
                             <h4 className="text-sm font-bold text-slate-900">
-                              {req.service}
+                              {getRequestTitle(req, language)}
                             </h4>
                           </div>
 
@@ -1332,7 +1333,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               {/* Target request snippet */}
               <div className="p-2.5 bg-slate-50 rounded-xl text-xs text-slate-600">
                 <span className="font-bold text-slate-800 block">
-                  {selectedRequestForOffer.service} (
+                  {getRequestTitle(selectedRequestForOffer, language)} (
                   {getCityDisplayName(
                     selectedRequestForOffer.cityId || selectedRequestForOffer.city,
                     language

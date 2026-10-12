@@ -9,6 +9,7 @@ import {
   validateChatAttachment,
 } from '../types';
 import { translations } from '../i18n/translations';
+import { getRequestTitle } from '../services/requestTitle';
 import { repository, getCurrentUserId, getFriendlyErrorMessage } from '../services';
 import { auth } from '../services/firebase';
 import {
@@ -410,7 +411,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               </div>
 
               <p className="text-[11px] text-slate-500 truncate max-w-[200px] sm:max-w-xs font-medium">
-                {request?.service || request?.requestText || requestId} · <span className="font-mono text-slate-400">{requestId}</span>
+                {(request && getRequestTitle(request, language)) || request?.requestText || requestId} · <span className="font-mono text-slate-400">{requestId}</span>
               </p>
             </div>
           </div>

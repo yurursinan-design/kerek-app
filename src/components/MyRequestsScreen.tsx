@@ -6,6 +6,7 @@ import {
   formatDynamicDate,
 } from '../types';
 import { translations } from '../i18n/translations';
+import { getRequestTitle } from '../services/requestTitle';
 import { formatShortDate } from '../services/dateFormat';
 import { repository } from '../services';
 import { getCityDisplayName, getCategoryDisplayName } from '../services/taxonomy';
@@ -182,7 +183,7 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
                     {/* Service & Text */}
                     <div>
                       <h4 className="text-sm font-bold text-slate-900 leading-snug group-hover:text-sky-800 transition-colors">
-                        {req.service}
+                        {getRequestTitle(req, language)}
                       </h4>
                       <p className="text-xs text-slate-500 line-clamp-1 italic mt-0.5">
                         «{req.requestText}»

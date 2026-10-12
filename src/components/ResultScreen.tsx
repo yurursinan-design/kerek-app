@@ -14,6 +14,7 @@ import {
   ServiceRequest,
 } from '../types';
 import { translations } from '../i18n/translations';
+import { getRequestTitle } from '../services/requestTitle';
 import { formatShortDate } from '../services/dateFormat';
 import { getDemoProviders } from '../data/demoProviders';
 import { repository, checkClientRateLimit, getFriendlyErrorMessage, getCurrentUserId } from '../services';
@@ -430,7 +431,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
 
             <div className="pt-2 border-t border-slate-100 space-y-1">
               <h2 className="text-sm font-bold text-slate-900">
-                {request.service}
+                {getRequestTitle(request, language)}
               </h2>
               <p className="text-xs text-slate-500 italic">
                 «{request.requestText}»
