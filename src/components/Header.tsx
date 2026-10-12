@@ -5,6 +5,7 @@ import { maskPhone } from '../services/phoneAuth';
 import { isDebugMode } from '../services/debug';
 import { exportLocalData, importLocalData, clearAllKerekLocalStorage, isFirebaseConfigured, resilientRepository, runFirebaseDiagnostics, getLatestDiagnosticReport } from '../services';
 import { NotificationBell } from './NotificationBell';
+import { LegalLinks } from './LegalModal';
 
 interface HeaderProps {
   currentScreen: 'home' | 'interpretation' | 'results';
@@ -22,6 +23,8 @@ interface HeaderProps {
   phoneNumber?: string | null;
   onLoginClick?: () => void;
   onLogout?: () => void;
+  /** Deletes the account; rejects with a message to show if it fails */
+  onDeleteAccount?: () => Promise<void>;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -39,9 +42,12 @@ export const Header: React.FC<HeaderProps> = ({
   phoneNumber = null,
   onLoginClick,
   onLogout,
+  onDeleteAccount,
 }) => {
   const [showDemoModal, setShowDemoModal] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const accountLabel =
     language === 'kz' ? 'Аккаунт' : language === 'tr' ? 'Hesap' : 'Аккаунт';
   const [importStatus, setImportStatus] = useState<{ success: boolean; message: string } | null>(null);
@@ -228,6 +234,58 @@ export const Header: React.FC<HeaderProps> = ({
                       <LogOut className="w-3.5 h-3.5" />
                       <span>{language === 'kz' ? 'Шығу' : language === 'tr' ? 'Çıkış yap' : 'Выйти'}</span>
                     </button>
+
+                    {onDeleteAccount && !confirmDelete && (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDelete(true)}
+                        className="w-full min-h-[40px] rounded-xl text-rose-700 hover:bg-rose-50 text-xs font-bold flex items-center justify-center gap-1.5"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>{language === 'kz' ? 'Аккаунтты жою' : language === 'tr' ? 'Hesabı sil' : 'Удалить аккаунт'}</span>
+                      </button>
+                    )}
+
+                    {onDeleteAccount && confirmDelete && (
+                      <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 space-y-2">
+                        <p className="text-[11px] text-rose-900 leading-relaxed">
+                          {language === 'kz'
+                            ? 'Профиліңіз, байланыс деректеріңіз және аккаунтыңыз жойылады, ашық өтініштер жабылады. Мұны қайтару мүмкін емес.'
+                            : language === 'tr'
+                            ? 'Profiliniz, iletişim bilgileriniz ve hesabınız silinir, açık talepler kapanır. Bu işlem geri alınamaz.'
+                            : 'Профиль, контактные данные и аккаунт будут удалены, открытые заявки закроются. Это нельзя отменить.'}
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={deleting}
+                            onClick={async () => {
+                              setDeleting(true);
+                              try {
+                                await onDeleteAccount();
+                                setShowAccountMenu(false);
+                              } finally {
+                                setDeleting(false);
+                                setConfirmDelete(false);
+                              }
+                            }}
+                            className="flex-1 min-h-[38px] rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold"
+                          >
+                            {language === 'kz' ? 'Жою' : language === 'tr' ? 'Sil' : 'Удалить'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={deleting}
+                            onClick={() => setConfirmDelete(false)}
+                            className="flex-1 min-h-[38px] rounded-lg bg-white border border-slate-200 text-slate-700 text-xs font-bold"
+                          >
+                            {language === 'kz' ? 'Болдырмау' : language === 'tr' ? 'Vazgeç' : 'Отмена'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    <LegalLinks language={language} className="block text-[10px] text-slate-500 text-center leading-relaxed pt-1" />
                   </div>
                 )}
               </div>

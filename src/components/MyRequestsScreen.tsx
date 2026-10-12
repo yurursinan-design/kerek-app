@@ -6,6 +6,7 @@ import {
   formatDynamicDate,
 } from '../types';
 import { translations } from '../i18n/translations';
+import { formatShortDate } from '../services/dateFormat';
 import { repository } from '../services';
 import { getCityDisplayName, getCategoryDisplayName } from '../services/taxonomy';
 import {
@@ -137,14 +138,7 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
             {requests.map((req) => {
               const offerCount = offersCountMap[req.id] || 0;
               const formattedDate = req.createdAt
-                ? new Date(req.createdAt).toLocaleDateString(
-                    language === 'kz'
-                      ? 'kk-KZ'
-                      : language === 'tr'
-                      ? 'tr-TR'
-                      : 'ru-RU',
-                    { day: 'numeric', month: 'short' }
-                  )
+                ? formatShortDate(req.createdAt, language)
                 : req.date;
 
               return (

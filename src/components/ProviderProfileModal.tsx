@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Language, Provider, Review } from '../types';
 import { translations } from '../i18n/translations';
+import { formatShortDate } from '../services/dateFormat';
 import { repository } from '../services';
 import {
   X,
@@ -366,11 +367,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                           </span>
                           {rev.createdAt && (
                             <span className="text-[10px] text-slate-400">
-                              {new Date(rev.createdAt).toLocaleDateString(language === 'kz' ? 'kk-KZ' : 'ru-RU', {
-                                year: 'numeric',
-                                month: 'short',
-                                day: 'numeric',
-                              })}
+                              {formatShortDate(rev.createdAt, language, { year: true })}
                             </span>
                           )}
                         </div>

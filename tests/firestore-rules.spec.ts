@@ -1735,6 +1735,42 @@ async function runTestSuite() {
       await assertSucceeds(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_3'), { status: 'COMPLETED' }));
     });
 
+    // =========================================================================
+    // SECTION 15: Account deletion — users remove their own records only
+    // =========================================================================
+    console.log('\n--- SECTION 15: Account deletion ---');
+
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      const db = adminContext.firestore();
+      await setDoc(doc(db, 'users', 'del_user'), { id: 'del_user', createdAt: '2026-10-12T00:00:00Z' });
+      await setDoc(doc(db, 'providers', 'del_user'), { id: 'del_user', userId: 'del_user', name: 'X', city: 'Алматы', category: 'x' });
+      await setDoc(doc(db, 'requests', 'req_del'), { id: 'req_del', customerId: 'del_user', city: 'Алматы', category: 'x', service: 'x', status: 'OPEN' });
+      await setDoc(doc(db, 'requestContacts', 'req_del'), { customerId: 'del_user', customerPhone: '+77010000000' });
+      await setDoc(doc(db, 'users', 'other_user'), { id: 'other_user', createdAt: '2026-10-12T00:00:00Z' });
+    });
+
+    await test("Another user cannot delete someone's user record", async () => {
+      await assertFails(deleteDoc(doc(phoneUser('intruder').firestore(), 'users', 'del_user')));
+    });
+    await test("Another user cannot delete someone's provider profile", async () => {
+      await assertFails(deleteDoc(doc(phoneUser('intruder').firestore(), 'providers', 'del_user')));
+    });
+    await test("Another user cannot delete someone's contact details", async () => {
+      await assertFails(deleteDoc(doc(phoneUser('intruder').firestore(), 'requestContacts', 'req_del')));
+    });
+    await test('Owner deletes their contact details', async () => {
+      await assertSucceeds(deleteDoc(doc(phoneUser('del_user').firestore(), 'requestContacts', 'req_del')));
+    });
+    await test('Owner deletes their provider profile', async () => {
+      await assertSucceeds(deleteDoc(doc(phoneUser('del_user').firestore(), 'providers', 'del_user')));
+    });
+    await test('Owner deletes their user record', async () => {
+      await assertSucceeds(deleteDoc(doc(phoneUser('del_user').firestore(), 'users', 'del_user')));
+    });
+    await test('Requests themselves still cannot be deleted', async () => {
+      await assertFails(deleteDoc(doc(phoneUser('del_user').firestore(), 'requests', 'req_del')));
+    });
+
   } finally {
     // Isolated Emulator Cleanup
     console.log('\n--- CLEANUP: Clearing Emulator Data ---');

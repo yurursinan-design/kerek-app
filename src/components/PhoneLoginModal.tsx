@@ -3,8 +3,10 @@ import type { ConfirmationResult } from 'firebase/auth';
 import { Loader2, Smartphone, X } from 'lucide-react';
 import { Language } from '../types';
 import { confirmSmsCode, normalizePhone, phoneAuthErrorMessage, resetPhoneVerifier, sendSmsCode } from '../services/phoneAuth';
+import { recordLegalConsent } from '../services/account';
+import { LegalLinks } from './LegalModal';
 
-export type PhoneLoginReason = 'request' | 'provider' | 'header';
+export type PhoneLoginReason = 'request' | 'provider' | 'header' | 'delete';
 
 interface PhoneLoginModalProps {
   open: boolean;
@@ -29,6 +31,11 @@ const TEXT = {
       ru: 'Чтобы работать исполнителем, подтвердите номер телефона.',
       tr: 'Usta olarak çalışmak için telefon numaranızı doğrulayın.',
     },
+    delete: {
+      kz: 'Қауіпсіздік үшін аккаунтты жоюдан бұрын нөміріңізді қайта растаңыз.',
+      ru: 'В целях безопасности подтвердите номер ещё раз перед удалением аккаунта.',
+      tr: 'Güvenlik için hesabı silmeden önce numaranızı tekrar doğrulayın.',
+    },
     header: {
       kz: 'Нөміріңізді растасаңыз, өтініштеріңіз бен профиліңіз кез келген құрылғыда сақталады.',
       ru: 'После подтверждения номера ваши заявки и профиль доступны на любом устройстве.',
@@ -49,6 +56,16 @@ const TEXT = {
     tr: 'Telefon numarası hatalı. Örnek: +7 701 123 45 67',
   },
   close: { kz: 'Жабу', ru: 'Закрыть', tr: 'Kapat' },
+  consent: {
+    kz: 'Мен Құпиялылық саясатымен және Пайдалану шарттарымен келісемін, дербес деректерімді өңдеуге келісім беремін. Маған 18 жас толған.',
+    ru: 'Я принимаю Политику конфиденциальности и Условия использования и даю согласие на обработку персональных данных. Мне есть 18 лет.',
+    tr: 'Gizlilik politikasını ve Kullanım şartlarını kabul ediyor, kişisel verilerimin işlenmesine onay veriyorum. 18 yaşından büyüğüm.',
+  },
+  consentRequired: {
+    kz: 'Жалғастыру үшін келісім белгісін қойыңыз.',
+    ru: 'Чтобы продолжить, отметьте согласие.',
+    tr: 'Devam etmek için onay kutusunu işaretleyin.',
+  },
 } as const;
 
 export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language, reason, onSuccess, onCancel }) => {
@@ -62,6 +79,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [agreed, setAgreed] = useState(false);
   const codeInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -88,6 +106,10 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
 
   const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
+    if (!agreed) {
+      setError(tx(TEXT.consentRequired));
+      return;
+    }
     const normalized = normalizePhone(phone);
     if (!normalized) {
       setError(tx(TEXT.invalidPhone));
@@ -114,6 +136,8 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
     setError(null);
     try {
       await confirmSmsCode(confirmation, code.replace(/\D/g, ''));
+      // Keep a record of the consent given in this form (date and policy version)
+      recordLegalConsent().catch((err) => console.warn('[PhoneLogin] consent record note:', err));
       onSuccess();
     } catch (err) {
       setError(phoneAuthErrorMessage(err, lang));
@@ -169,9 +193,25 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
               placeholder="+7 701 123 45 67"
               className="w-full h-12 px-3.5 bg-slate-50 border border-slate-200 rounded-xl text-base font-semibold text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white transition-colors"
             />
+            <div className="flex items-start gap-2.5">
+              <input
+                id="phone-login-consent"
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => {
+                  setAgreed(e.target.checked);
+                  if (error) setError(null);
+                }}
+                className="mt-0.5 w-5 h-5 shrink-0 accent-sky-600"
+              />
+              <div className="text-xs text-slate-600 leading-relaxed space-y-1">
+                <label htmlFor="phone-login-consent">{tx(TEXT.consent)}</label>
+                <LegalLinks language={language} className="block text-sky-700 font-semibold" />
+              </div>
+            </div>
             <button
               type="submit"
-              disabled={busy}
+              disabled={busy || !agreed}
               className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
             >
               {busy && <Loader2 className="w-4 h-4 animate-spin" />}

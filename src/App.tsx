@@ -19,6 +19,7 @@ import { InAppToast } from './components/InAppToast';
 import { PhoneLoginModal, PhoneLoginReason } from './components/PhoneLoginModal';
 import { onAuthStateChanged } from 'firebase/auth';
 import { logoutToAnonymous, requiresPhoneLogin } from './services/phoneAuth';
+import { deleteMyAccount, RecentLoginRequiredError } from './services/account';
 import { generateRequestId } from './services/ids';
 import {
   auth,
@@ -92,6 +93,24 @@ export default function App() {
     }
     afterPhoneLoginRef.current = action;
     setPhoneLogin(reason);
+  };
+
+  /** "Delete my account": a stale session confirms the number by SMS first, then deletion continues. */
+  const handleDeleteAccount = async (): Promise<void> => {
+    try {
+      await deleteMyAccount();
+      // Start over as a new anonymous visitor
+      window.location.replace('/');
+    } catch (err) {
+      if (err instanceof RecentLoginRequiredError) {
+        afterPhoneLoginRef.current = () => {
+          handleDeleteAccount();
+        };
+        setPhoneLogin('delete');
+        return;
+      }
+      setAppError(getFriendlyErrorMessage(err, language));
+    }
   };
   const [hasFatalFailedMutations, setHasFatalFailedMutations] = useState(false);
 
@@ -532,6 +551,7 @@ export default function App() {
               setAppError(getFriendlyErrorMessage(err, language));
             }
           }}
+          onDeleteAccount={handleDeleteAccount}
         />
 
         <PhoneLoginModal

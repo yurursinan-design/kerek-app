@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { formatShortDate } from '../services/dateFormat';
 import { AppNotification, Language } from '../types';
 import {
   Bell,
@@ -82,10 +83,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
       if (diffHours < 24) {
         return language === 'kz' ? `${diffHours} сағ бұрын` : `${diffHours} ч назад`;
       }
-      return date.toLocaleDateString(language === 'kz' ? 'kk-KZ' : 'ru-RU', {
-        month: 'short',
-        day: 'numeric',
-      });
+      return formatShortDate(date, language);
     } catch {
       return '';
     }

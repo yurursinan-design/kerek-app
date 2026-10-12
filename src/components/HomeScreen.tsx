@@ -22,6 +22,7 @@ import {
   Loader2,
   ShieldCheck,
 } from 'lucide-react';
+import { LegalLinks } from './LegalModal';
 import { RequestMediaView } from './RequestMediaView';
 
 interface HomeScreenProps {
@@ -680,8 +681,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       </div>
 
       {/* Footer Info */}
-      <footer className="text-center text-xs text-slate-400 py-3 border-t border-slate-100">
-        <span>КЕРЕК 2026 · Қазақстан · Екі жақты маркетплейс MVP</span>
+      <footer className="text-center text-xs text-slate-400 py-3 border-t border-slate-100 space-y-1.5">
+        <LegalLinks language={language} className="block text-slate-500" />
+        <span className="block">КЕРЕК 2026 · Қазақстан</span>
       </footer>
     </div>
   );

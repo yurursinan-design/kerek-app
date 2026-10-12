@@ -81,7 +81,8 @@ service cloud.firestore {
                     && request.auth.uid == userId
                     && incoming().id == userId
                     && strMax(incoming(), 'name', 100) && strMax(incoming(), 'phone', 30);
-      allow delete: if false;
+      // Account deletion ("delete my account")
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
     }
 
     // =================== Providers Collection ===================
@@ -111,7 +112,8 @@ service cloud.firestore {
                     && strMax(incoming(), 'name', 100) && strMax(incoming(), 'city', 50) && strMax(incoming(), 'category', 100)
                     && noTrustBadges(incoming())
                     && providerFieldLimits(incoming());
-      allow delete: if false;
+      // Account deletion: a provider can remove their own profile
+      allow delete: if isSignedIn() && isValidId(providerId) && providerId == request.auth.uid;
     }
 
     // =================== Requests Collection ===================
@@ -280,7 +282,8 @@ service cloud.firestore {
       );
       allow list: if false;
       allow create, update: if isSignedIn() && isValidId(requestId) && incoming().customerId == request.auth.uid && exists(/databases/$(database)/documents/requests/$(requestId)) && get(/databases/$(database)/documents/requests/$(requestId)).data.customerId == request.auth.uid;
-      allow delete: if false;
+      // Account deletion: the customer removes their contact details (deleting a missing document is a no-op)
+      allow delete: if isSignedIn() && isValidId(requestId) && (resource == null || resource.data.customerId == request.auth.uid);
     }
 
     // =================== Offers Collection ===================

@@ -14,9 +14,10 @@ import {
   ServiceRequest,
 } from '../types';
 import { translations } from '../i18n/translations';
+import { formatShortDate } from '../services/dateFormat';
 import { getDemoProviders } from '../data/demoProviders';
 import { repository, checkClientRateLimit, getFriendlyErrorMessage, getCurrentUserId } from '../services';
-import { auth } from '../services/firebase';
+import { auth, isFirebaseConfigured } from '../services/firebase';
 import { getCategoryDisplayName, getCityDisplayName } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { ReviewModal } from './ReviewModal';
@@ -85,6 +86,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
 
   // Demo directory fallback
   const demoProviders: DemoProvider[] = getDemoProviders(need, language);
+  const showDemoContent = !isFirebaseConfigured();
 
   // Active contact modal
   const [activeModal, setActiveModal] = useState<{
@@ -318,12 +320,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
 
   // Format created date nicely
   const formattedCreatedDate = request?.createdAt
-    ? new Date(request.createdAt).toLocaleDateString(language === 'kz' ? 'kk-KZ' : 'ru-RU', {
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
+    ? formatShortDate(request.createdAt, language, { time: true })
     : '';
 
   // Helper for status badge
@@ -389,7 +386,8 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   return (
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col justify-between space-y-4">
       <div className="space-y-4">
-        {/* MANDATORY PROMINENT DEMO NOTICE */}
+        {/* Demo notice and demo directory: only in demo mode (no real database connected) */}
+        {showDemoContent && (
         <div className="p-3 bg-amber-50 border border-amber-300 rounded-2xl flex items-start gap-3 shadow-xs">
           <div className="p-1 bg-amber-100 rounded-xl text-amber-800 shrink-0 mt-0.5">
             <AlertTriangle className="w-4 h-4 stroke-[2.5]" />
@@ -403,6 +401,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
             </p>
           </div>
         </div>
+        )}
 
         {/* Action Error Alert */}
         {actionError && (
@@ -907,7 +906,8 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
           </div>
         )}
 
-        {/* Existing Provider Directory Cards Section */}
+        {/* Existing Provider Directory Cards Section (demo mode only) */}
+        {showDemoContent && (
         <div className="space-y-3 pt-2">
           <div className="space-y-0.5">
             <h3 className="text-base font-bold text-slate-900 tracking-tight font-display">
@@ -995,6 +995,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
             ))}
           </div>
         </div>
+        )}
       </div>
 
       {/* Bottom Action: New Request */}

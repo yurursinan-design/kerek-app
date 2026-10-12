@@ -233,13 +233,12 @@ export class ResilientRepository implements Repository {
     };
     const cRank = statusOrder[cloudReq.status] || 0;
     const lRank = statusOrder[localReq.status] || 0;
+    // A local copy only wins when it is further along (a change not yet synced). Otherwise the
+    // cloud document is the current one: the device copy can lack fields other people wrote
+    // (for example the provider reporting the job finished) and its createdAt can be rewritten
+    // by the local cache, so it is not a reliable tie-breaker.
     if (lRank > cRank) return localReq;
-    if (cRank > lRank) return cloudReq;
-
-    return new Date(cloudReq.createdAt).getTime() >=
-      new Date(localReq.createdAt).getTime()
-      ? cloudReq
-      : localReq;
+    return cloudReq;
   }
 
   async getRequests(filter?: RequestFilter): Promise<ServiceRequest[]> {

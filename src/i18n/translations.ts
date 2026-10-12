@@ -12,12 +12,12 @@ export const translations = {
     analyzing: 'Сұранысыңызды талдаудамыз...',
     examplesTitle: 'Жиі қойылатын мысалдар:',
     examples: [
-      'Кызылордада бүгін кір жуғыш машина жөндейтін адам керек',
-      'Кызылордада bugün çamaşır makinesi tamircisi lazım',
-      'Нужен сантехник сегодня',
-      'Нужен телефон до 150 000 ₸',
-      'Нужна машина для переезда',
+      'Қызылордада бүгін кір жуғыш машина жөндейтін шебер керек',
+      'Бүгін сантехник керек, кран ағып тұр',
+      'Астанада электрик керек, розетка істемейді',
+      'Пәтер көшіруге жүк көлігі мен тиеушілер керек',
       'Алматыда шұғыл пәтер тазалау керек',
+      'Кондиционерді тазалау керек',
     ],
     // Navigation
     navHome: 'Басты бет',
@@ -244,7 +244,7 @@ export const translations = {
     selectRatingPrompt: 'Бағаны таңдаңыз (1-5)',
 
     // In-App Chat
-    chatWithProviderBtn: 'Устамен сөйлесу',
+    chatWithProviderBtn: 'Шебермен сөйлесу',
     chatWithCustomerBtn: 'Клиентпен сөйлесу',
     chatScreenTitle: 'Чат',
     chatPlaceholder: 'Хабарлама жазыңыз...',
@@ -331,12 +331,12 @@ export const translations = {
     analyzing: 'Анализируем ваш запрос...',
     examplesTitle: 'Примеры запросов:',
     examples: [
-      'Кызылордада бүгін кір жуғыш машина жөндейтін адам керек',
-      'Кызылордада bugün çamaşır makinesi tamircisi lazım',
-      'Нужен сантехник сегодня',
-      'Нужен телефон до 150 000 ₸',
-      'Нужна машина для переезда',
+      'В Кызылорде сегодня нужен мастер по ремонту стиральной машины',
+      'Нужен сантехник сегодня, течёт кран',
       'В Астане нужен электрик сегодня до 20 000 ₸',
+      'Нужна газель с грузчиками для переезда',
+      'Нужна уборка квартиры в Алматы',
+      'Нужно почистить кондиционер',
     ],
     // Navigation
     navHome: 'Главная',
@@ -652,9 +652,9 @@ export const translations = {
     examples: [
       'Kızılorda\'da bugün çamaşır makinesi tamircisi lazım',
       'Kızılorda\'da acil su tesisatçısı lazım',
-      'Bugün acil usta lazım',
-      '150 000 ₸ kadar telefon lazım',
-      'Ev taşıma için nakliye aracı lazım',
+      'Klima temizliği lazım',
+      'Astana\'da bugün elektrikçi lazım',
+      'Ev taşıma için kamyonet ve hamal lazım',
       'Almatı\'da acil daire temizliği lazım',
     ],
     // Navigation
