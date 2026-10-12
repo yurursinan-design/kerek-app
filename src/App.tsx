@@ -532,7 +532,9 @@ export default function App() {
       return;
     }
     setActiveTab(tab);
-    if (tab === 'home' && currentScreen !== 'interpretation' && currentScreen !== 'results') {
+    // Tapping "Home" while already on the home tab (e.g. viewing a request) returns to the start screen;
+    // coming from another tab keeps the request that was open there
+    if (tab === 'home' && (activeTab === 'home' || (currentScreen !== 'interpretation' && currentScreen !== 'results'))) {
       setCurrentScreen('home');
     }
     refreshData();
@@ -803,6 +805,7 @@ export default function App() {
                   onSearch={handleSearch}
                   isAnalyzing={isAnalyzing}
                   onOpenProviderMode={() => handleTabChange('provider-mode')}
+                  onServiceRequest={(need) => handleContinue(need)}
                 />
               )}
 

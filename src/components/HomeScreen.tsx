@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
+  ExtractedNeed,
   Language,
   PendingAttachment,
   RequestLocation,
@@ -23,6 +24,9 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { LegalLinks } from './LegalModal';
+import { ServiceDiscovery } from './ServiceDiscovery';
+import { RequestWizard } from './RequestWizard';
+import type { CatalogGroup, CatalogService } from '../data/serviceCatalog';
 import { RequestMediaView } from './RequestMediaView';
 
 interface HomeScreenProps {
@@ -34,6 +38,8 @@ interface HomeScreenProps {
   ) => void;
   isAnalyzing: boolean;
   onOpenProviderMode: () => void;
+  /** A request built step by step from a catalogue service */
+  onServiceRequest: (need: ExtractedNeed) => void;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
@@ -41,7 +47,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onSearch,
   isAnalyzing,
   onOpenProviderMode,
+  onServiceRequest,
 }) => {
+  const [picked, setPicked] = useState<{ group: CatalogGroup; service: CatalogService } | null>(null);
   const t = translations[language];
   const [query, setQuery] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -374,6 +382,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const canSubmit = (query.trim().length > 0 || attachments.length > 0) && !isAnalyzing;
 
+  if (picked) {
+    return (
+      <RequestWizard
+        language={language}
+        group={picked.group}
+        service={picked.service}
+        onCancel={() => setPicked(null)}
+        onSubmit={(need) => {
+          setPicked(null);
+          onServiceRequest(need);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col justify-between space-y-6">
       {/* Hidden file pickers */}
@@ -395,42 +418,27 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       />
 
       <div className="space-y-5">
-        {/* Top Kazakhstan Accent Banner */}
-        <div className="text-center pt-1">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-sky-50 border border-sky-100 rounded-full text-xs font-semibold text-sky-800 mb-2.5">
-            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
-            <span>{t.tagline}</span>
-          </div>
+        {/* Search, popular services, all categories, how it works */}
+        <ServiceDiscovery
+          language={language}
+          onPickService={(group, service) => {
+            setPicked({ group, service });
+            window.scrollTo({ top: 0 });
+          }}
+          onFreeText={(text) => onSearch(text, [], undefined)}
+        />
 
-          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight font-display mb-1.5">
-            {t.headline}
-          </h1>
-          <p className="text-sm text-slate-600 max-w-xs mx-auto leading-relaxed">
-            {t.subheadline}
+        {/* Free text: describe the need in your own words (analysed by the app) */}
+        <div className="space-y-1 pt-2">
+          <h2 className="text-base font-bold text-slate-900">
+            {language === 'kz' ? 'Немесе өз сөзіңізбен жазыңыз' : 'Или опишите своими словами'}
+          </h2>
+          <p className="text-xs text-slate-500">
+            {language === 'kz'
+              ? 'Жазыңыз немесе айтыңыз, фото мен видео қосыңыз — біз өзіміз түсінеміз'
+              : 'Напишите или наговорите, добавьте фото и видео — мы сами разберёмся'}
           </p>
         </div>
-
-        {/* Provider Entry Point Banner */}
-        <button
-          type="button"
-          onClick={onOpenProviderMode}
-          className="w-full p-3.5 bg-gradient-to-r from-sky-50 via-slate-50 to-amber-50/50 hover:from-sky-100/70 border border-sky-200/80 rounded-2xl flex items-center justify-between text-left transition-all active:scale-[0.99] shadow-2xs group"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-sky-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <Briefcase className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-sm font-bold text-slate-900 group-hover:text-sky-700 transition-colors">
-                {t.providerEntryBanner}
-              </div>
-              <div className="text-xs text-slate-500">
-                {t.providerEntrySubtext}
-              </div>
-            </div>
-          </div>
-          <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-sky-600 transition-colors shrink-0" />
-        </button>
 
         {/* Search & Media Input Box */}
         <form onSubmit={handleSubmit} className="space-y-3">
@@ -653,31 +661,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </div>
         </div>
 
-        {/* Examples Section */}
-        <div className="space-y-2.5 pt-1">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            <span>{t.examplesTitle}</span>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            {t.examples.map((example, idx) => (
-              <button
-                key={idx}
-                type="button"
-                onClick={() => handleExampleClick(example)}
-                className="w-full text-left p-3.5 bg-white hover:bg-sky-50/60 active:bg-sky-100 border border-slate-200/90 rounded-xl transition-all group flex items-start justify-between gap-3 shadow-2xs"
-              >
-                <span className="text-sm font-medium text-slate-700 group-hover:text-sky-900 leading-snug">
-                  «{example}»
-                </span>
-                <span className="shrink-0 text-sky-600 opacity-60 group-hover:opacity-100 text-xs font-semibold mt-0.5">
-                  →
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
 
       {/* Footer Info */}

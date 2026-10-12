@@ -202,8 +202,8 @@ export const SERVICE_CATALOG: CatalogGroup[] = [
   },
   {
     id: 'household',
-    kz: 'Сағаттық шебер және тұрмыстық қызметтер',
-    ru: 'Мастер на час и бытовые услуги',
+    kz: 'Үй шебері',
+    ru: 'Мастер на час',
     icon: 'Hammer',
     color: 'lime',
     services: [
