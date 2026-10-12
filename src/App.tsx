@@ -71,6 +71,8 @@ export default function App() {
   const [activeRequest, setActiveRequest] = useState<ServiceRequest | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [customerRequests, setCustomerRequests] = useState<ServiceRequest[]>([]);
+  // False until the customer's requests were loaded once (so "no requests yet" isn't shown while loading)
+  const [customerRequestsLoaded, setCustomerRequestsLoaded] = useState(false);
   const [hasProviderProfile, setHasProviderProfile] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
 
@@ -203,11 +205,13 @@ export default function App() {
       const currentUserId = getCurrentUserId();
       const myRequests = await repository.getRequests({ customerId: currentUserId });
       setCustomerRequests(myRequests);
+      setCustomerRequestsLoaded(true);
 
       const allProviders = await repository.getProviders();
       const customProv = allProviders.some((p) => !p.isDemo);
       setHasProviderProfile(customProv);
     } catch (err) {
+      setCustomerRequestsLoaded(true);
       setAppError(getFriendlyErrorMessage(err, language));
     }
   }, [language]);
@@ -517,12 +521,15 @@ export default function App() {
       return null;
     }
   });
+  // While an open request is being reloaded after a refresh, show a spinner instead of the start screen
+  const [restoringNav, setRestoringNav] = useState(() => Boolean(savedNav?.currentScreen === 'results' && savedNav?.requestId));
   const restoredNavRef = useRef(false);
   useEffect(() => {
     if (restoredNavRef.current) return;
     restoredNavRef.current = true;
     const saved = savedNav;
     if (!saved) return;
+    const giveUp = setTimeout(() => setRestoringNav(false), 10000);
     (async () => {
       try {
         await auth?.authStateReady?.();
@@ -539,6 +546,9 @@ export default function App() {
         }
       } catch (err) {
         console.warn('[App] could not reopen the previous screen:', err);
+      } finally {
+        clearTimeout(giveUp);
+        setRestoringNav(false);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -691,7 +701,12 @@ export default function App() {
               </div>
             }
           >
-          {activeTab === 'home' && (
+          {restoringNav && (
+            <div className="flex-1 flex items-center justify-center py-16" role="status">
+              <span className="w-6 h-6 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
+            </div>
+          )}
+          {!restoringNav && activeTab === 'home' && (
             <>
               {currentScreen === 'home' && (
                 <HomeScreen
@@ -726,6 +741,7 @@ export default function App() {
           {activeTab === 'my-requests' && (
             <MyRequestsScreen
               requests={customerRequests}
+              loading={!customerRequestsLoaded}
               language={language}
               onSelectRequest={handleSelectRequestFromHistory}
               onCreateNewRequest={handleNewSearch}

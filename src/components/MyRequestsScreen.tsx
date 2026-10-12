@@ -23,6 +23,8 @@ import {
 
 interface MyRequestsScreenProps {
   requests: ServiceRequest[];
+  /** True until the requests were loaded the first time */
+  loading?: boolean;
   language: Language;
   onSelectRequest: (request: ServiceRequest) => void;
   onCreateNewRequest: () => void;
@@ -30,6 +32,7 @@ interface MyRequestsScreenProps {
 
 export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
   requests,
+  loading = false,
   language,
   onSelectRequest,
   onCreateNewRequest,
@@ -109,7 +112,11 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
         </div>
 
         {/* Requests List */}
-        {requests.length === 0 ? (
+        {loading && requests.length === 0 ? (
+          <div className="flex items-center justify-center py-16" role="status">
+            <span className="w-6 h-6 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : requests.length === 0 ? (
           <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center space-y-4 mt-6">
             <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
               <ClipboardList className="w-6 h-6" />
