@@ -2,7 +2,7 @@ import * as functions from 'firebase-functions';
 import * as crypto from 'crypto';
 import { getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import { GEMINI_CONFIG } from './config';
@@ -16,38 +16,11 @@ if (!getApps().length) {
 const db = getFirestore();
 
 // Access secrets securely from Google Secret Manager
-const kaspiWebhookSecret = defineSecret('KASPI_WEBHOOK_SECRET');
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
 
-/**
- * Kaspi.kz Escrow Webhook
- *
- * SECURITY AUDIT NOTICE:
- * Official Kaspi.kz / Kaspi Pay webhook integration specifications (HMAC algorithm, signature header format,
- * timestamp headers, and replay protection) are neither documented nor present in this repository.
- * Per security guidelines:
- * 1. Do NOT invent a synthetic HMAC algorithm or signature scheme.
- * 2. Prevent the endpoint from modifying real payment status in the database without verified credentials.
- * 3. Safely reject requests with 501 Not Implemented until official Kaspi merchant integration specifications are provided.
- */
-export const kaspiEscrowWebhook = onRequest(
-  {
-    secrets: [kaspiWebhookSecret],
-  },
-  async (req, res) => {
-    console.warn(
-      '[kaspiEscrowWebhook] Security notice: Official Kaspi payment webhook protocol is unverified in this repository. ' +
-      'Escrow status mutation is safely disabled until official Kaspi merchant integration specifications are provided.'
-    );
-
-    res.status(501).json({
-      success: false,
-      error:
-        'Official Kaspi payment webhook protocol is unverified in this repository. ' +
-        'Escrow status mutation is disabled to prevent unauthorized payment state changes.',
-    });
-  }
-);
+// Payments are made directly between customer and provider for now. The Kaspi escrow webhook stub
+// (and its KASPI_WEBHOOK_SECRET, which blocked deploying functions while undefined) was removed;
+// add a real integration once the Kaspi merchant specifications are available.
 
 /** Counts calls per key in a one-minute window (rateLimits/{key}); false once max is reached. */
 async function allowCall(key: string, max: number, now: number): Promise<boolean> {
@@ -196,17 +169,20 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
         .where('categoryId', '==', categoryId);
       const providersSnap = await queryRef.get();
 
-      const batch = db.batch();
+      // A Firestore batch holds at most 500 writes, so notifications are written in chunks
+      const BATCH_LIMIT = 450;
+      let batch = db.batch();
+      let inBatch = 0;
       let count = 0;
       const now = new Date().toISOString();
 
-      providersSnap.forEach((doc) => {
+      for (const doc of providersSnap.docs) {
         const providerData = doc.data();
         const providerId = doc.id;
         const providerUserId = providerData.userId || providerId;
 
         // Skip if provider is the customer themselves
-        if (providerUserId === customerId) return;
+        if (providerUserId === customerId) continue;
 
         const notifId = `notif_new_request_${requestId}_${providerId}`;
         const notifRef = db.collection('notifications').doc(notifId);
@@ -237,10 +213,19 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
           { merge: true }
         );
         count++;
-      });
+        inBatch++;
 
-      if (count > 0) {
+        if (inBatch >= BATCH_LIMIT) {
+          await batch.commit();
+          batch = db.batch();
+          inBatch = 0;
+        }
+      }
+
+      if (inBatch > 0) {
         await batch.commit();
+      }
+      if (count > 0) {
         console.log(`[onNewRequestNotifyProviders] Dispatched ${count} notifications for request ${requestId}`);
       }
     } catch (err) {

@@ -120,6 +120,13 @@ export function normalizeRequestStatus(status?: string): RequestStatus {
   return 'OPEN';
 }
 
+// Statuses a provider still needs to see. Completed and cancelled requests (the bulk of the data
+// over time) are left out of provider queries so the provider screen doesn't download all history.
+const PROVIDER_VISIBLE_STATUSES = [
+  'OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED', 'PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS',
+  'open', 'new', 'matching', 'offers_received', 'provider_selected', 'accepted', 'in_progress',
+];
+
 /** Request fields written when the selected provider reports the job finished. */
 function providerDoneUpdate(req: ServiceRequest, now: string): Partial<ServiceRequest> & { updatedAt: string } {
   return {
@@ -896,80 +903,80 @@ export class FirebaseRepository implements Repository {
       if (filter?.customerId) {
         const effectiveCustomerId = auth?.currentUser?.uid || filter.customerId;
         qPrimary = query(requestsColl, where('customerId', '==', effectiveCustomerId));
-      } else if (targetCityId && targetCatId) {
-        qPrimary = query(
-          requestsColl,
-          where('cityId', '==', targetCityId),
-          where('categoryId', '==', targetCatId)
-        );
-      } else if (targetCityId) {
-        qPrimary = query(requestsColl, where('cityId', '==', targetCityId));
-      } else if (targetCatId) {
-        qPrimary = query(requestsColl, where('categoryId', '==', targetCatId));
-      } else {
-        qPrimary = query(requestsColl);
       }
 
-      const unsubPrimary = onSnapshot(
-        qPrimary,
-        (snap) => {
-          primaryMap.clear();
-          snap.forEach((d) => {
-            primaryMap.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
-          });
-          emitCombined();
-        },
-        (err) => {
-          console.warn('[FirebaseRepository] subscribeToRequests error:', err?.message || err);
-          if (onError) onError(err);
-        }
-      );
+      // Provider queries skip finished requests. If the project lacks an index the filtered query
+      // needs, Firestore answers failed-precondition and the listener falls back to the unfiltered query.
+      const isProviderQuery = !filter?.customerId;
+      const listen = (
+        base: ReturnType<typeof where>[],
+        map: Map<string, ServiceRequest>,
+        label: string,
+        reportErrors: boolean
+      ): (() => void) => {
+        let unsub: () => void = () => {};
+        const start = (withStatus: boolean) => {
+          const constraints = withStatus ? [...base, where('status', 'in', PROVIDER_VISIBLE_STATUSES)] : base;
+          unsub = onSnapshot(
+            query(requestsColl, ...constraints),
+            (snap) => {
+              map.clear();
+              snap.forEach((d) => {
+                map.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
+              });
+              emitCombined();
+            },
+            (err: any) => {
+              if (withStatus && err?.code === 'failed-precondition') {
+                start(false);
+                return;
+              }
+              console.warn(`[FirebaseRepository] subscribeToRequests ${label} note:`, err?.message || err);
+              if (reportErrors && onError) onError(err);
+            }
+          );
+        };
+        start(isProviderQuery);
+        return () => unsub();
+      };
+
+      let unsubPrimary: () => void;
+      if (qPrimary) {
+        unsubPrimary = onSnapshot(
+          qPrimary,
+          (snap) => {
+            primaryMap.clear();
+            snap.forEach((d) => {
+              primaryMap.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
+            });
+            emitCombined();
+          },
+          (err) => {
+            console.warn('[FirebaseRepository] subscribeToRequests error:', err?.message || err);
+            if (onError) onError(err);
+          }
+        );
+      } else if (targetCityId && targetCatId) {
+        unsubPrimary = listen([where('cityId', '==', targetCityId), where('categoryId', '==', targetCatId)], primaryMap, 'primary', true);
+      } else if (targetCityId) {
+        unsubPrimary = listen([where('cityId', '==', targetCityId)], primaryMap, 'primary', true);
+      } else if (targetCatId) {
+        unsubPrimary = listen([where('categoryId', '==', targetCatId)], primaryMap, 'primary', true);
+      } else {
+        unsubPrimary = listen([], primaryMap, 'primary', true);
+      }
 
       let unsubLegacy: (() => void) | null = null;
       if (targetCatId === 'appliances' && targetCityId) {
         try {
-          const qLegacy = query(
-            requestsColl,
-            where('cityId', '==', targetCityId),
-            where('categoryId', '==', 'appliance_repair')
-          );
-          unsubLegacy = onSnapshot(
-            qLegacy,
-            (snap) => {
-              legacyMap.clear();
-              snap.forEach((d) => {
-                legacyMap.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
-              });
-              emitCombined();
-            },
-            (err) => {
-              console.warn('[FirebaseRepository] subscribeToRequests legacy note:', err?.message || err);
-            }
-          );
+          unsubLegacy = listen([where('cityId', '==', targetCityId), where('categoryId', '==', 'appliance_repair')], legacyMap, 'legacy', false);
         } catch {}
       }
 
       let unsubOther: (() => void) | null = null;
       if (targetCityId && targetCatId && targetCatId !== 'other') {
         try {
-          const qOther = query(
-            requestsColl,
-            where('cityId', '==', targetCityId),
-            where('categoryId', '==', 'other')
-          );
-          unsubOther = onSnapshot(
-            qOther,
-            (snap) => {
-              otherMap.clear();
-              snap.forEach((d) => {
-                otherMap.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
-              });
-              emitCombined();
-            },
-            (err) => {
-              console.warn('[FirebaseRepository] subscribeToRequests other note:', err?.message || err);
-            }
-          );
+          unsubOther = listen([where('cityId', '==', targetCityId), where('categoryId', '==', 'other')], otherMap, 'other', false);
         } catch {}
       }
 

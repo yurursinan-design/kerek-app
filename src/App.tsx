@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense, lazy } from 'react';
 import {
   AppNotification,
   ExtractedNeed,
@@ -12,9 +12,10 @@ import { Header } from './components/Header';
 import { BottomNav, MainTab } from './components/BottomNav';
 import { HomeScreen } from './components/HomeScreen';
 import { InterpretationScreen } from './components/InterpretationScreen';
-import { ResultScreen } from './components/ResultScreen';
-import { MyRequestsScreen } from './components/MyRequestsScreen';
-import { ProviderModeScreen } from './components/ProviderModeScreen';
+// Screens after the first one load on demand, so the start screen opens faster on slow connections
+const ResultScreen = lazy(() => import('./components/ResultScreen').then((m) => ({ default: m.ResultScreen })));
+const MyRequestsScreen = lazy(() => import('./components/MyRequestsScreen').then((m) => ({ default: m.MyRequestsScreen })));
+const ProviderModeScreen = lazy(() => import('./components/ProviderModeScreen').then((m) => ({ default: m.ProviderModeScreen })));
 import { InAppToast } from './components/InAppToast';
 import { PhoneLoginModal, PhoneLoginReason } from './components/PhoneLoginModal';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -618,6 +619,13 @@ export default function App() {
 
         {/* Dynamic Screen View */}
         <main className="flex-1 flex flex-col">
+          <Suspense
+            fallback={
+              <div className="flex-1 flex items-center justify-center py-16" role="status" aria-label="…">
+                <span className="w-6 h-6 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
+              </div>
+            }
+          >
           {activeTab === 'home' && (
             <>
               {currentScreen === 'home' && (
@@ -670,6 +678,7 @@ export default function App() {
               }}
             />
           )}
+          </Suspense>
         </main>
 
         {/* Fixed Mobile Bottom Navigation */}
