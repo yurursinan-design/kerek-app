@@ -199,12 +199,13 @@ export class ResilientRepository implements Repository {
   async uploadRequestAttachment(
     requestId: string,
     file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string },
-    customerId?: string
+    customerId?: string,
+    slot?: number
   ): Promise<RequestAttachment> {
     if (this.firebaseRepo.isAvailable()) {
       // Cloud mode uploads only to Cloud Storage. A local fallback would store the file on this
       // device and put a link into the shared request that no provider can open.
-      return await this.firebaseRepo.uploadRequestAttachment(requestId, file, customerId);
+      return await this.firebaseRepo.uploadRequestAttachment(requestId, file, customerId, slot);
     }
     return await this.localRepo.uploadRequestAttachment(requestId, file, customerId);
   }

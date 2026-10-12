@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import { db, auth, app, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { deleteApp } from 'firebase/app';
 import { signInAnonymously } from 'firebase/auth';
-import { doc, getDoc, getDocs, collection, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
 // Mock minimal localStorage required by Firebase Auth Node.js environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -105,6 +105,7 @@ async function runMessagingSecurityTests() {
     customerId: customerUid,
     customerName: 'Test Müşteri',
     city: 'Қызылорда',
+    cityId: 'kyzylorda',
     category: 'Тұрмыстық техника жөндеу',
     service: 'Тест қауіпсіздік тексеру',
     status: 'OPEN',
@@ -114,7 +115,10 @@ async function runMessagingSecurityTests() {
 
   // The provider sends an offer and the customer selects it: the rules only allow a conversation for a
   // request that has a selected provider with an accepted offer.
-  const testOfferId = `OFFER-${testReqId}-SEC`;
+  const testOfferId = `OFFER-${testReqId}-${providerUid}`;
+  await setDoc(doc(providerDb, 'providers', providerUid), {
+    id: providerUid, userId: providerUid, name: 'Test Шебер', city: 'Қызылорда', cityId: 'kyzylorda', category: 'appliances',
+  });
   await setDoc(doc(providerDb, 'offers', testOfferId), {
     id: testOfferId,
     requestId: testReqId,
@@ -124,12 +128,11 @@ async function runMessagingSecurityTests() {
     price: '10 000 ₸',
     status: 'PENDING',
   });
-  await setDoc(reqRef, {
-    status: 'PROVIDER_SELECTED',
-    selectedOfferId: testOfferId,
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
-  await setDoc(doc(db!, 'offers', testOfferId), { status: 'ACCEPTED', updatedAt: new Date().toISOString() }, { merge: true });
+  // Selecting the offer and accepting it happen in one write
+  const acceptBatch = writeBatch(db!);
+  acceptBatch.set(reqRef, { status: 'PROVIDER_SELECTED', selectedOfferId: testOfferId, updatedAt: new Date().toISOString() }, { merge: true });
+  acceptBatch.set(doc(db!, 'offers', testOfferId), { status: 'ACCEPTED', updatedAt: new Date().toISOString() }, { merge: true });
+  await acceptBatch.commit();
 
   // Customer creates the deterministic conversation linking customer and the selected provider
   await setDoc(convRef, {

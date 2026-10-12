@@ -57,6 +57,49 @@ service cloud.firestore {
         && strMax(m, 'providerWhatsapp', 30) && strMax(m, 'priceType', 20);
     }
 
+    // Request statuses in which providers of the city may still see and answer a request
+    function PROVIDER_KEYS() {
+      return ['id', 'userId', 'name', 'phone', 'whatsapp', 'city', 'cityId', 'district', 'category', 'categoryId',
+        'categoryIds', 'serviceIds', 'services', 'priceRange', 'workingHours', 'experienceYears', 'description',
+        'availability', 'tradeLicense', 'verified', 'iinVerified', 'hasCertificate', 'isDemo', 'blocked', 'hidden',
+        'createdAt', 'updatedAt'];
+    }
+
+    function CONVERSATION_KEYS() {
+      return ['id', 'requestId', 'customerId', 'customerName', 'providerId', 'providerUserId', 'providerName', 'status',
+        'lastMessageText', 'lastMessageSenderId', 'lastMessageAt', 'unreadCountCustomer', 'unreadCountProvider',
+        'createdAt', 'updatedAt'];
+    }
+
+    function isOpenStatus(st) {
+      return st in ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'];
+    }
+
+    // Approximate point shared with providers: numbers only (a string here used to break the provider feed)
+    function locationOk(m) {
+      return !('location' in m) || (m.location is map
+        && m.location.keys().hasOnly(['latitude', 'longitude', 'approximate', 'accuracy'])
+        && m.location.latitude is number && m.location.longitude is number
+        && m.location.latitude >= -90 && m.location.latitude <= 90
+        && m.location.longitude >= -180 && m.location.longitude <= 180);
+    }
+
+    // The parsed version of the customer's text: known keys, bounded strings and lists
+    function understandingOk(m) {
+      return !('understanding' in m) || (m.understanding is map
+        && m.understanding.keys().size() <= 20
+        && strMax(m.understanding, 'description', 5000) && strMax(m.understanding, 'service', 300)
+        && strMax(m.understanding, 'detectedProblem', 500) && strMax(m.understanding, 'userIntent', 500)
+        && strMax(m.understanding, 'city', 100) && strMax(m.understanding, 'category', 100)
+        && strMax(m.understanding, 'preferredDate', 100)
+        && (!('missingInformation' in m.understanding) || (m.understanding.missingInformation is list && m.understanding.missingInformation.size() <= 10))
+        && (!('suggestedQuestions' in m.understanding) || (m.understanding.suggestedQuestions is list && m.understanding.suggestedQuestions.size() <= 10)));
+    }
+
+    function attachmentsOk(m) {
+      return !('attachments' in m) || (m.attachments is list && m.attachments.size() <= 15);
+    }
+
     function providerFieldLimits(m) {
       return strMax(m, 'phone', 30) && strMax(m, 'whatsapp', 30)
         && strMax(m, 'district', 100) && strMax(m, 'services', 1000)
@@ -64,7 +107,9 @@ service cloud.firestore {
         && strMax(m, 'description', 5000) && strMax(m, 'availability', 300)
         && strMax(m, 'tradeLicense', 100) && strMax(m, 'cityId', 64) && strMax(m, 'categoryId', 64)
         && (!('categoryIds' in m) || (m.categoryIds is list && m.categoryIds.size() <= 30))
-        && (!('serviceIds' in m) || (m.serviceIds is list && m.serviceIds.size() <= 160));
+        && (!('serviceIds' in m) || (m.serviceIds is list && m.serviceIds.size() <= 160))
+        && (!('experienceYears' in m) || (m.experienceYears is number && m.experienceYears >= 0 && m.experienceYears <= 80))
+        && strMax(m, 'createdAt', 40) && strMax(m, 'updatedAt', 40);
     }
 
     // =================== Users Collection ===================
@@ -93,7 +138,8 @@ service cloud.firestore {
     // - Providers can only create and manage their own profile
     // - Listing is scoped to user's own profile or targeted directory queries (preventing blanket scraping)
     match /providers/{providerId} {
-      allow get: if isSignedIn() && isValidId(providerId);
+      // Profiles carry phone numbers: only phone-verified accounts read them, not anonymous visitors
+      allow get: if hasVerifiedPhone() && isValidId(providerId);
       allow list: if false;
       allow create: if hasVerifiedPhone()
                     && isValidId(providerId)
@@ -103,7 +149,10 @@ service cloud.firestore {
                     && incoming().city is string && incoming().city.size() <= 50
                     && incoming().category is string && incoming().category.size() <= 100
                     && incoming().name is string && incoming().name.size() > 0 && incoming().name.size() <= 100
+                    && incoming().cityId is string && incoming().cityId.size() > 0
+                    && incoming().keys().hasOnly(PROVIDER_KEYS())
                     && noTrustBadges(incoming())
+                    && falseOrAbsent(incoming(), 'blocked') && falseOrAbsent(incoming(), 'hidden') && falseOrAbsent(incoming(), 'isDemo')
                     && providerFieldLimits(incoming());
       allow update: if hasVerifiedPhone()
                     && isValidId(providerId)
@@ -112,7 +161,15 @@ service cloud.firestore {
                     && incoming().userId == request.auth.uid
                     && incoming().id == request.auth.uid
                     && strMax(incoming(), 'name', 100) && strMax(incoming(), 'city', 50) && strMax(incoming(), 'category', 100)
-                    && noTrustBadges(incoming())
+                    && incoming().cityId is string && incoming().cityId.size() > 0
+                    && incoming().keys().hasOnly(PROVIDER_KEYS())
+                    // Badges set by the operator stay as they are; the provider can't add or change them
+                    && (noTrustBadges(incoming()) || (
+                         incoming().get('verified', false) == existing().get('verified', false)
+                         && incoming().get('iinVerified', false) == existing().get('iinVerified', false)
+                         && incoming().get('hasCertificate', false) == existing().get('hasCertificate', false)))
+                    && incoming().get('blocked', false) == existing().get('blocked', false)
+                    && incoming().get('hidden', false) == existing().get('hidden', false)
                     && providerFieldLimits(incoming());
       // Account deletion: a provider can remove their own profile
       allow delete: if isSignedIn() && isValidId(providerId) && providerId == request.auth.uid;
@@ -124,10 +181,14 @@ service cloud.firestore {
     // - Customer can list their own requests, or browse active requests in marketplace
     // - Blanket or unconstrained requests queries are strictly forbidden
     // A provider sees requests from their own city (the city on their provider profile)
+    // Only open requests: once a provider is chosen or the request is closed, other providers lose access.
+    // A blocked provider sees nothing.
     function isProviderInCityOf(r) {
-      return exists(/databases/$(database)/documents/providers/$(request.auth.uid))
-        && ('cityId' in r) && r.cityId is string
-        && get(/databases/$(database)/documents/providers/$(request.auth.uid)).data.get('cityId', '') == r.cityId;
+      return ('cityId' in r) && r.cityId is string && r.cityId != ''
+        && isOpenStatus(r.status)
+        && exists(/databases/$(database)/documents/providers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/providers/$(request.auth.uid)).data.get('cityId', '') == r.cityId
+        && get(/databases/$(database)/documents/providers/$(request.auth.uid)).data.get('blocked', false) != true;
     }
 
     // The provider whose offer was selected keeps access to the request they work on
@@ -163,9 +224,13 @@ service cloud.firestore {
                     && !('selectedOfferId' in incoming())
                     && !('paymentStatus' in incoming())
                     && !('escrowAmount' in incoming())
+                    && incoming().keys().hasOnly([
+                      'id', 'customerId', 'customerName', 'requestText', 'description', 'city', 'cityId',
+                      'category', 'categoryId', 'serviceId', 'service', 'date', 'budget', 'urgency', 'status',
+                      'createdAt', 'updatedAt', 'attachments', 'location', 'understanding'
+                    ])
                     && requestFieldLimits(incoming())
-                    && (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 15))
-                    && (!('location' in incoming()) || (incoming().location is map && ('latitude' in incoming().location) && ('longitude' in incoming().location)));
+                    && attachmentsOk(incoming()) && locationOk(incoming()) && understandingOk(incoming());
       // Which fields an update changes, computed once: diff() walks the whole document (including the
       // nested understanding map), so repeating it per branch could exceed the 1000-expression limit.
       function requestUpdateAllowed() {
@@ -185,8 +250,7 @@ service cloud.firestore {
            'attachments', 'location', 'understanding', 'updatedAt'
          ]) &&
          requestFieldLimits(incoming()) &&
-         (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 15)) &&
-         (!('location' in incoming()) || (incoming().location is map && ('latitude' in incoming().location) && ('longitude' in incoming().location)))) ||
+         attachmentsOk(incoming()) && locationOk(incoming()) && understandingOk(incoming())) ||
         // 2. Customer accepting an offer (transitioning to PROVIDER_SELECTED with verified offer; cannot switch once selected)
         (existing().customerId == request.auth.uid &&
          incoming().customerId == existing().customerId &&
@@ -197,7 +261,7 @@ service cloud.firestore {
          incoming().selectedOfferId is string &&
          exists(/databases/$(database)/documents/offers/$(incoming().selectedOfferId)) &&
          get(/databases/$(database)/documents/offers/$(incoming().selectedOfferId)).data.requestId == requestId &&
-         get(/databases/$(database)/documents/offers/$(incoming().selectedOfferId)).data.status in ['PENDING', 'ACCEPTED'] &&
+         getAfter(/databases/$(database)/documents/offers/$(incoming().selectedOfferId)).data.status == 'ACCEPTED' &&
          changed.hasOnly(['status', 'selectedOfferId', 'updatedAt'])) ||
         // 3. Customer cancelling request
         (existing().customerId == request.auth.uid &&
@@ -214,24 +278,12 @@ service cloud.firestore {
          existing().status in ['OPEN', 'MATCHING', 'NEW', 'OFFERS_RECEIVED'] &&
          incoming().customerId == existing().customerId &&
          incoming().id == existing().id &&
-         changed.hasOnly(['status', 'updatedAt', 'lastOfferId', 'offerId']) &&
-         (
-           ('lastOfferId' in incoming() &&
-            incoming().lastOfferId is string &&
-            exists(/databases/$(database)/documents/offers/$(incoming().lastOfferId)) &&
-            get(/databases/$(database)/documents/offers/$(incoming().lastOfferId)).data.requestId == requestId &&
-            (get(/databases/$(database)/documents/offers/$(incoming().lastOfferId)).data.providerUserId == request.auth.uid ||
-             get(/databases/$(database)/documents/offers/$(incoming().lastOfferId)).data.providerId == request.auth.uid) &&
-            get(/databases/$(database)/documents/offers/$(incoming().lastOfferId)).data.status == 'PENDING')
-           ||
-           ('offerId' in incoming() &&
-            incoming().offerId is string &&
-            exists(/databases/$(database)/documents/offers/$(incoming().offerId)) &&
-            get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.requestId == requestId &&
-            (get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.providerUserId == request.auth.uid ||
-             get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.providerId == request.auth.uid) &&
-            get(/databases/$(database)/documents/offers/$(incoming().offerId)).data.status == 'PENDING')
-         )) ||
+         changed.hasOnly(['status', 'updatedAt', 'lastOfferId']) &&
+         incoming().lastOfferId is string &&
+         exists(/databases/$(database)/documents/offers/$(incoming().lastOfferId)) &&
+         get(/databases/$(database)/documents/offers/$(incoming().lastOfferId)).data.requestId == requestId &&
+         get(/databases/$(database)/documents/offers/$(incoming().lastOfferId)).data.providerUserId == request.auth.uid &&
+         get(/databases/$(database)/documents/offers/$(incoming().lastOfferId)).data.status == 'PENDING') ||
         // 5. Selected provider starting the job, or reporting it finished (providerDoneAt).
         //    Only the customer can mark the request COMPLETED (branch 6).
         (existing().status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'] &&
@@ -268,6 +320,7 @@ service cloud.firestore {
         exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId)) &&
         get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId)).data.requestId == reqId &&
         get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId)).data.status == 'ACCEPTED' &&
+        get(/databases/$(database)/documents/requests/$(reqId)).data.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED'] &&
         (
           get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId)).data.providerUserId == request.auth.uid ||
           get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reqId)).data.selectedOfferId)).data.providerId == request.auth.uid
@@ -295,6 +348,8 @@ service cloud.firestore {
     // - Blanket or unconstrained offers queries are strictly forbidden
     match /offers/{offerId} {
       allow get: if isSignedIn() && isValidId(offerId) && (
+        // A provider checks whether their own offer on a request already exists
+        (resource == null && offerId.matches('OFFER-.+-' + request.auth.uid)) ||
         resource.data.providerUserId == request.auth.uid ||
         (resource.data.requestId is string &&
          get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.customerId == request.auth.uid)
@@ -306,19 +361,29 @@ service cloud.firestore {
         (resource.data.requestId is string &&
          get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.customerId == request.auth.uid)
       );
+      // One offer per provider and request (the id is fixed), only from a provider profile in the
+      // request's city, never on your own request, and only with the known offer fields.
       allow create: if hasVerifiedPhone()
                     && isValidId(offerId)
                     && incoming().id == offerId
                     && incoming().requestId is string && incoming().requestId.size() <= 64
+                    && offerId == 'OFFER-' + incoming().requestId + '-' + request.auth.uid
                     && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
-                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED']
+                    && isProviderInCityOf(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data)
+                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId != request.auth.uid
+                    && incoming().providerName == get(/databases/$(database)/documents/providers/$(request.auth.uid)).data.name
+                    && incoming().keys().hasOnly([
+                      'id', 'requestId', 'providerId', 'providerUserId', 'providerName', 'providerPhone',
+                      'providerWhatsapp', 'isDemo', 'price', 'priceType', 'availability', 'message', 'status',
+                      'createdAt', 'updatedAt', 'iinVerified', 'hasCertificate'
+                    ])
+                    && falseOrAbsent(incoming(), 'isDemo')
+                    && strMax(incoming(), 'createdAt', 40)
                     && incoming().providerUserId == request.auth.uid
                     // providerId names the provider profile shown to the customer; it must be the caller's own
                     && (!('providerId' in incoming()) || incoming().providerId == request.auth.uid)
                     && incoming().price is string && incoming().price.size() <= 50
                     && incoming().status == 'PENDING'
-                    // Payment state is managed by the backend only
-                    && !('paymentStatus' in incoming())
                     && noTrustBadges(incoming())
                     && offerFieldLimits(incoming());
       allow update: if isSignedIn() && isValidId(offerId) && (
@@ -339,19 +404,15 @@ service cloud.firestore {
           incoming().price is string && incoming().price.size() <= 50 &&
           offerFieldLimits(incoming())
         ) ||
-        // Customer accepting or rejecting an offer (status transition: PENDING -> ACCEPTED / REJECTED)
-        // paymentStatus cannot be set or modified by client directly; it is managed exclusively by backend escrow webhook (kaspiEscrowWebhook)
+        // Customer rejecting an offer, or accepting the one the request selects in the same write
+        // (so only one offer per request can ever be ACCEPTED)
         (
           get(/databases/$(database)/documents/requests/$(existing().requestId)).data.customerId == request.auth.uid &&
-          incoming().id == existing().id &&
-          incoming().requestId == existing().requestId &&
-          incoming().providerUserId == existing().providerUserId &&
-          (!('providerId' in existing()) || incoming().providerId == existing().providerId) &&
-          (!('createdAt' in existing()) || incoming().createdAt == existing().createdAt) &&
-          (!('paymentStatus' in incoming()) || (('paymentStatus' in existing()) && incoming().paymentStatus == existing().paymentStatus)) &&
           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) &&
           existing().status == 'PENDING' &&
-          incoming().status in ['ACCEPTED', 'REJECTED']
+          (incoming().status == 'REJECTED' ||
+           (incoming().status == 'ACCEPTED'
+            && getAfter(/databases/$(database)/documents/requests/$(existing().requestId)).data.get('selectedOfferId', '') == offerId))
         )
       );
       allow delete: if false;
@@ -376,6 +437,9 @@ service cloud.firestore {
                     && incoming().providerId is string
                     && incoming().providerId != request.auth.uid
                     && incoming().rating is int && incoming().rating >= 1 && incoming().rating <= 5
+                    && incoming().keys().hasOnly(['id', 'requestId', 'customerId', 'customerName', 'providerId', 'providerName', 'rating', 'comment', 'createdAt'])
+                    && strMax(incoming(), 'comment', 1000) && strMax(incoming(), 'customerName', 100)
+                    && strMax(incoming(), 'providerName', 100) && strMax(incoming(), 'createdAt', 40)
                     && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
                     && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status == 'COMPLETED'
                     && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == request.auth.uid
@@ -416,7 +480,12 @@ service cloud.firestore {
                     && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.requestId == incoming().requestId
                     && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerUserId == incoming().providerUserId
                     && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == incoming().customerId
+                    // providerId also grants access, so it must name the same selected provider
+                    && incoming().get('providerId', incoming().providerUserId) == incoming().providerUserId
                     && (incoming().customerId == request.auth.uid || incoming().providerUserId == request.auth.uid)
+                    && incoming().keys().hasOnly(CONVERSATION_KEYS())
+                    && strMax(incoming(), 'customerName', 100) && strMax(incoming(), 'providerName', 100)
+                    && strMax(incoming(), 'lastMessageText', 300)
                     && incoming().status in ['ACTIVE', 'ARCHIVED'];
       allow update: if isSignedIn() && isValidId(conversationId) && (
         (resource.data.customerId == request.auth.uid ||
@@ -428,8 +497,14 @@ service cloud.firestore {
         incoming().get('providerId', null) == existing().get('providerId', null) &&
         incoming().requestId == existing().requestId &&
         incoming().id == existing().id &&
-        strMax(incoming(), 'customerName', 100) && strMax(incoming(), 'providerName', 100) &&
-        strMax(incoming(), 'lastMessageText', 2000)
+        // Participants only move the last-message preview and the unread counters
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'lastMessageText', 'lastMessageSenderId', 'lastMessageAt', 'unreadCountCustomer', 'unreadCountProvider', 'updatedAt'
+        ]) &&
+        (!incoming().diff(existing()).affectedKeys().hasAny(['lastMessageSenderId']) || incoming().lastMessageSenderId == request.auth.uid) &&
+        strMax(incoming(), 'lastMessageText', 300) &&
+        incoming().get('unreadCountCustomer', 0) is int && incoming().get('unreadCountCustomer', 0) <= 100000 &&
+        incoming().get('unreadCountProvider', 0) is int && incoming().get('unreadCountProvider', 0) <= 100000
       );
       allow delete: if false;
 
@@ -448,6 +523,8 @@ service cloud.firestore {
                       && incoming().conversationId == conversationId
                       && incoming().senderId == request.auth.uid
                       && incoming().type in ['text', 'image', 'file']
+                      && incoming().keys().hasOnly(['id', 'conversationId', 'requestId', 'senderId', 'senderRole', 'type', 'text', 'attachments', 'isRead', 'readAt', 'createdAt'])
+                      && strMax(incoming(), 'createdAt', 40)
                       && incoming().text is string && incoming().text.size() <= 2000
                       && (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 10))
                       && conversationId == ('conv_' + incoming().requestId)
@@ -458,24 +535,22 @@ service cloud.firestore {
                         ((get(/databases/$(database)/documents/conversations/$(conversationId)).data.providerUserId == request.auth.uid || get(/databases/$(database)/documents/conversations/$(conversationId)).data.providerId == request.auth.uid) && incoming().senderRole == 'provider')
                       )
                       && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
-                      && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED']
-                      && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status != 'CANCELLED'
-                      && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status != 'OPEN';
+                      && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS', 'COMPLETED'];
         allow update: if false;
         allow delete: if false;
       }
     }
 
     // =================== Notifications Collection ===================
-    // Each related document is read once through these helpers (missing documents read as an empty
-    // map), which keeps the create rule well under the 1000-expression evaluation limit.
+    // Each related document is read once (missing documents read as an empty map) and passed on as
+    // a value, which keeps the create rule under the 1000-expression evaluation limit.
     function offerOrEmpty(offerId) {
-      return exists(/databases/$(database)/documents/offers/$(offerId))
+      return offerId is string && offerId != '' && exists(/databases/$(database)/documents/offers/$(offerId))
         ? get(/databases/$(database)/documents/offers/$(offerId)).data : {};
     }
 
     function conversationOrEmpty(conversationId) {
-      return exists(/databases/$(database)/documents/conversations/$(conversationId))
+      return conversationId is string && conversationId != '' && exists(/databases/$(database)/documents/conversations/$(conversationId))
         ? get(/databases/$(database)/documents/conversations/$(conversationId)).data : {};
     }
 
@@ -489,21 +564,16 @@ service cloud.firestore {
       return d.get('providerUserId', '') == uid || d.get('providerId', '') == uid;
     }
 
-    // Is uid the provider working on this request: the selected offer, the offer named in the
-    // notification, the request's conversation, or its appointment
-    function isProviderOfRequest(n, req, uid) {
-      return (req.get('selectedOfferId', '') is string && req.get('selectedOfferId', '') != ''
-              && isProviderOn(offerOrEmpty(req.get('selectedOfferId', '')), uid))
-        || (('offerId' in n) && isProviderOn(offerOrEmpty(n.offerId), uid))
-        || (('conversationId' in n)
-            && conversationOrEmpty(n.conversationId).get('requestId', '') == n.requestId
-            && conversationOrEmpty(n.conversationId).get('customerId', '') == req.customerId
-            && isProviderOn(conversationOrEmpty(n.conversationId), uid))
-        || (appointmentOrEmpty(n.requestId).get('customerId', '') == req.customerId
-            && isProviderOn(appointmentOrEmpty(n.requestId), uid));
+    // Is uid the provider working on this request: the selected offer, a still-pending offer named in
+    // the notification, the request's conversation, or its appointment
+    function isProviderOfRequest(n, req, uid, d) {
+      return isProviderOn(d.sel, uid)
+        || (isProviderOn(d.named, uid) && d.named.get('status', '') == 'PENDING')
+        || (d.conv.get('requestId', '') == n.requestId && d.conv.get('customerId', '') == req.customerId && isProviderOn(d.conv, uid))
+        || (d.appt.get('customerId', '') == req.customerId && isProviderOn(d.appt, uid));
     }
 
-    function notificationSenderAllowed(n, req) {
+    function notificationSenderAllowed(n, req, d) {
       let uid = request.auth.uid;
       return (
         // 1. The customer confirming something to themselves (offer accepted, completion, review prompt)
@@ -511,24 +581,67 @@ service cloud.firestore {
           && n.type in ['CUSTOMER_OFFER_ACCEPTED', 'CUSTOMER_WORK_COMPLETED', 'CUSTOMER_REVIEW_REQUIRED'])
         // 2. The customer notifying a provider who works on, or offered for, this request
         || (req.customerId == uid && n.recipientRole == 'provider' && n.recipientUserId != uid
-          && isProviderOfRequest(n, req, n.recipientUserId))
+          && isProviderOfRequest(n, req, n.recipientUserId, d))
         // 3. A provider of this request notifying its customer
         || (n.recipientUserId == req.customerId && n.recipientRole == 'customer' && n.recipientUserId != uid
-          && isProviderOfRequest(n, req, uid))
+          && isProviderOfRequest(n, req, uid, d))
       );
     }
 
-    // Spark MVP In-App Notification System:
-    // - Document ID is deterministic/idempotent: notif_{type}_{refId}
-    // - Reading & listing is strictly scoped to the recipient (recipientUserId == request.auth.uid)
-    // - Creating a notification requires authentication, valid document structure, unread status,
-    //   and verified request context (no unconstrained self-creation and no arbitrary writes):
-    //   1. Self-notification: only the customer who owns the request can notify themselves for valid completion/review/accept flows
-    //   2. Customer -> Provider: recipient must be verified via selectedOfferId, valid offer, conversation, or appointment
-    //   3. Provider -> Customer: caller must be verified via offer, selectedOfferId, conversation, or appointment, and recipient must be request's customer
-    // - Updating is strictly restricted to marking as read (isRead, readAt, updatedAt) by the recipient
-    //   with verified data types (isRead must be bool, timestamps ISO strings/null) while core identity remains completely immutable
-    // - Deletion is strictly prohibited
+    // Title and body are short texts per language
+    function notifTextOk(t, n) {
+      return t is map && t.keys().hasOnly(['kz', 'ru']) && strMax(t, 'kz', n) && strMax(t, 'ru', n);
+    }
+
+    function messageSentByCaller(conversationId, messageId) {
+      let path = /databases/$(database)/documents/conversations/$(conversationId)/messages/$(messageId);
+      return exists(path) && get(path).data.get('senderId', '') == request.auth.uid;
+    }
+
+    // Each notification id is derived from the thing it reports, so one sender can't create an
+    // endless stream: one per offer, per accepted offer, per message, per request event, and per
+    // appointment change of an active job.
+    function notificationIdMatches(id, n, req, d) {
+      let t = n.type;
+      let rid = n.requestId;
+      let oid = n.get('offerId', '');
+      return (t == 'CUSTOMER_NEW_OFFER' && id == 'notif_offer_' + oid && d.named.get('status', '') == 'PENDING')
+        || (t == 'PROVIDER_OFFER_ACCEPTED' && id == 'notif_offer_accepted_prov_' + oid && req.get('selectedOfferId', '') == oid)
+        || (t == 'CUSTOMER_OFFER_ACCEPTED' && id == 'notif_offer_accepted_cust_' + oid && req.get('selectedOfferId', '') == oid)
+        || (t in ['CUSTOMER_NEW_MESSAGE', 'CUSTOMER_NEW_ATTACHMENT', 'PROVIDER_NEW_MESSAGE', 'PROVIDER_NEW_ATTACHMENT']
+            && id.matches('notif_msg_[A-Za-z0-9_-]+')
+            && messageSentByCaller(n.get('conversationId', '-'), id.split('notif_msg_')[1]))
+        || (t == 'CUSTOMER_WORK_COMPLETED' && (id == 'notif_done_cust_' + rid || id == 'notif_completed_cust_' + rid))
+        || (t == 'CUSTOMER_REVIEW_REQUIRED' && id == 'notif_review_' + rid)
+        || (t == 'PROVIDER_WORK_COMPLETED' && id == 'notif_completed_prov_' + rid)
+        || (t == 'PROVIDER_REQUEST_CANCELLED' && id == 'notif_cancelled_' + rid && req.status == 'CANCELLED')
+        || (id.matches('notif_(appt_create|appt_upd|appt_cancel|workstatus)_appointment_' + rid + '_[a-z0-9_]+')
+            && t in ['CUSTOMER_APPOINTMENT_CREATED', 'CUSTOMER_APPOINTMENT_UPDATED', 'CUSTOMER_APPOINTMENT_CANCELLED',
+                     'PROVIDER_APPOINTMENT_CREATED', 'PROVIDER_APPOINTMENT_UPDATED', 'PROVIDER_APPOINTMENT_CANCELLED',
+                     'CUSTOMER_PROVIDER_ON_THE_WAY', 'CUSTOMER_PROVIDER_ARRIVED', 'CUSTOMER_WORK_STARTED',
+                     'PROVIDER_WORK_STATUS_UPDATED']
+            && req.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS']);
+    }
+
+    // Reads the request and its related documents once, then checks the id and the sender
+    function notificationCreateAllowed(id, n) {
+      let req = get(/databases/$(database)/documents/requests/$(n.requestId)).data;
+      let d = {
+        'sel': offerOrEmpty(req.get('selectedOfferId', '')),
+        'named': offerOrEmpty(n.get('offerId', '')),
+        'conv': conversationOrEmpty(n.get('conversationId', '')),
+        'appt': appointmentOrEmpty(n.requestId)
+      };
+      return (!('offerId' in n) || d.named.get('requestId', '') == n.requestId)
+        && notificationIdMatches(id, n, req, d)
+        && notificationSenderAllowed(n, req, d);
+    }
+
+    // In-app notifications:
+    // - Read, list, mark as read and delete: the recipient only
+    // - Create: a participant of the request (see notificationSenderAllowed), with an id bound to the
+    //   offer, message, request event or appointment change it reports (notificationIdMatches),
+    //   known fields only and short texts. New-request alerts for providers come from Cloud Functions.
     match /notifications/{notificationId} {
       allow get: if isSignedIn() && isValidId(notificationId) && resource.data.recipientUserId == request.auth.uid;
       allow list: if isSignedIn() && resource.data.recipientUserId == request.auth.uid;
@@ -536,27 +649,23 @@ service cloud.firestore {
       allow create: if isSignedIn()
                     && isValidId(notificationId)
                     && incoming().id == notificationId
+                    && incoming().keys().hasOnly([
+                      'id', 'recipientUserId', 'recipientRole', 'type', 'title', 'body', 'targetScreen', 'isRead',
+                      'readAt', 'createdAt', 'requestId', 'offerId', 'conversationId', 'providerId'
+                    ])
+                    && notifTextOk(incoming().title, 120) && notifTextOk(incoming().body, 400)
+                    && (!('providerId' in incoming()) || isValidId(incoming().providerId))
                     && incoming().recipientUserId is string && isValidId(incoming().recipientUserId)
                     && incoming().recipientRole in ['customer', 'provider']
-                    && incoming().type in [
-                      'NEW_REQUEST', 'CUSTOMER_NEW_OFFER', 'CUSTOMER_OFFER_ACCEPTED', 'CUSTOMER_NEW_MESSAGE',
-                      'CUSTOMER_NEW_ATTACHMENT', 'CUSTOMER_WORK_COMPLETED', 'CUSTOMER_REVIEW_REQUIRED',
-                      'CUSTOMER_APPOINTMENT_CREATED', 'CUSTOMER_APPOINTMENT_UPDATED', 'CUSTOMER_APPOINTMENT_CANCELLED',
-                      'CUSTOMER_PROVIDER_ON_THE_WAY', 'CUSTOMER_PROVIDER_ARRIVED', 'CUSTOMER_WORK_STARTED',
-                      'PROVIDER_WORK_STATUS_UPDATED', 'PROVIDER_OFFER_ACCEPTED', 'PROVIDER_NEW_MESSAGE',
-                      'PROVIDER_NEW_ATTACHMENT', 'PROVIDER_REQUEST_CANCELLED', 'PROVIDER_WORK_COMPLETED',
-                      'PROVIDER_APPOINTMENT_CREATED', 'PROVIDER_APPOINTMENT_UPDATED', 'PROVIDER_APPOINTMENT_CANCELLED'
-                    ]
                     && incoming().isRead == false
                     && (!('readAt' in incoming()) || incoming().readAt == null)
                     && incoming().createdAt is string && incoming().createdAt.size() >= 10 && incoming().createdAt.size() <= 40
                     && incoming().targetScreen in ['request_detail', 'request_details', 'chat', 'offers_list', 'review_modal']
                     && ('requestId' in incoming()) && incoming().requestId is string && isValidId(incoming().requestId)
                     && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
-                    && (!('offerId' in incoming()) || (incoming().offerId is string && isValidId(incoming().offerId)
-                        && offerOrEmpty(incoming().offerId).get('requestId', '') == incoming().requestId))
-                    && (!('conversationId' in incoming()) || (incoming().conversationId is string && isValidId(incoming().conversationId)))
-                    && notificationSenderAllowed(incoming(), get(/databases/$(database)/documents/requests/$(incoming().requestId)).data);
+                    && (!('offerId' in incoming()) || isValidId(incoming().offerId))
+                    && (!('conversationId' in incoming()) || isValidId(incoming().conversationId))
+                    && notificationCreateAllowed(notificationId, incoming());
 
       allow update: if isSignedIn()
                     && isValidId(notificationId)
@@ -571,7 +680,8 @@ service cloud.firestore {
                     && (!('updatedAt' in incoming()) || (incoming().updatedAt is string && incoming().updatedAt.size() >= 10 && incoming().updatedAt.size() <= 40))
                     && incoming().diff(existing()).affectedKeys().hasOnly(['isRead', 'readAt', 'updatedAt']);
 
-      allow delete: if false;
+      // The recipient can clear their own notifications
+      allow delete: if isSignedIn() && isValidId(notificationId) && resource.data.recipientUserId == request.auth.uid;
     }
 
     // =================== Appointments Collection ===================
@@ -634,7 +744,13 @@ service cloud.firestore {
                         )
                       )
                     )
-                    && incoming().status in ['PROPOSED', 'CONFIRMED']
+                    && incoming().keys().hasOnly([
+                      'id', 'requestId', 'customerId', 'providerId', 'providerUserId', 'proposedBy', 'scheduledAt',
+                      'durationMinutes', 'status', 'note', 'workStatus', 'workStatusUpdatedAt', 'createdAt', 'updatedAt'
+                    ])
+                    // The other side confirms; work progress starts from the beginning
+                    && incoming().status == 'PROPOSED'
+                    && (!('workStatus' in incoming()) || incoming().workStatus == 'NOT_STARTED')
                     && incoming().scheduledAt is string && incoming().scheduledAt.size() >= 10 && incoming().scheduledAt.size() <= 40
                     && (!('durationMinutes' in incoming()) || (incoming().durationMinutes is number && incoming().durationMinutes > 0 && incoming().durationMinutes <= 1440))
                     && (!('note' in incoming()) || (incoming().note is string && incoming().note.size() <= 1000))
@@ -670,7 +786,7 @@ service cloud.firestore {
                     && (!('durationMinutes' in incoming()) || (incoming().durationMinutes is number && incoming().durationMinutes > 0 && incoming().durationMinutes <= 1440))
                     && (!('note' in incoming()) || (incoming().note is string && incoming().note.size() <= 1000))
                     && exists(/databases/$(database)/documents/requests/$(resource.data.requestId))
-                    && get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.status != 'COMPLETED'
+                    && get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS']
                     && (
                       (resource.data.status == 'PROPOSED' && incoming().status in ['PROPOSED', 'CONFIRMED', 'RESCHEDULED', 'CANCELLED']) ||
                       (resource.data.status == 'CONFIRMED' && incoming().status in ['CONFIRMED', 'RESCHEDULED', 'CANCELLED', 'COMPLETED']) ||

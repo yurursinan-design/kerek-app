@@ -285,8 +285,6 @@ async function runAcceptOfferFixTests() {
     firebaseRepository.isAvailable = () => true;
     if (typeof process !== 'undefined' && process.env?.FIRESTORE_EMULATOR_HOST && db) {
       const emuReqId = `REQ-EMU-CONCURRENT-${Date.now()}`;
-      const offerAId = `OFFER-EMU-A-${Date.now()}`;
-      const offerBId = `OFFER-EMU-B-${Date.now()}`;
 
       const currentUid = (await ensureFirebaseAuth()) || 'cust-emu-uid';
 
@@ -295,6 +293,7 @@ async function runAcceptOfferFixTests() {
         customerId: currentUid,
         customerName: 'Aigerim',
         city: 'Almaty',
+        cityId: 'almaty',
         category: 'appliances',
         service: 'Repair',
         status: 'OPEN',
@@ -306,10 +305,15 @@ async function runAcceptOfferFixTests() {
         const client = createSecondaryFirebaseApp(`${name}-${Date.now()}`)!;
         await signInAnonymously(client.auth);
         await attachEmulatorTestPhone(client.auth);
-        return { db: client.db, uid: client.auth.currentUser!.uid };
+        const uid = client.auth.currentUser!.uid;
+        // Offers come from a provider profile in the request's city
+        await setDoc(doc(client.db, 'providers', uid), { id: uid, userId: uid, name, city: 'Almaty', cityId: 'almaty', category: 'appliances' });
+        return { db: client.db, uid, name };
       };
-      const provA = await makeProvider('atomic-prov-a');
-      const provB = await makeProvider('atomic-prov-b');
+      const provA = await makeProvider('Master Arman');
+      const provB = await makeProvider('Master Berik');
+      const offerAId = `OFFER-${emuReqId}-${provA.uid}`;
+      const offerBId = `OFFER-${emuReqId}-${provB.uid}`;
 
       await setDoc(doc(provA.db, 'offers', offerAId), {
         id: offerAId,

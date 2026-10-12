@@ -2,7 +2,7 @@ import assert from 'node:assert';
 import { db, auth, app, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { deleteApp } from 'firebase/app';
 import { signInAnonymously } from 'firebase/auth';
-import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
 // Mock minimal localStorage for Node environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -48,8 +48,9 @@ async function runSecurityAudit() {
   const otherReqId = `REQ-OTHER-${Date.now().toString().slice(-6)}`;
   const testConvId = `conv_${testReqId}`;
 
-  const validOfferId = `OFFER-VALID-${Date.now().toString().slice(-6)}`;
-  const foreignOfferId = `OFFER-FOREIGN-${Date.now().toString().slice(-6)}`;
+  // One offer per provider and request: the id is fixed by the rules
+  const validOfferId = `OFFER-${testReqId}-${selectedProvUid}`;
+  const foreignOfferId = `OFFER-${otherReqId}-${selectedProvUid}`;
 
   // References
   const reqRef = doc(db!, 'requests', testReqId);
@@ -68,6 +69,7 @@ async function runSecurityAudit() {
       customerId: customerUid,
       customerName: 'Test Müşteri',
       city: 'Қызылорда',
+      cityId: 'kyzylorda',
       category: 'Тұрмыстық техника жөндеу',
       service: 'Тест қызметі',
       status: 'OPEN',
@@ -81,11 +83,17 @@ async function runSecurityAudit() {
       customerId: customerUid,
       customerName: 'Test Müşteri',
       city: 'Қызылорда',
+      cityId: 'kyzylorda',
       category: 'Тұрмыстық техника жөндеу',
       service: 'Бөлек қызмет',
       status: 'OPEN',
       createdAt: now,
       updatedAt: now,
+    });
+
+    // Offers come from a provider profile in the request's city
+    await setDoc(doc(selectedProvDb, 'providers', selectedProvUid), {
+      id: selectedProvUid, userId: selectedProvUid, name: 'Шебер Самат', city: 'Қызылорда', cityId: 'kyzylorda', category: 'appliances',
     });
 
     // Provider creates valid offer for testReqId
@@ -236,11 +244,11 @@ async function runSecurityAudit() {
     // ------------------------------------------------------------------------
     console.log('\n--- LEGITIMATE 2: Customer accepts legitimate offer (PROVIDER_SELECTED) ---');
     try {
-      await updateDoc(reqRef, {
-        status: 'PROVIDER_SELECTED',
-        selectedOfferId: validOfferId,
-        updatedAt: new Date().toISOString(),
-      });
+      // Selecting the offer and accepting it happen in one write
+      const batch = writeBatch(db!);
+      batch.update(reqRef, { status: 'PROVIDER_SELECTED', selectedOfferId: validOfferId, updatedAt: new Date().toISOString() });
+      batch.update(doc(db!, 'offers', validOfferId), { status: 'ACCEPTED', updatedAt: new Date().toISOString() });
+      await batch.commit();
       console.log('✅ PASS: Customer successfully accepted legitimate offer');
     } catch (err: any) {
       console.error('❌ FAIL: Customer offer acceptance failed:', err.message);

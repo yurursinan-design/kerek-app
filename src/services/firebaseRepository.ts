@@ -69,7 +69,7 @@ import {
   validateReviewData,
 } from './validation';
 import { getCurrentUserId } from './localRepository';
-import { generateOfferId, generateRequestId } from './ids';
+import { generateRequestId, providerOfferId } from './ids';
 import { CANONICAL_CITIES, CANONICAL_CATEGORIES, normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 
 /**
@@ -123,10 +123,8 @@ export function normalizeRequestStatus(status?: string): RequestStatus {
 
 // Statuses a provider still needs to see. Completed and cancelled requests (the bulk of the data
 // over time) are left out of provider queries so the provider screen doesn't download all history.
-const PROVIDER_VISIBLE_STATUSES = [
-  'OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED', 'PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS',
-  'open', 'new', 'matching', 'offers_received', 'provider_selected', 'accepted', 'in_progress',
-];
+/** Requests providers of a city can see (firestore.rules isOpenStatus); jobs a provider was chosen for are read one by one. */
+const PROVIDER_VISIBLE_STATUSES = ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'];
 
 /** Request fields written when the selected provider reports the job finished. */
 function providerDoneUpdate(req: ServiceRequest, now: string): Partial<ServiceRequest> & { updatedAt: string } {
@@ -266,20 +264,29 @@ export class FirebaseRepository implements Repository {
         ? { experienceYears: providerData.experienceYears }
         : {}),
       availability: providerData.availability || providerData.workingHours || '09:00 - 20:00',
-      // Trust badges are not self-assignable; they stay off until real verification exists
-      verified: false,
-      iinVerified: false,
-      hasCertificate: false,
       ...(providerData.tradeLicense ? { tradeLicense: providerData.tradeLicense } : {}),
-      isDemo: false,
-      createdAt: providerData.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    };
+    } as Provider;
 
     try {
       const provRef = doc(firestore, 'providers', id);
-      await setDoc(provRef, sanitizeForFirestore(newProvider), { merge: true });
-      return newProvider;
+      const existingSnap = await getDoc(provRef);
+      if (existingSnap.exists()) {
+        // Editing: badges set by the operator and the original creation date stay as they are
+        await setDoc(provRef, sanitizeForFirestore(newProvider), { merge: true });
+        const prev = existingSnap.data() as Provider;
+        return { ...prev, ...newProvider };
+      }
+      // Trust badges are not self-assignable; they stay off until the operator verifies the provider
+      const created: Provider = {
+        ...newProvider,
+        verified: false,
+        iinVerified: false,
+        hasCertificate: false,
+        createdAt: new Date().toISOString(),
+      };
+      await setDoc(provRef, sanitizeForFirestore(created));
+      return created;
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `providers/${id}`);
     }
@@ -505,7 +512,8 @@ export class FirebaseRepository implements Repository {
   async uploadRequestAttachment(
     requestId: string,
     file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string },
-    customerId?: string
+    customerId?: string,
+    slot?: number
   ): Promise<RequestAttachment> {
     await ensureFirebaseAuth();
     const cleanId = (requestId || '').trim();
@@ -532,8 +540,6 @@ export class FirebaseRepository implements Repository {
     }
 
     const sanitizedName = sanitizeFileName(file.name);
-    const attachmentId = `att_req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const storagePath = `requests/${cleanId}/${attachmentId}_${sanitizedName}`;
 
     if (!storage) {
       throw new Error('Firebase Storage is not configured or unavailable');
@@ -559,9 +565,8 @@ export class FirebaseRepository implements Repository {
       throw new Error('Attachment payload data is missing or invalid');
     }
 
-    const fileRef = storageRef(storage, storagePath);
     const metadata = {
-      contentType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mp3'),
+      contentType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mpeg'),
       customMetadata: {
         requestId: cleanId,
         uploadedBy: authUid || effectiveCustId,
@@ -570,8 +575,24 @@ export class FirebaseRepository implements Repository {
     };
 
     try {
-      const uploadResult = await uploadBytes(fileRef, blobPayload, metadata);
+      // A request holds at most 15 files, stored under fixed names att0 … att14 (storage.rules).
+      // Start at the next free slot and move on if a slot is already taken.
+      const firstSlot = Math.min(Math.max(slot ?? existing.attachments?.length ?? 0, 0), 14);
+      let uploadResult: Awaited<ReturnType<typeof uploadBytes>> | null = null;
+      let storagePath = '';
+      let lastErr: unknown = null;
+      for (let s = firstSlot; s <= 14 && !uploadResult; s++) {
+        storagePath = `requests/${cleanId}/att${s}`;
+        try {
+          uploadResult = await uploadBytes(storageRef(storage, storagePath), blobPayload, metadata);
+        } catch (e: any) {
+          lastErr = e;
+          if (e?.code !== 'storage/unauthorized') break;
+        }
+      }
+      if (!uploadResult) throw lastErr || new Error('No free attachment slot');
       const downloadUrl = await getDownloadURL(uploadResult.ref);
+      const attachmentId = storagePath.split('/').pop() as string;
 
       const attachment: RequestAttachment = {
         id: attachmentId,
@@ -579,7 +600,7 @@ export class FirebaseRepository implements Repository {
         storagePath,
         downloadUrl,
         fileName: sanitizedName,
-        mimeType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mp3'),
+        mimeType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mpeg'),
         sizeBytes: file.size,
         createdAt: new Date().toISOString(),
       };
@@ -932,10 +953,6 @@ export class FirebaseRepository implements Repository {
               emitCombined();
             },
             (err: any) => {
-              if (withStatus && err?.code === 'failed-precondition') {
-                start(false);
-                return;
-              }
               console.warn(`[FirebaseRepository] subscribeToRequests ${label} note:`, err?.message || err);
               if (reportErrors && onError) onError(err);
             }
@@ -1134,7 +1151,8 @@ export class FirebaseRepository implements Repository {
 
     const firestore = this.ensureDb();
     const providerUserId = auth?.currentUser?.uid || getCurrentUserId();
-    const id = offerData.id || generateOfferId(offerData.requestId || 'REQ');
+    // One offer per provider and request: the id is fixed, so a repeated tap can't create a second one
+    const id = providerOfferId(offerData.requestId || '', providerUserId);
 
     const priceType = offerData.priceType || 'fixed';
     let price = (offerData.price || '').trim();
@@ -1154,7 +1172,6 @@ export class FirebaseRepository implements Repository {
       providerName: offerData.providerName || '',
       providerPhone: offerData.providerPhone || '',
       providerWhatsapp: offerData.providerWhatsapp || '',
-      isDemo: offerData.isDemo || false,
       price,
       priceType,
       availability: offerData.availability || 'В течение часа',
@@ -1168,6 +1185,10 @@ export class FirebaseRepository implements Repository {
 
     try {
       const offerRef = doc(firestore, 'offers', id);
+      const already = await getDoc(offerRef);
+      if (already.exists()) {
+        return { id, ...already.data() } as ProviderOffer;
+      }
       await setDoc(offerRef, sanitizeForFirestore(newOffer));
 
       // Upgrade request status to OFFERS_RECEIVED if it was NEW or MATCHING
@@ -1927,7 +1948,7 @@ export class FirebaseRepository implements Repository {
       createdAt: now,
     };
 
-    const summaryText = text || (newMsg.attachments?.[0]?.type === 'image' ? '📷 Фото' : '📎 Файл');
+    const summaryText = (text || (newMsg.attachments?.[0]?.type === 'image' ? '📷 Фото' : '📎 Файл')).slice(0, 300);
 
     try {
       const batch = writeBatch(firestore);

@@ -69,7 +69,8 @@ export interface Repository {
   uploadRequestAttachment(
     requestId: string,
     file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string },
-    customerId?: string
+    customerId?: string,
+    slot?: number
   ): Promise<RequestAttachment>;
 
   // Offers

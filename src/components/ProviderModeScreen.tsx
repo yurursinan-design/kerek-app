@@ -127,6 +127,18 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [requests, setRequests] = useState<ServiceRequest[]>([]);
   const [dismissedReqIds, setDismissedReqIds] = useState<string[]>([]);
   const [sentOffersMap, setSentOffersMap] = useState<Record<string, ProviderOffer>>({});
+  // Same map for the live request feed, which keeps one subscription for the whole screen
+  const offersMapRef = useRef<Record<string, ProviderOffer>>({});
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    offersMapRef.current = sentOffersMap;
+  }, [sentOffersMap]);
 
   // Offer modal state
   const [selectedRequestForOffer, setSelectedRequestForOffer] =
@@ -213,79 +225,12 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
           offersMap[o.requestId] = o;
         });
 
+        offersMapRef.current = offersMap;
         if (isMounted) {
           setSentOffersMap(offersMap);
         }
 
-        // Clean up previous subscription if any
-        if (requestsUnsubscribeRef.current) {
-          requestsUnsubscribeRef.current();
-          requestsUnsubscribeRef.current = null;
-        }
-
-        // Requests of the provider's city; the provider's groups (several since the full catalogue)
-        // are matched on the device in the new-requests filter below
-        const filter = {
-          city: myProv.city,
-          cityId: myProv.cityId ? (normalizeCityId(myProv.cityId) || myProv.cityId) : normalizeCityId(myProv.city),
-        };
-
-        const unsub = repository.subscribeToRequests(
-          filter,
-          async (matchingRequests) => {
-            if (!isMounted) return;
-            setDebugError(null);
-            setDebugInfo('✅ ' + matchingRequests.length + ' talep bulundu');
-
-            // Ensure all requests that this provider has submitted offers for are included!
-            const offeredReqIds = Object.keys(offersMap);
-            const existingReqIds = new Set(matchingRequests.map((r) => r.id));
-            const missingReqPromises = offeredReqIds
-              .filter((id) => !existingReqIds.has(id))
-              .map(async (id) => {
-                const fetched = await repository.getRequest(id);
-                if (fetched) return fetched;
-                const off = offersMap[id];
-                if (off) {
-                  const fallbackReq: ServiceRequest = {
-                    id,
-                    customerId: '',
-                    customerName: language === 'kz' ? 'Клиент' : 'Клиент',
-                    requestText: off.message || (language === 'kz' ? 'Өтініш' : 'Заявка клиента'),
-                    service: language === 'kz' ? 'Тапсырыс' : 'Услуга',
-                    city: myProv.city,
-                    cityId: myProv.cityId,
-                    category: myProv.category,
-                    categoryId: myProv.categoryId,
-                    date: language === 'kz' ? 'Бүгін' : 'Сегодня',
-                    budget: off.price,
-                    urgency: 'normal',
-                    status: off.status === 'ACCEPTED' ? 'PROVIDER_SELECTED' : 'OPEN',
-                    createdAt: off.createdAt || new Date().toISOString(),
-                    selectedOfferId: off.status === 'ACCEPTED' ? off.id : undefined,
-                  };
-                  return fallbackReq;
-                }
-                return null;
-              });
-
-            const missingReqs = (await Promise.all(missingReqPromises)).filter(
-              (r): r is ServiceRequest => r !== null
-            );
-
-            const combinedRequests = [...matchingRequests, ...missingReqs];
-            if (isMounted) {
-              setRequests(combinedRequests);
-            }
-          },
-          (err: any) => {
-            if (!isMounted) return;
-            const errMsg = 'FIRESTORE HATA: ' + (err?.code || '') + ' - ' + (err?.message || String(err));
-            setDebugError(errMsg);
-          }
-        );
-
-        requestsUnsubscribeRef.current = unsub;
+        startRequestFeed(myProv, () => isMounted);
 
         try {
           const revs = await repository.getReviews({ providerId: myProv.id });
@@ -308,6 +253,83 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       }
     };
   }, []);
+
+  // Live list of the provider's city requests, plus the requests this provider has offered on
+  // (jobs they were chosen for are no longer in the city feed and are read one by one)
+  const startRequestFeed = (myProv: Provider, isAlive: () => boolean) => {
+    // Clean up previous subscription if any
+    if (requestsUnsubscribeRef.current) {
+      requestsUnsubscribeRef.current();
+      requestsUnsubscribeRef.current = null;
+    }
+
+    // Requests of the provider's city; the provider's groups (several since the full catalogue)
+    // are matched on the device in the new-requests filter below
+    const filter = {
+      city: myProv.city,
+      cityId: myProv.cityId ? (normalizeCityId(myProv.cityId) || myProv.cityId) : normalizeCityId(myProv.city),
+    };
+
+    const unsub = repository.subscribeToRequests(
+      filter,
+      async (matchingRequests) => {
+        if (!isAlive()) return;
+        setDebugError(null);
+        setDebugInfo('✅ ' + matchingRequests.length + ' talep bulundu');
+
+        // Requests this provider has offered on stay in the list (the city feed only holds open
+        // requests; a job the provider was chosen for is read on its own). The ref also holds
+        // offers sent after this screen opened.
+        const offersMap = offersMapRef.current;
+        const offeredReqIds = Object.keys(offersMap);
+        const existingReqIds = new Set(matchingRequests.map((r) => r.id));
+        const missingReqPromises = offeredReqIds
+          .filter((id) => !existingReqIds.has(id))
+          .map(async (id) => {
+            const fetched = await repository.getRequest(id);
+            if (fetched) return fetched;
+            const off = offersMap[id];
+            if (off) {
+              const fallbackReq: ServiceRequest = {
+                id,
+                customerId: '',
+                customerName: language === 'kz' ? 'Клиент' : 'Клиент',
+                requestText: off.message || (language === 'kz' ? 'Өтініш' : 'Заявка клиента'),
+                service: language === 'kz' ? 'Тапсырыс' : 'Услуга',
+                city: myProv.city,
+                cityId: myProv.cityId,
+                category: myProv.category,
+                categoryId: myProv.categoryId,
+                date: language === 'kz' ? 'Бүгін' : 'Сегодня',
+                budget: off.price,
+                urgency: 'normal',
+                status: off.status === 'ACCEPTED' ? 'PROVIDER_SELECTED' : 'OPEN',
+                createdAt: off.createdAt || new Date().toISOString(),
+                selectedOfferId: off.status === 'ACCEPTED' ? off.id : undefined,
+              };
+              return fallbackReq;
+            }
+            return null;
+          });
+
+        const missingReqs = (await Promise.all(missingReqPromises)).filter(
+          (r): r is ServiceRequest => r !== null
+        );
+
+        const combinedRequests = [...matchingRequests, ...missingReqs];
+        if (isAlive()) {
+          setRequests(combinedRequests);
+        }
+      },
+      (err: any) => {
+        if (!isAlive()) return;
+        const errMsg = 'FIRESTORE HATA: ' + (err?.code || '') + ' - ' + (err?.message || String(err));
+        setDebugError(errMsg);
+      }
+    );
+
+    requestsUnsubscribeRef.current = unsub;
+  };
 
   // Save profile via repository
   const handleSaveProfileData = async (providerData: Partial<Provider>) => {
@@ -360,29 +382,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         onProfileCreated();
       }
 
-      // Refresh matching requests subscription for this updated profile
-      if (requestsUnsubscribeRef.current) {
-        requestsUnsubscribeRef.current();
-        requestsUnsubscribeRef.current = null;
-      }
-      const newFilter = {
-        city: savedProvider.city,
-        cityId: savedProvider.cityId ? (normalizeCityId(savedProvider.cityId) || savedProvider.cityId) : cId,
-      };
-      requestsUnsubscribeRef.current = repository.subscribeToRequests(
-        newFilter,
-        (matchingRequests) => {
-          setRequests((prev) => {
-            const existingOffered = prev.filter((r) => sentOffersMap[r.id]);
-            const map = new Map<string, ServiceRequest>();
-            matchingRequests.forEach((r) => map.set(r.id, r));
-            existingOffered.forEach((r) => {
-              if (!map.has(r.id)) map.set(r.id, r);
-            });
-            return Array.from(map.values());
-          });
-        }
-      );
+      // Refresh the request feed for the updated profile (city may have changed)
+      startRequestFeed(savedProvider, () => mountedRef.current);
     } catch (err) {
       setErrorMessage(getFriendlyErrorMessage(err, language));
       setTimeout(() => setErrorMessage(null), 4000);

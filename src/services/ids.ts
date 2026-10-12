@@ -32,3 +32,8 @@ export function generateRequestId(now: number = Date.now()): string {
 export function generateOfferId(requestId: string): string {
   return `OFFER-${requestId}-${randomChars(4)}`;
 }
+
+/** The offer a provider makes on a request: one per provider and request (firestore.rules checks this id). */
+export function providerOfferId(requestId: string, providerUid: string): string {
+  return `OFFER-${requestId}-${providerUid}`;
+}

@@ -4,6 +4,7 @@ import { firebaseRepository } from '../src/services/firebaseRepository';
 import { localRepository } from '../src/services/localRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
+import { actAs } from './helpers/actors';
 
 // Mock localStorage for node environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -19,9 +20,12 @@ if (typeof globalThis.localStorage === 'undefined') {
 async function runLiveChatVerification() {
   console.log('=== VERIFYING LIVE FIREBASE CHAT FLOW ===');
   await ensureFirebaseAuth();
+  // The provider is a separate account (nobody can make an offer on their own request)
+  const providerUid = await actAs('live-provider');
+  await resilientRepository.createProvider({ name: 'Шебер Бауыржан', city: 'Қызылорда', cityId: 'kyzylorda', category: 'Тұрмыстық техника жөндеу', phone: '+7 701 555 1234' });
+  const uid = await actAs('live-customer');
   const authUser = auth?.currentUser;
   assert(authUser, 'Firebase Auth session must be active');
-  const uid = authUser.uid;
   console.log('✓ Firebase Auth user active with UID:', uid);
 
   // 1. Customer creates request in Kyzylorda
@@ -42,10 +46,11 @@ async function runLiveChatVerification() {
 
   // 2. Provider creates offer
   console.log('\n[STEP 2] Provider creates offer for request');
+  await actAs('live-provider');
   const offer = await resilientRepository.createOffer({
     requestId: req.id,
-    providerId: uid, // In single-session test, same user tests both roles as allowed by rules
-    providerUserId: uid,
+    providerId: providerUid,
+    providerUserId: providerUid,
     providerName: 'Шебер Бауыржан',
     providerPhone: '+7 701 555 1234',
     providerWhatsapp: '+7 701 555 1234',
@@ -57,6 +62,7 @@ async function runLiveChatVerification() {
 
   // 3. Customer accepts offer -> status = PROVIDER_SELECTED
   console.log('\n[STEP 3] Customer accepts provider offer');
+  await actAs('live-customer');
   const acceptRes = await resilientRepository.acceptOffer(req.id, offer.id);
   assert(acceptRes.request, 'Request must be returned from acceptOffer');
   assert.strictEqual(acceptRes.request.status, 'PROVIDER_SELECTED');
@@ -69,7 +75,7 @@ async function runLiveChatVerification() {
   assert.strictEqual(conv.id, `conv_${req.id}`);
   assert.strictEqual(conv.requestId, req.id);
   assert.strictEqual(conv.customerId, uid);
-  assert.strictEqual(conv.providerUserId, uid);
+  assert.strictEqual(conv.providerUserId, providerUid);
   console.log('✓ Conversation retrieved/created. Conversation ID:', conv.id);
 
   // Verify conversation doc
@@ -101,15 +107,16 @@ async function runLiveChatVerification() {
 
   // 6. Provider sends a reply message
   console.log('\n[STEP 6] Provider sends reply message');
+  await actAs('live-provider');
   const provMsg = await resilientRepository.sendMessage(conv.id, {
-    senderId: uid,
+    senderId: providerUid,
     senderRole: 'provider',
     text: 'Иә, әрине! Сағат 18:00-де келіп қараймын.',
   });
   assert(provMsg.id);
   assert.strictEqual(provMsg.conversationId, conv.id);
   assert.strictEqual(provMsg.senderRole, 'provider');
-  assert.strictEqual(provMsg.senderId, uid);
+  assert.strictEqual(provMsg.senderId, providerUid);
   console.log('✓ Provider message sent successfully. Msg ID:', provMsg.id);
 
   // 7. Verify both messages in Firestore

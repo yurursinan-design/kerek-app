@@ -373,7 +373,7 @@ export default function App() {
       let failedUploads = 0;
 
       if (updatedNeed.pendingAttachments && updatedNeed.pendingAttachments.length > 0) {
-        for (const item of updatedNeed.pendingAttachments) {
+        for (const [slot, item] of updatedNeed.pendingAttachments.entries()) {
           try {
             const uploaded = await repository.uploadRequestAttachment(
               newReq.id,
@@ -383,7 +383,8 @@ export default function App() {
                 type: item.type,
                 data: item.file || item.previewUrl,
               },
-              currentUserId
+              currentUserId,
+              slot
             );
             uploadedAttachments.push(uploaded);
           } catch (uploadErr) {

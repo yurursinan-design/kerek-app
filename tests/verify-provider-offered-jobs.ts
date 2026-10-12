@@ -3,6 +3,7 @@ import { localRepository } from '../src/services/localRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
 import { ensureFirebaseAuth, auth } from '../src/services/firebase';
 import { Provider, ProviderOffer, ServiceRequest } from '../src/types';
+import { actAs } from './helpers/actors';
 
 // Mock localStorage for node environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -19,7 +20,7 @@ async function runTest() {
   console.log('=== VERIFYING REQ-675871 IN PROVIDER MODE ===');
   localStorage.clear();
   await ensureFirebaseAuth();
-  const uid = auth?.currentUser?.uid || 'anon-test-uid';
+  const uid = await actAs('customer');
   const testReqId = 'REQ-675871-' + Date.now();
 
   // 1. Customer creates request
@@ -35,7 +36,8 @@ async function runTest() {
   assert.strictEqual(req.id, testReqId);
   console.log('✓ Step 1: Request created successfully');
 
-  // 2. Provider registers
+  // 2. Provider (another person) registers
+  await actAs('provider');
   const prov = await resilientRepository.createProvider({
     name: 'Шебер Руслан',
     city: 'Қызылорда',
@@ -113,7 +115,9 @@ async function runTest() {
   console.log('✓ Step 6: visibleRequests retains request');
 
   // 7. Customer accepts offer -> status becomes PROVIDER_SELECTED
+  await actAs('customer');
   await resilientRepository.acceptOffer(testReqId, offer.id);
+  await actAs('provider');
   const updatedReq = await resilientRepository.getRequest(testReqId);
   assert.strictEqual(updatedReq?.status, 'PROVIDER_SELECTED');
 

@@ -41,6 +41,10 @@ async function runNotificationsVerification() {
     await attachEmulatorTestPhone(provClient.auth);
     otherUserId = provClient.auth.currentUser!.uid;
     providerDb = provClient.db;
+    // Offers come from a provider profile in the request's city
+    await setDoc(doc(providerDb, 'providers', otherUserId), {
+      id: otherUserId, userId: otherUserId, name: 'Ерлан Мастер', city: 'Алматы', cityId: 'almaty', category: 'appliances',
+    });
   }
   const mockReq = await resilientRepository.createRequest({
     customerId: currentUid,
@@ -57,7 +61,7 @@ async function runNotificationsVerification() {
   console.log(`Created test request: ${mockReq.id}`);
 
   const mockOffer: ProviderOffer = {
-    id: `OFFER_TEST_${Date.now()}`,
+    id: `OFFER-${mockReq.id}-${otherUserId}`,
     requestId: mockReq.id,
     providerId: otherUserId,
     providerUserId: otherUserId,
@@ -104,6 +108,10 @@ async function runNotificationsVerification() {
   // --- Test 2: Offer acceptance notifications ---
   // Customer (currentUid) accepts provider's offer:
   // Both provider notification (PROVIDER_OFFER_ACCEPTED) and customer confirmation (CUSTOMER_OFFER_ACCEPTED) are created.
+  // In cloud mode the offer is really accepted first: the rules only allow these notices for the selected offer.
+  if (providerDb) {
+    await resilientRepository.acceptOffer(mockReq.id, mockOffer.id);
+  }
   await notificationService.notifyOfferAccepted(mockReq, mockOffer);
 
   // Customer checks their own notifications in resilientRepository
