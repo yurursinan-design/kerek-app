@@ -49,6 +49,31 @@ export const kaspiEscrowWebhook = onRequest(
   }
 );
 
+/** Counts calls per key in a one-minute window (rateLimits/{key}); false once max is reached. */
+async function allowCall(key: string, max: number, now: number): Promise<boolean> {
+  const ref = db.collection('rateLimits').doc(key);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const data = snap.exists ? snap.data() || {} : {};
+    const windowStart = typeof data.windowStart === 'number' ? data.windowStart : 0;
+    const count = typeof data.callCount === 'number' ? data.callCount : 0;
+    if (now - windowStart >= 60000) {
+      tx.set(ref, { windowStart: now, callCount: 1, lastCallAt: now });
+      return true;
+    }
+    if (count >= max) return false;
+    tx.set(ref, { windowStart, callCount: count + 1, lastCallAt: now });
+    return true;
+  });
+}
+
+/** Caller's address as seen by Google's front end (first X-Forwarded-For entry). */
+function clientIp(req: { ip?: string; headers?: Record<string, string | string[] | undefined> } | undefined): string {
+  const fwd = req?.headers?.['x-forwarded-for'];
+  const first = (Array.isArray(fwd) ? fwd[0] : fwd || '').split(',')[0].trim();
+  return first || req?.ip || '';
+}
+
 /**
  * Cloud Function v2: parseServiceRequest
  * Callable function deployed in asia-south1.
@@ -81,48 +106,15 @@ export const parseServiceRequest = onCall<
 
     const uid = request.auth.uid;
 
-    // 2. Server-side Rate Limit check (rateLimits/{uid})
+    // 2. Server-side rate limits: per account, and per network address so that opening new
+    // anonymous accounts does not get around the account limit
     const now = Date.now();
-    const rateLimitRef = db.collection('rateLimits').doc(uid);
-    const rateLimitDoc = await rateLimitRef.get();
-
-    if (rateLimitDoc.exists) {
-      const rateLimitData = rateLimitDoc.data() || {};
-      const lastCallAt = typeof rateLimitData.lastCallAt === 'number' ? rateLimitData.lastCallAt : 0;
-      const callCount = typeof rateLimitData.callCount === 'number' ? rateLimitData.callCount : 0;
-
-      if (now - lastCallAt < 60000 && callCount >= 10) {
-        throw new HttpsError(
-          'resource-exhausted',
-          'Too many requests. Please wait a moment before trying again.'
-        );
-      }
-
-      if (now - lastCallAt >= 60000) {
-        await rateLimitRef.set(
-          {
-            callCount: 1,
-            lastCallAt: now,
-          },
-          { merge: true }
-        );
-      } else {
-        await rateLimitRef.set(
-          {
-            callCount: callCount + 1,
-            lastCallAt: now,
-          },
-          { merge: true }
-        );
-      }
-    } else {
-      await rateLimitRef.set(
-        {
-          callCount: 1,
-          lastCallAt: now,
-        },
-        { merge: true }
-      );
+    if (!(await allowCall(`uid_${uid}`, 10, now))) {
+      throw new HttpsError('resource-exhausted', 'Too many requests. Please wait a moment before trying again.');
+    }
+    const ip = clientIp(request.rawRequest);
+    if (ip && !(await allowCall(`ip_${crypto.createHash('sha256').update(ip).digest('hex').slice(0, 32)}`, 30, now))) {
+      throw new HttpsError('resource-exhausted', 'Too many requests. Please wait a moment before trying again.');
     }
 
     // 3. Input validation: text must be non-empty string <= 500 characters

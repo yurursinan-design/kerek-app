@@ -36,7 +36,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           }`}
         >
           <Search className={`w-5 h-5 ${activeTab === 'home' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[11px] tracking-tight mt-1 truncate max-w-[90px]">
+          <span className="text-[11px] leading-tight tracking-tight mt-1 text-center line-clamp-2 max-w-full px-0.5">
             {t.navHome}
           </span>
         </button>
@@ -61,7 +61,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               </span>
             )}
           </div>
-          <span className="text-[11px] tracking-tight mt-1 truncate max-w-[90px]">
+          <span className="text-[11px] leading-tight tracking-tight mt-1 text-center line-clamp-2 max-w-full px-0.5">
             {t.navMyRequests}
           </span>
         </button>
@@ -84,7 +84,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               <span className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-emerald-500" />
             )}
           </div>
-          <span className="text-[11px] tracking-tight mt-1 truncate max-w-[90px]">
+          <span className="text-[11px] leading-tight tracking-tight mt-1 text-center line-clamp-2 max-w-full px-0.5">
             {t.navProviderMode}
           </span>
         </button>

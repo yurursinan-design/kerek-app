@@ -660,7 +660,7 @@ export const translations = {
     // Navigation
     navHome: 'Ana Sayfa',
     navMyRequests: 'Taleplerim',
-    navProviderMode: 'Usta / İcraçı Modu',
+    navProviderMode: 'Usta Modu',
     providerEntryBanner: 'Hizmet Veriyorum',
     providerEntrySubtext: 'Şehrinizdeki müşterilerden iş alıp kazanmak ister misiniz?',
 
