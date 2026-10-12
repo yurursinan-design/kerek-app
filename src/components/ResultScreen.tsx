@@ -162,6 +162,33 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
     };
   }, [initialRequest, language]);
 
+  // Average rating per provider from real reviews (shown on offer cards)
+  const [providerRatings, setProviderRatings] = useState<Record<string, { avg: number; count: number }>>({});
+  useEffect(() => {
+    const ids = Array.from(new Set(offers.map((o) => o.providerUserId || o.providerId).filter(Boolean))) as string[];
+    const missing = ids.filter((id) => !(id in providerRatings));
+    if (missing.length === 0) return;
+    let alive = true;
+    Promise.all(
+      missing.map(async (id) => {
+        try {
+          const reviews = await repository.getReviews({ providerId: id });
+          const count = reviews.length;
+          const avg = count ? reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / count : 0;
+          return [id, { avg, count }] as const;
+        } catch {
+          return [id, { avg: 0, count: 0 }] as const;
+        }
+      })
+    ).then((entries) => {
+      if (alive) setProviderRatings((prev) => ({ ...prev, ...Object.fromEntries(entries) }));
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offers]);
+
   // Handle Accept Offer: request -> PROVIDER_SELECTED, this offer -> ACCEPTED, others -> REJECTED
   const handleAcceptOffer = async (offer: ProviderOffer) => {
     if (!request) return;
@@ -778,12 +805,12 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
         {/* Incoming Provider Offers Section (Customer can Accept or Reject) */}
         {offers.length > 0 && (
           <div className="space-y-3 pt-1">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900 tracking-tight font-display">
+            <div className="space-y-0.5">
+              <h3 className="text-lg font-bold text-slate-900 tracking-tight font-display">
                 {t.offersReceivedTitle} ({offers.length})
               </h3>
               {(request?.status === 'MATCHING' || request?.status === 'OPEN') && (
-                <span className="text-xs text-sky-600 font-semibold animate-pulse">
+                <span className="block text-xs text-sky-600 font-semibold animate-pulse">
                   {t.requestSearchingSubtitle}
                 </span>
               )}
@@ -812,7 +839,16 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div>
+                      <div className="flex items-start gap-3 min-w-0">
+                        <span className="w-11 h-11 rounded-full bg-gradient-to-br from-sky-500 to-indigo-500 text-white font-bold text-sm flex items-center justify-center shrink-0">
+                          {(offer.providerName || '?')
+                            .split(/\s+/)
+                            .filter(Boolean)
+                            .slice(0, 2)
+                            .map((w) => w[0]?.toUpperCase())
+                            .join('')}
+                        </span>
+                      <div className="min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <button
                             type="button"
@@ -837,14 +873,31 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                             </span>
                           )}
                         </div>
+                        {(() => {
+                          const r = providerRatings[offer.providerUserId || offer.providerId];
+                          return r && r.count > 0 ? (
+                            <div className="flex items-center gap-1 text-xs text-slate-700 mt-0.5">
+                              <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                              <span className="font-bold">{r.avg.toFixed(1)}</span>
+                              <span className="text-slate-500">
+                                ({r.count} {language === 'kz' ? 'пікір' : 'отзыв.'})
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {language === 'kz' ? 'Жаңа шебер' : 'Новый мастер'}
+                            </div>
+                          );
+                        })()}
                         <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
                           <Clock className="w-3 h-3 text-slate-400" />
                           <span>{formatDynamicDate(offer.availability, language)}</span>
                         </div>
                       </div>
+                      </div>
 
-                      <div className="text-right">
-                        <span className="text-sm font-extrabold text-slate-900">
+                      <div className="text-right shrink-0">
+                        <span className="text-base font-extrabold text-slate-900 whitespace-nowrap">
                           {formatOfferDisplayPrice(offer, language)}
                         </span>
                       </div>
