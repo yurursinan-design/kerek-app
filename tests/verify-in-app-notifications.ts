@@ -2,7 +2,8 @@ import { localRepository } from '../src/services/localRepository';
 import { firebaseRepository } from '../src/services/firebaseRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
 import { notificationService } from '../src/services/notificationService';
-import { ensureFirebaseAuth, auth, db } from '../src/services/firebase';
+import { ensureFirebaseAuth, auth, db, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
+import { signInAnonymously } from 'firebase/auth';
 import { collection, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
 import { AppNotification, ServiceRequest, ProviderOffer, Conversation, ChatMessage } from '../src/types';
 
@@ -30,7 +31,17 @@ async function runNotificationsVerification() {
   console.log(`Authenticated UID for tests: ${currentUid}\n`);
 
   // --- Real Request created via repository so it exists in Firestore ---
-  const otherUserId = `other_user_${Date.now()}`;
+  // In cloud mode the provider is a real second account, so its offer can exist in Firestore and the
+  // notification rules (which verify the referenced offer) can be exercised for real.
+  let otherUserId = `other_user_${Date.now()}`;
+  let providerDb: any = null;
+  if (resilientRepository.isCloudActive()) {
+    const provClient = createSecondaryFirebaseApp(`notif-provider-${Date.now()}`)!;
+    await signInAnonymously(provClient.auth);
+    await attachEmulatorTestPhone(provClient.auth);
+    otherUserId = provClient.auth.currentUser!.uid;
+    providerDb = provClient.db;
+  }
   const mockReq = await resilientRepository.createRequest({
     customerId: currentUid,
     customerName: 'Айгүл Клиент',
@@ -59,6 +70,10 @@ async function runNotificationsVerification() {
     status: 'PENDING',
     createdAt: new Date().toISOString(),
   };
+
+  if (providerDb) {
+    await setDoc(doc(providerDb, 'offers', mockOffer.id), mockOffer);
+  }
 
   // --- Test 1: Customer receives notification when new offer is created ---
   // In local mode / test:

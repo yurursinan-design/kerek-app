@@ -1,0 +1,56 @@
+# Runs the test suites on every Pull Request and on main:
+#   - type check
+#   - Firestore security rules tests (emulator)
+#   - verify-* tests against the Firestore + Auth emulators
+name: Testler
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The Firestore emulator runs on Java
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Firebase emulators
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-15.31.0
+
+      - name: Bağımlılıkları kur
+        run: bun install --frozen-lockfile
+
+      - name: Tip kontrolü
+        run: bun run typecheck
+
+      - name: Güvenlik kuralı testleri
+        run: npm run test:rules
+
+      - name: Uygulama testleri
+        run: npm run test:verify

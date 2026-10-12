@@ -39,6 +39,7 @@ import {
 import { logTechnicalError } from './errorHandler';
 import { auth, isFirebaseConfigured } from './firebase';
 import { normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
+import { generateOfferId } from './ids';
 
 const STORAGE_KEY_USER_ID = 'kerek_current_user_id_v2';
 const STORAGE_KEY_USERS = 'kerek_users_v2';
@@ -627,7 +628,7 @@ export class LocalRepository implements Repository {
       }
 
       const newOffer: ProviderOffer = {
-        id: offerData.id || `OFFER-${offerData.requestId || 'REQ'}-${Date.now().toString().slice(-4)}`,
+        id: offerData.id || generateOfferId(offerData.requestId || 'REQ'),
         requestId: offerData.requestId || '',
         providerId: offerData.providerId || '',
         providerUserId:

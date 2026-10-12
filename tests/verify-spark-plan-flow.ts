@@ -1,4 +1,4 @@
-import { analyzeRequestLocally } from '../src/services/analyzer';
+import { analyzeRequestUnderstanding, understandingToExtractedNeed } from '../src/services/requestUnderstanding';
 import {
   normalizeCategoryId,
   normalizeCityId,
@@ -40,12 +40,14 @@ async function runSparkPlanTests() {
 
   // --- Step 1: Local parsing on Spark Plan (No Cloud Functions deployed) ---
   console.log('--- 1. Local Parser Execution (Spark Plan Fallback) ---');
-  const parsedKz = analyzeRequestLocally(query, 'kz');
+  // The engine the app actually runs when no Cloud Function answers (App.handleSearch)
+  const understanding = analyzeRequestUnderstanding(query, { language: 'kz' } as any);
+  const parsedKz: any = understandingToExtractedNeed(understanding, query, 'kz');
   console.log('Local parsed result (KZ):', JSON.stringify(parsedKz, null, 2));
 
   assert('cityId is "kyzylorda"', parsedKz.cityId === 'kyzylorda');
   assert('city is "Қызылорда"', parsedKz.city === 'Қызылорда');
-  assert('categoryId is "appliance_repair"', parsedKz.categoryId === 'appliance_repair');
+  assert('categoryId is "appliances"', parsedKz.categoryId === 'appliances');
   assert('category is "Тұрмыстық техника жөндеу"', parsedKz.category === 'Тұрмыстық техника жөндеу');
   assert(
     'service identifies Samsung washing machine repair',
@@ -60,7 +62,8 @@ async function runSparkPlanTests() {
   // --- Step 2: Canonical taxonomy synchronization ---
   console.log('\n--- 2. Canonical Taxonomy Verification ---');
   assert('normalizeCityId matches canonical', normalizeCityId(parsedKz.city) === 'kyzylorda');
-  assert('normalizeCategoryId matches canonical', normalizeCategoryId(parsedKz.category) === 'appliance_repair');
+  assert('normalizeCategoryId matches canonical', normalizeCategoryId(parsedKz.category) === 'appliances');
+  assert('legacy appliance_repair alias normalizes to canonical', normalizeCategoryId('appliance_repair') === 'appliances');
   assert('getCityDisplayName KZ matches', getCityDisplayName('kyzylorda', 'kz') === 'Қызылорда');
   assert('getCategoryDisplayName KZ matches', getCategoryDisplayName('appliance_repair', 'kz') === 'Тұрмыстық техника жөндеу');
 
@@ -99,7 +102,7 @@ async function runSparkPlanTests() {
   assert('Request status is "OPEN"', createdReq.status === 'OPEN');
   assert('Request customerId matches user', createdReq.customerId === customerId);
   assert('Request cityId is "kyzylorda"', createdReq.cityId === 'kyzylorda');
-  assert('Request categoryId is "appliance_repair"', createdReq.categoryId === 'appliance_repair');
+  assert('Request categoryId is "appliances"', createdReq.categoryId === 'appliances');
   assert('Request description retains query', createdReq.description === query);
   assert('Request urgency is "high"', createdReq.urgency === 'high');
 

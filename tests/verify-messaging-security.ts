@@ -112,7 +112,26 @@ async function runMessagingSecurityTests() {
     updatedAt: now,
   });
 
-  // Customer creates deterministic conversation linking customer and provider
+  // The provider sends an offer and the customer selects it: the rules only allow a conversation for a
+  // request that has a selected provider with an accepted offer.
+  const testOfferId = `OFFER-${testReqId}-SEC`;
+  await setDoc(doc(providerDb, 'offers', testOfferId), {
+    id: testOfferId,
+    requestId: testReqId,
+    providerId: providerUid,
+    providerUserId: providerUid,
+    providerName: 'Test Шебер',
+    price: '10 000 ₸',
+    status: 'PENDING',
+  });
+  await setDoc(reqRef, {
+    status: 'PROVIDER_SELECTED',
+    selectedOfferId: testOfferId,
+    updatedAt: new Date().toISOString(),
+  }, { merge: true });
+  await setDoc(doc(db!, 'offers', testOfferId), { status: 'ACCEPTED', updatedAt: new Date().toISOString() }, { merge: true });
+
+  // Customer creates the deterministic conversation linking customer and the selected provider
   await setDoc(convRef, {
     id: testConvId,
     requestId: testReqId,
@@ -125,12 +144,6 @@ async function runMessagingSecurityTests() {
     createdAt: now,
     updatedAt: now,
   });
-
-  // Update request to PROVIDER_SELECTED so message exchange is valid
-  await setDoc(reqRef, {
-    status: 'PROVIDER_SELECTED',
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
   console.log('✓ Transient conversation ready:', testConvId);
 
   // -------------------------------------------------------------------------

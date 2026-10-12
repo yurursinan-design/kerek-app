@@ -10,8 +10,10 @@
     "clean": "rm -rf dist server.js",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
-    "test": "VITE_USE_EMULATOR=true FIRESTORE_EMULATOR_HOST=127.0.0.1:8088 for f in tests/verify-*.ts; do echo \"=== Running $f ===\" && tsx \"$f\" || exit 1; done",
-    "test:rules": "firebase emulators:exec --only firestore \"tsx tests/firestore-rules.spec.ts\""
+    "test": "npm run test:rules && npm run test:verify",
+    "test:rules": "npx --yes firebase-tools@15.31.0 emulators:exec --project demo-kerek --only firestore \"npx tsx tests/firestore-rules.spec.ts\"",
+    "test:verify": "npx --yes firebase-tools@15.31.0 emulators:exec --project demo-kerek --only firestore,auth \"bash scripts/test-verify.sh\"",
+    "dev:emulator": "npx --yes firebase-tools@15.31.0 emulators:exec --project demo-kerek --only firestore,auth \"vite --config vite.emulator.config.ts\""
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

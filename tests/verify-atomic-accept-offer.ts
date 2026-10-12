@@ -8,7 +8,8 @@ import { localRepository } from '../src/services/localRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
 import { firebaseRepository } from '../src/services/firebaseRepository';
 import { offlineQueueService } from '../src/services/offlineQueueService';
-import { auth, db, ensureFirebaseAuth } from '../src/services/firebase';
+import { auth, db, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
+import { signInAnonymously } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { getConversationId, getAppointmentId } from '../src/types';
 
@@ -135,6 +136,8 @@ async function runAcceptOfferFixTests() {
     assert(false, `TEST 4: ${e.message}`);
   }
 
+  const realCurrentUser = auth?.currentUser ?? null;
+
   // -------------------------------------------------------------
   // TEST 5: Queue processor encountering a legacy queued acceptOffer marks it FAILED_PERMANENT and does not execute it
   // -------------------------------------------------------------
@@ -181,6 +184,10 @@ async function runAcceptOfferFixTests() {
     firebaseRepository.acceptOffer = origCloudAcceptOffer;
   } catch (e: any) {
     assert(false, `TEST 5: ${e.message}`);
+  } finally {
+    // TEST 5 replaced auth.currentUser with a plain object; put the real user back, or later
+    // Firestore calls wait forever for a token that object cannot produce
+    if (auth) (auth as any).currentUser = realCurrentUser;
   }
 
   // -------------------------------------------------------------
@@ -294,11 +301,21 @@ async function runAcceptOfferFixTests() {
         createdAt: new Date().toISOString(),
       });
 
-      await setDoc(doc(db, 'offers', offerAId), {
+      // Each offer is written by its own provider account, as the security rules require
+      const makeProvider = async (name: string) => {
+        const client = createSecondaryFirebaseApp(`${name}-${Date.now()}`)!;
+        await signInAnonymously(client.auth);
+        await attachEmulatorTestPhone(client.auth);
+        return { db: client.db, uid: client.auth.currentUser!.uid };
+      };
+      const provA = await makeProvider('atomic-prov-a');
+      const provB = await makeProvider('atomic-prov-b');
+
+      await setDoc(doc(provA.db, 'offers', offerAId), {
         id: offerAId,
         requestId: emuReqId,
-        providerId: 'prov-emu-1',
-        providerUserId: 'prov-emu-1',
+        providerId: provA.uid,
+        providerUserId: provA.uid,
         providerName: 'Master Arman',
         price: '10 000 ₸',
         availability: 'Today',
@@ -306,11 +323,11 @@ async function runAcceptOfferFixTests() {
         createdAt: new Date().toISOString(),
       });
 
-      await setDoc(doc(db, 'offers', offerBId), {
+      await setDoc(doc(provB.db, 'offers', offerBId), {
         id: offerBId,
         requestId: emuReqId,
-        providerId: 'prov-emu-2',
-        providerUserId: 'prov-emu-2',
+        providerId: provB.uid,
+        providerUserId: provB.uid,
         providerName: 'Master Berik',
         price: '12 000 ₸',
         availability: 'Today',
