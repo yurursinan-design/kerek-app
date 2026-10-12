@@ -1,5 +1,5 @@
 import { ExtractedNeed, Language, Urgency } from '../types';
-import { normalizeCategoryId, normalizeCityId } from './taxonomy';
+import { CANONICAL_CITIES, normalizeCategoryId, normalizeCityId } from './taxonomy';
 
 interface CityPattern {
   nameKz: string;
@@ -90,24 +90,8 @@ const CITIES: CityPattern[] = [
   },
 ];
 
-export const ALL_CITIES_LIST = [
-  { kz: 'Алматы', ru: 'Алматы' },
-  { kz: 'Астана', ru: 'Астана' },
-  { kz: 'Шымкент', ru: 'Шымкент' },
-  { kz: 'Қызылорда', ru: 'Кызылорда' },
-  { kz: 'Ақтөбе', ru: 'Актобе' },
-  { kz: 'Қарағанды', ru: 'Караганда' },
-  { kz: 'Тараз', ru: 'Тараз' },
-  { kz: 'Павлодар', ru: 'Павлодар' },
-  { kz: 'Өскемен', ru: 'Усть-Каменогорск' },
-  { kz: 'Семей', ru: 'Семей' },
-  { kz: 'Атырау', ru: 'Атырау' },
-  { kz: 'Ақтау', ru: 'Актау' },
-  { kz: 'Қостанай', ru: 'Костанай' },
-  { kz: 'Орал', ru: 'Уральск' },
-  { kz: 'Түркістан', ru: 'Туркестан' },
-  { kz: 'Көкшетау', ru: 'Кокшетау' },
-];
+// Same list as the request wizard, so customers and providers pick from identical cities
+export const ALL_CITIES_LIST = CANONICAL_CITIES.map((c) => ({ kz: c.nameKz, ru: c.nameRu }));
 
 export const CATEGORIES_LIST = [
   { id: 'plumbing', kz: 'Сантехника және құбырлар', ru: 'Сантехника и канализация', tr: 'Su Tesisatı & Kanalizasyon' },

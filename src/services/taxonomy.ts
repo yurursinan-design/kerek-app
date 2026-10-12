@@ -324,6 +324,90 @@ export const CANONICAL_CITIES: CityDefinition[] = [
     nameTr: 'Kökşetav',
     patterns: [/kokshetau[a-zа-яё]*|көкшетау[а-яё]*|кокшетау[а-яё]*/i],
   },
+  {
+    id: 'petropavl',
+    nameKz: 'Петропавл',
+    nameRu: 'Петропавловск',
+    patterns: [/petropavl[a-zа-яё]*|петропавл[а-яё]*/i],
+  },
+  {
+    id: 'taldykorgan',
+    nameKz: 'Талдықорған',
+    nameRu: 'Талдыкорган',
+    patterns: [/taldyk[a-z]*|талдық[а-яёғ]*|талдык[а-яё]*/i],
+  },
+  {
+    id: 'zhezkazgan',
+    nameKz: 'Жезқазған',
+    nameRu: 'Жезказган',
+    patterns: [/zhezk[a-z]*|жезқ[а-яёғ]*|жезк[а-яё]*/i],
+  },
+  {
+    id: 'ekibastuz',
+    nameKz: 'Екібастұз',
+    nameRu: 'Экибастуз',
+    patterns: [/ekibast[a-z]*|екібаст[а-яёұ]*|экибаст[а-яё]*/i],
+  },
+  {
+    id: 'temirtau',
+    nameKz: 'Теміртау',
+    nameRu: 'Темиртау',
+    patterns: [/temirt[a-z]*|теміртау[а-яё]*|темиртау[а-яё]*/i],
+  },
+  {
+    id: 'konaev',
+    nameKz: 'Қонаев',
+    nameRu: 'Конаев',
+    patterns: [/kona[ey]e?v[a-z]*|қонаев[а-яё]*|конаев[а-яё]*|капчага[а-яё]*|қапшағ[а-яё]*/i],
+  },
+  {
+    id: 'kaskelen',
+    nameKz: 'Қаскелең',
+    nameRu: 'Каскелен',
+    patterns: [/kaskelen[a-z]*|қаскелең[а-яё]*|каскелен[а-яё]*/i],
+  },
+  {
+    id: 'talgar',
+    nameKz: 'Талғар',
+    nameRu: 'Талгар',
+    patterns: [/talgar[a-z]*|талғар[а-яё]*|талгар[а-яё]*/i],
+  },
+  {
+    id: 'rudny',
+    nameKz: 'Рудный',
+    nameRu: 'Рудный',
+    patterns: [/rudn[a-z]*|рудн[а-яё]*/i],
+  },
+  {
+    id: 'zhanaozen',
+    nameKz: 'Жаңаөзен',
+    nameRu: 'Жанаозен',
+    patterns: [/zhanaoz[a-z]*|жаңаөз[а-яё]*|жанаоз[а-яё]*/i],
+  },
+  {
+    id: 'balkhash',
+    nameKz: 'Балқаш',
+    nameRu: 'Балхаш',
+    patterns: [/balkh?ash[a-z]*|балқаш[а-яё]*|балхаш[а-яё]*/i],
+  },
+  {
+    id: 'satbayev',
+    nameKz: 'Сәтбаев',
+    nameRu: 'Сатпаев',
+    patterns: [/satba?y?ev[a-z]*|сәтбаев[а-яё]*|сатпаев[а-яё]*/i],
+  },
+  {
+    id: 'kentau',
+    nameKz: 'Кентау',
+    nameRu: 'Кентау',
+    patterns: [/kentau[a-z]*|кентау[а-яё]*/i],
+  },
+  {
+    id: 'stepnogorsk',
+    nameKz: 'Степногорск',
+    nameRu: 'Степногорск',
+    patterns: [/stepnogorsk[a-z]*|степногорск[а-яё]*/i],
+  },
 ];
 
 /**

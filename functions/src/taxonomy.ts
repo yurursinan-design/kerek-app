@@ -96,6 +96,20 @@ export const CANONICAL_CITIES: readonly CanonicalCity[] = [
   { id: 'oral', nameRu: 'Уральск', nameKz: 'Орал' },
   { id: 'turkestan', nameRu: 'Туркестан', nameKz: 'Түркістан' },
   { id: 'kokshetau', nameRu: 'Кокшетау', nameKz: 'Көкшетау' },
+  { id: 'petropavl', nameRu: 'Петропавловск', nameKz: 'Петропавл' },
+  { id: 'taldykorgan', nameRu: 'Талдыкорган', nameKz: 'Талдықорған' },
+  { id: 'zhezkazgan', nameRu: 'Жезказган', nameKz: 'Жезқазған' },
+  { id: 'ekibastuz', nameRu: 'Экибастуз', nameKz: 'Екібастұз' },
+  { id: 'temirtau', nameRu: 'Темиртау', nameKz: 'Теміртау' },
+  { id: 'konaev', nameRu: 'Конаев', nameKz: 'Қонаев' },
+  { id: 'kaskelen', nameRu: 'Каскелен', nameKz: 'Қаскелең' },
+  { id: 'talgar', nameRu: 'Талгар', nameKz: 'Талғар' },
+  { id: 'rudny', nameRu: 'Рудный', nameKz: 'Рудный' },
+  { id: 'zhanaozen', nameRu: 'Жанаозен', nameKz: 'Жаңаөзен' },
+  { id: 'balkhash', nameRu: 'Балхаш', nameKz: 'Балқаш' },
+  { id: 'satbayev', nameRu: 'Сатпаев', nameKz: 'Сәтбаев' },
+  { id: 'kentau', nameRu: 'Кентау', nameKz: 'Кентау' },
+  { id: 'stepnogorsk', nameRu: 'Степногорск', nameKz: 'Степногорск' },
 ] as const;
 
 export const CANONICAL_CATEGORY_IDS = new Set<string>(
