@@ -1,94 +1,154 @@
 import React from 'react';
 import { Language } from '../types';
 import { translations } from '../i18n/translations';
-import { Search, ClipboardList, Briefcase } from 'lucide-react';
+import { Search, ClipboardList, Briefcase, Send, Clock, ArrowLeftRight } from 'lucide-react';
+import type { AppMode } from './RoleChooser';
+import type { ProviderTab } from './ProviderModeScreen';
 
 export type MainTab = 'home' | 'my-requests' | 'provider-mode';
 
 interface BottomNavProps {
+  mode: AppMode;
   activeTab: MainTab;
+  providerTab: ProviderTab;
   language: Language;
   onTabChange: (tab: MainTab) => void;
+  onProviderTabChange: (tab: ProviderTab) => void;
+  onSwitchMode: () => void;
   requestsCount: number;
-  hasProviderProfile: boolean;
+  providerCounts: Record<ProviderTab, number>;
 }
 
+const L = {
+  providerNew: { kz: 'Жаңа өтініштер', ru: 'Новые заявки', tr: 'Yeni talepler' },
+  providerOffers: { kz: 'Ұсыныстарым', ru: 'Мои предложения', tr: 'Tekliflerim' },
+  providerActive: { kz: 'Белсенді жұмыстар', ru: 'Активные заказы', tr: 'Aktif işler' },
+  toCustomer: { kz: 'Маман іздеу', ru: 'Найти мастера', tr: 'Hizmet al' },
+} as const;
+
+interface ItemProps {
+  active: boolean;
+  activeClass: string;
+  label: string;
+  icon: React.ReactNode;
+  badge?: number;
+  badgeClass?: string;
+  onClick: () => void;
+}
+
+const NavItem: React.FC<ItemProps> = ({ active, activeClass, label, icon, badge, badgeClass, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    aria-current={active ? 'page' : undefined}
+    className={`relative flex flex-col items-center justify-center min-h-[48px] py-1 transition-colors ${
+      active ? `${activeClass} font-bold` : 'text-slate-500 hover:text-slate-800 font-medium'
+    }`}
+  >
+    <div className="relative">
+      {icon}
+      {badge !== undefined && badge > 0 && (
+        <span
+          className={`absolute -top-1 -right-2 min-w-4 h-4 px-1 rounded-full text-white text-[9px] font-extrabold flex items-center justify-center shadow-xs ${badgeClass}`}
+        >
+          {badge}
+        </span>
+      )}
+    </div>
+    <span className="text-[11px] leading-tight tracking-tight mt-1 text-center line-clamp-2 max-w-full px-0.5">{label}</span>
+  </button>
+);
+
+/**
+ * Bottom navigation. The customer side (blue) and the provider side (green) have their own items;
+ * the last item switches to the other side.
+ */
 export const BottomNav: React.FC<BottomNavProps> = ({
+  mode,
   activeTab,
+  providerTab,
   language,
   onTabChange,
+  onProviderTabChange,
+  onSwitchMode,
   requestsCount,
-  hasProviderProfile,
+  providerCounts,
 }) => {
   const t = translations[language];
+  const lang = language as 'kz' | 'ru' | 'tr';
+  const tx = (entry: { kz: string; ru: string; tr: string }) => entry[lang] || entry.ru;
+  const iconClass = (active: boolean) => `w-5 h-5 ${active ? 'stroke-[2.5]' : ''}`;
 
   return (
-    <nav className="sticky bottom-0 z-40 w-full bg-white/95 backdrop-blur-md border-t border-slate-200">
-      <div className="grid grid-cols-3 items-center h-16 max-w-md mx-auto px-2">
-        {/* Tab 1: Home */}
-        <button
-          type="button"
-          onClick={() => onTabChange('home')}
-          className={`flex flex-col items-center justify-center min-h-[48px] py-1 transition-colors ${
-            activeTab === 'home'
-              ? 'text-sky-600 font-bold'
-              : 'text-slate-500 hover:text-slate-800 font-medium'
-          }`}
-        >
-          <Search className={`w-5 h-5 ${activeTab === 'home' ? 'stroke-[2.5]' : ''}`} />
-          <span className="text-[11px] leading-tight tracking-tight mt-1 text-center line-clamp-2 max-w-full px-0.5">
-            {t.navHome}
-          </span>
-        </button>
-
-        {/* Tab 2: My Requests */}
-        <button
-          type="button"
-          onClick={() => onTabChange('my-requests')}
-          className={`relative flex flex-col items-center justify-center min-h-[48px] py-1 transition-colors ${
-            activeTab === 'my-requests'
-              ? 'text-sky-600 font-bold'
-              : 'text-slate-500 hover:text-slate-800 font-medium'
-          }`}
-        >
-          <div className="relative">
-            <ClipboardList
-              className={`w-5 h-5 ${activeTab === 'my-requests' ? 'stroke-[2.5]' : ''}`}
-            />
-            {requestsCount > 0 && (
-              <span className="absolute -top-1 -right-2 w-4 h-4 rounded-full bg-sky-600 text-white text-[9px] font-extrabold flex items-center justify-center shadow-xs">
-                {requestsCount}
-              </span>
-            )}
-          </div>
-          <span className="text-[11px] leading-tight tracking-tight mt-1 text-center line-clamp-2 max-w-full px-0.5">
-            {t.navMyRequests}
-          </span>
-        </button>
-
-        {/* Tab 3: Provider Mode */}
-        <button
-          type="button"
-          onClick={() => onTabChange('provider-mode')}
-          className={`relative flex flex-col items-center justify-center min-h-[48px] py-1 transition-colors ${
-            activeTab === 'provider-mode'
-              ? 'text-sky-600 font-bold'
-              : 'text-slate-500 hover:text-slate-800 font-medium'
-          }`}
-        >
-          <div className="relative">
-            <Briefcase
-              className={`w-5 h-5 ${activeTab === 'provider-mode' ? 'stroke-[2.5]' : ''}`}
-            />
-            {hasProviderProfile && (
-              <span className="absolute -top-0.5 -right-1 w-2 h-2 rounded-full bg-emerald-500" />
-            )}
-          </div>
-          <span className="text-[11px] leading-tight tracking-tight mt-1 text-center line-clamp-2 max-w-full px-0.5">
-            {t.navProviderMode}
-          </span>
-        </button>
-      </div>
+    <nav
+      className={`sticky bottom-0 z-40 w-full bg-white/95 backdrop-blur-md border-t-2 ${
+        mode === 'provider' ? 'border-emerald-500' : 'border-sky-500'
+      }`}
+    >
+      {mode === 'customer' ? (
+        <div className="grid grid-cols-3 items-center h-16 max-w-md mx-auto px-2">
+          <NavItem
+            active={activeTab === 'home'}
+            activeClass="text-sky-600"
+            label={t.navHome}
+            icon={<Search className={iconClass(activeTab === 'home')} />}
+            onClick={() => onTabChange('home')}
+          />
+          <NavItem
+            active={activeTab === 'my-requests'}
+            activeClass="text-sky-600"
+            label={t.navMyRequests}
+            icon={<ClipboardList className={iconClass(activeTab === 'my-requests')} />}
+            badge={requestsCount}
+            badgeClass="bg-sky-600"
+            onClick={() => onTabChange('my-requests')}
+          />
+          <NavItem
+            active={false}
+            activeClass=""
+            label={t.navProviderMode}
+            icon={<ArrowLeftRight className="w-5 h-5 text-emerald-600" />}
+            onClick={onSwitchMode}
+          />
+        </div>
+      ) : (
+        <div className="grid grid-cols-4 items-center h-16 max-w-md mx-auto px-1">
+          <NavItem
+            active={providerTab === 'new'}
+            activeClass="text-emerald-700"
+            label={tx(L.providerNew)}
+            icon={<Briefcase className={iconClass(providerTab === 'new')} />}
+            badge={providerCounts.new}
+            badgeClass="bg-emerald-600"
+            onClick={() => onProviderTabChange('new')}
+          />
+          <NavItem
+            active={providerTab === 'offers'}
+            activeClass="text-emerald-700"
+            label={tx(L.providerOffers)}
+            icon={<Send className={iconClass(providerTab === 'offers')} />}
+            badge={providerCounts.offers}
+            badgeClass="bg-emerald-600"
+            onClick={() => onProviderTabChange('offers')}
+          />
+          <NavItem
+            active={providerTab === 'active'}
+            activeClass="text-emerald-700"
+            label={tx(L.providerActive)}
+            icon={<Clock className={iconClass(providerTab === 'active')} />}
+            badge={providerCounts.active}
+            badgeClass="bg-emerald-600"
+            onClick={() => onProviderTabChange('active')}
+          />
+          <NavItem
+            active={false}
+            activeClass=""
+            label={tx(L.toCustomer)}
+            icon={<ArrowLeftRight className="w-5 h-5 text-sky-600" />}
+            onClick={onSwitchMode}
+          />
+        </div>
+      )}
     </nav>
   );
 };

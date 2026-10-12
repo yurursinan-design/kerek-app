@@ -48,10 +48,17 @@ import {
   Info,
 } from 'lucide-react';
 
+export type ProviderTab = 'new' | 'offers' | 'active';
+
 interface ProviderModeScreenProps {
   language: Language;
   onOfferSent?: () => void;
   onProfileCreated?: () => void;
+  /** When given, the tab is chosen from outside (the bottom navigation) and the inner tab bar is hidden */
+  tab?: ProviderTab;
+  onTabChange?: (tab: ProviderTab) => void;
+  /** Reports how many items each tab holds, for badges in the bottom navigation */
+  onCountsChange?: (counts: Record<ProviderTab, number>) => void;
 }
 
 function isSelfRequest(
@@ -79,6 +86,9 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   language,
   onOfferSent,
   onProfileCreated,
+  tab,
+  onTabChange,
+  onCountsChange,
 }) => {
   const t = translations[language];
 
@@ -137,7 +147,9 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       : 'Готов подъехать со своим инструментом, дам гарантию на работу.'
   );
   // Tab state & Action loading
-  const [activeTab, setActiveTab] = useState<'new' | 'offers' | 'active'>('new');
+  const [internalTab, setInternalTab] = useState<ProviderTab>('new');
+  const activeTab: ProviderTab = tab ?? internalTab;
+  const setActiveTab = (next: ProviderTab) => (onTabChange ? onTabChange(next) : setInternalTab(next));
   const [actionLoadingReqId, setActionLoadingReqId] = useState<string | null>(null);
 
   const [notification, setNotification] = useState<string | null>(null);
@@ -625,6 +637,14 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     );
   });
 
+  const newCount = newRequests.length;
+  const offersCount = myOffersRequests.length;
+  const activeCount = activeJobRequests.length;
+  useEffect(() => {
+    onCountsChange?.({ new: newCount, offers: offersCount, active: activeCount });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newCount, offersCount, activeCount]);
+
   if (activeChatRequestId) {
     return (
       <div className="w-full max-w-xl mx-auto px-0 sm:px-4 py-2 sm:py-5">
@@ -831,8 +851,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               </div>
             </div>
 
-            {/* Provider Tabs Navigation */}
-            <div className="flex items-center p-1 bg-slate-100 rounded-2xl gap-1">
+            {/* Provider Tabs Navigation (hidden when the bottom navigation picks the tab) */}
+            <div className={`${tab ? 'hidden' : 'flex'} items-center p-1 bg-slate-100 rounded-2xl gap-1`}>
               <button
                 type="button"
                 onClick={() => setActiveTab('new')}

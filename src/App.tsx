@@ -16,6 +16,8 @@ import { InterpretationScreen } from './components/InterpretationScreen';
 const ResultScreen = lazy(() => import('./components/ResultScreen').then((m) => ({ default: m.ResultScreen })));
 const MyRequestsScreen = lazy(() => import('./components/MyRequestsScreen').then((m) => ({ default: m.MyRequestsScreen })));
 const ProviderModeScreen = lazy(() => import('./components/ProviderModeScreen').then((m) => ({ default: m.ProviderModeScreen })));
+import type { ProviderTab } from './components/ProviderModeScreen';
+import { RoleChooser, AppMode } from './components/RoleChooser';
 import { InAppToast } from './components/InAppToast';
 import { PhoneLoginModal, PhoneLoginReason } from './components/PhoneLoginModal';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -49,6 +51,8 @@ import {
 const LANGUAGE_KEY = 'kerek_language_v1';
 // Where the user was in this browser tab, so a page refresh reopens the same screen
 const NAV_KEY = 'kerek_nav_v1';
+// Customer or provider side of the app, chosen on the first visit
+const MODE_KEY = 'kerek_app_mode_v1';
 
 export default function App() {
   const [language, setLanguage] = useState<Language>(() => {
@@ -67,6 +71,24 @@ export default function App() {
     document.documentElement.lang = language === 'kz' ? 'kk' : language;
   }, [language]);
   const [activeTab, setActiveTab] = useState<MainTab>('home');
+  const [appMode, setAppModeState] = useState<AppMode | null>(() => {
+    try {
+      const v = localStorage.getItem(MODE_KEY);
+      return v === 'customer' || v === 'provider' ? v : null;
+    } catch {
+      return null;
+    }
+  });
+  const setAppMode = (mode: AppMode) => {
+    setAppModeState(mode);
+    try {
+      localStorage.setItem(MODE_KEY, mode);
+    } catch {
+      // storage unavailable: the choice lasts for this visit
+    }
+  };
+  const [providerTab, setProviderTab] = useState<ProviderTab>('new');
+  const [providerCounts, setProviderCounts] = useState<Record<ProviderTab, number>>({ new: 0, offers: 0, active: 0 });
   const [currentScreen, setCurrentScreen] = useState<'home' | 'interpretation' | 'results'>('home');
   const [extractedNeed, setExtractedNeed] = useState<ExtractedNeed | null>(null);
   const [activeRequest, setActiveRequest] = useState<ServiceRequest | null>(null);
@@ -137,7 +159,9 @@ export default function App() {
   const seenNotifIdsRef = useRef<Set<string>>(new Set());
   const isInitialNotifFetchRef = useRef<boolean>(true);
 
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
+  // The bell lists the notifications of the side the user is on
+  const modeNotifications = notifications.filter((n) => (n.recipientRole || 'customer') === (appMode || 'customer'));
+  const unreadCount = modeNotifications.filter((n) => !n.isRead).length;
 
   // Realtime Notifications Listener (Single active subscription for the current authenticated user)
   useEffect(() => {
@@ -400,6 +424,11 @@ export default function App() {
 
   // Back actions
   const handleBack = () => {
+    if (appMode === 'provider') {
+      // Provider side: "back" returns to the new-requests list
+      if (providerTab !== 'new') setProviderTab('new');
+      return;
+    }
     if (activeTab !== 'home') {
       setActiveTab('home');
       setCurrentScreen('home');
@@ -416,7 +445,8 @@ export default function App() {
 
   // Phone/browser back button: while the user is away from the start screen, keep one history
   // entry so "back" steps back inside the app instead of leaving it.
-  const isAtRoot = activeTab === 'home' && currentScreen === 'home';
+  const isAtRoot =
+    !appMode || (appMode === 'provider' ? providerTab === 'new' : activeTab === 'home' && currentScreen === 'home');
   const handleBackRef = useRef(handleBack);
   handleBackRef.current = handleBack;
 
@@ -438,6 +468,18 @@ export default function App() {
       window.history.back();
     }
   }, [isAtRoot, activeTab, currentScreen]);
+
+  // Keep the visible tab consistent with the chosen side of the app
+  useEffect(() => {
+    if (appMode === 'provider' && activeTab !== 'provider-mode') setActiveTab('provider-mode');
+    if (appMode === 'customer' && activeTab === 'provider-mode') setActiveTab('home');
+  }, [appMode, activeTab]);
+
+  // The provider side needs a verified number; after logging out (or a lost session) go back to the customer side
+  useEffect(() => {
+    if (appMode === 'provider' && isFirebaseConfigured() && authUid && !phoneNumber) setAppMode('customer');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appMode, authUid, phoneNumber]);
 
   useEffect(() => {
     const onPopState = () => handleBackRef.current();
@@ -465,9 +507,26 @@ export default function App() {
   };
 
   // Switch tabs
+  // Provider side: needs a verified phone number first
+  const enterProviderMode = () => {
+    withPhoneLogin('provider', () => {
+      setAppMode('provider');
+      setActiveTab('provider-mode');
+      refreshData();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  };
+
+  const enterCustomerMode = () => {
+    setAppMode('customer');
+    setActiveTab('home');
+    if (currentScreen !== 'interpretation' && currentScreen !== 'results') setCurrentScreen('home');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handleTabChange = (tab: MainTab) => {
-    if (tab === 'provider-mode' && requiresPhoneLogin()) {
-      withPhoneLogin('provider', () => handleTabChange('provider-mode'));
+    if (tab === 'provider-mode') {
+      enterProviderMode();
       return;
     }
     setActiveTab(tab);
@@ -584,6 +643,7 @@ export default function App() {
     }
 
     // Customer notifications: navigate to relevant request screen
+    setAppMode('customer');
     if (notif.requestId) {
       try {
         const req = await repository.getRequest(notif.requestId);
@@ -613,13 +673,23 @@ export default function App() {
 
         {/* Top Header */}
         <Header
-          currentScreen={activeTab !== 'home' ? 'results' : currentScreen}
+          currentScreen={
+            !appMode
+              ? 'home'
+              : appMode === 'provider'
+              ? providerTab === 'new'
+                ? 'home'
+                : 'results'
+              : activeTab !== 'home'
+              ? 'results'
+              : currentScreen
+          }
           language={language}
           onLanguageChange={setLanguage}
           onBack={handleBack}
           onHomeClick={handleHomeClick}
           onDataImported={refreshData}
-          notifications={notifications}
+          notifications={modeNotifications}
           unreadCount={unreadCount}
           currentUserId={auth?.currentUser?.uid || getCurrentUserId()}
           onSelectNotification={handleNotificationClick}
@@ -629,6 +699,7 @@ export default function App() {
           onLogout={async () => {
             try {
               await logoutToAnonymous();
+              setAppMode('customer');
               setActiveTab('home');
               setCurrentScreen('home');
               setActiveRequest(null);
@@ -711,12 +782,18 @@ export default function App() {
               </div>
             }
           >
-          {restoringNav && (
+          {!appMode && (
+            <RoleChooser
+              language={language}
+              onChoose={(mode) => (mode === 'provider' ? enterProviderMode() : enterCustomerMode())}
+            />
+          )}
+          {appMode && restoringNav && (
             <div className="flex-1 flex items-center justify-center py-16" role="status">
               <span className="w-6 h-6 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
             </div>
           )}
-          {!restoringNav && activeTab === 'home' && (
+          {appMode && !restoringNav && activeTab === 'home' && (
             <>
               {currentScreen === 'home' && (
                 <HomeScreen
@@ -748,7 +825,7 @@ export default function App() {
             </>
           )}
 
-          {activeTab === 'my-requests' && (
+          {appMode && activeTab === 'my-requests' && (
             <MyRequestsScreen
               requests={customerRequests}
               loading={!customerRequestsLoaded}
@@ -758,9 +835,12 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'provider-mode' && (
+          {appMode && activeTab === 'provider-mode' && (
             <ProviderModeScreen
               language={language}
+              tab={providerTab}
+              onTabChange={setProviderTab}
+              onCountsChange={setProviderCounts}
               onOfferSent={() => {
                 refreshData();
               }}
@@ -773,13 +853,22 @@ export default function App() {
         </main>
 
         {/* Fixed Mobile Bottom Navigation */}
-        <BottomNav
-          activeTab={activeTab}
-          language={language}
-          onTabChange={handleTabChange}
-          requestsCount={customerRequests.length}
-          hasProviderProfile={hasProviderProfile}
-        />
+        {appMode && (
+          <BottomNav
+            mode={appMode}
+            activeTab={activeTab}
+            providerTab={providerTab}
+            language={language}
+            onTabChange={handleTabChange}
+            onProviderTabChange={(tab) => {
+              setProviderTab(tab);
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onSwitchMode={appMode === 'provider' ? enterCustomerMode : enterProviderMode}
+            requestsCount={customerRequests.length}
+            providerCounts={providerCounts}
+          />
+        )}
       </div>
     </div>
   );
