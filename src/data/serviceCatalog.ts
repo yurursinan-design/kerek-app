@@ -402,3 +402,24 @@ export function searchServices(text: string, limit = 8): { group: CatalogGroup; 
 }
 
 export const TOTAL_SERVICE_COUNT = SERVICE_CATALOG.reduce((n, g) => n + g.services.length, 0);
+
+/** Groups a provider works in: categoryIds, or the single legacy categoryId. */
+export function providerGroupIds(p: { categoryIds?: string[]; categoryId?: string } | null | undefined): string[] {
+  if (!p) return [];
+  if (Array.isArray(p.categoryIds) && p.categoryIds.length > 0) return p.categoryIds;
+  return p.categoryId ? [p.categoryId] : [];
+}
+
+/** Keeps only known ids, without duplicates, so profiles never store free text in these lists. */
+export function cleanCatalogIds(serviceIds: unknown): { serviceIds: string[]; categoryIds: string[] } {
+  const ids = Array.isArray(serviceIds) ? serviceIds.filter((x): x is string => typeof x === 'string') : [];
+  const services: string[] = [];
+  const groups: string[] = [];
+  for (const id of ids) {
+    const found = getService(id);
+    if (!found || services.includes(id)) continue;
+    services.push(id);
+    if (!groups.includes(found.group.id)) groups.push(found.group.id);
+  }
+  return { serviceIds: services.slice(0, 160), categoryIds: groups };
+}

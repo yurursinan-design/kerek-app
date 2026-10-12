@@ -1,3 +1,4 @@
+import { cleanCatalogIds } from '../data/serviceCatalog';
 import {
   collection,
   doc,
@@ -241,7 +242,9 @@ export class FirebaseRepository implements Repository {
     const city = providerData.city?.trim() || 'Қызылорда';
     const cityId = normalizeCityId(providerData.cityId || city) || providerData.cityId || 'kyzylorda';
     const category = providerData.category?.trim() || '';
-    const categoryId = normalizeCategoryId(providerData.categoryId || category);
+    // Catalogue services picked by the provider; the first group is the main category
+    const catalog = cleanCatalogIds(providerData.serviceIds);
+    const categoryId = catalog.categoryIds[0] || normalizeCategoryId(providerData.categoryId || category);
 
     const newProvider: Provider = {
       id,
@@ -254,6 +257,7 @@ export class FirebaseRepository implements Repository {
       district: providerData.district?.trim() || '',
       category,
       categoryId,
+      ...(catalog.serviceIds.length ? { serviceIds: catalog.serviceIds, categoryIds: catalog.categoryIds } : {}),
       services: providerData.services?.trim() || '',
       priceRange: providerData.priceRange?.trim() || '',
       workingHours: providerData.workingHours?.trim() || '09:00 - 20:00',

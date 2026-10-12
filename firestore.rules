@@ -62,7 +62,9 @@ service cloud.firestore {
         && strMax(m, 'district', 100) && strMax(m, 'services', 1000)
         && strMax(m, 'priceRange', 100) && strMax(m, 'workingHours', 100)
         && strMax(m, 'description', 5000) && strMax(m, 'availability', 300)
-        && strMax(m, 'tradeLicense', 100) && strMax(m, 'cityId', 64) && strMax(m, 'categoryId', 64);
+        && strMax(m, 'tradeLicense', 100) && strMax(m, 'cityId', 64) && strMax(m, 'categoryId', 64)
+        && (!('categoryIds' in m) || (m.categoryIds is list && m.categoryIds.size() <= 30))
+        && (!('serviceIds' in m) || (m.serviceIds is list && m.serviceIds.size() <= 160));
     }
 
     // =================== Users Collection ===================

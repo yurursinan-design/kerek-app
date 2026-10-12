@@ -1,9 +1,11 @@
 import { getFriendlyErrorMessage } from '../services';
 import { auth } from '../services/firebase';
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Language, Provider } from '../types';
 import { translations } from '../i18n/translations';
 import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
+import { getService, groupName, serviceName } from '../data/serviceCatalog';
+import { ServicePicker } from './ServicePicker';
 import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import {
@@ -61,6 +63,12 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
       (language === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники')
   );
   const [services, setServices] = useState(initialProvider?.services || '');
+  // Catalogue services the provider offers (the main category follows the first one picked)
+  const [serviceIds, setServiceIds] = useState<string[]>(initialProvider?.serviceIds || []);
+  useEffect(() => {
+    const first = getService(serviceIds[0]);
+    if (first) setCategory(groupName(first.group, language));
+  }, [serviceIds, language]);
 
   const [experienceYears, setExperienceYears] = useState(
     initialProvider?.experienceYears !== undefined && initialProvider.experienceYears !== null
@@ -145,8 +153,8 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
       setStepError(t.cityRequiredError);
       return false;
     }
-    if (!category.trim()) {
-      setStepError(t.categoryRequiredError);
+    if (serviceIds.length === 0) {
+      setStepError(language === 'kz' ? 'Кем дегенде бір қызметті таңдаңыз' : 'Выберите хотя бы одну услугу');
       return false;
     }
     setStepError(null);
@@ -207,7 +215,14 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
         city: city.trim(),
         district: district.trim(),
         category: category.trim(),
-        services: services.trim(),
+        serviceIds,
+        services:
+          services.trim() ||
+          serviceIds
+            .map((id) => getService(id))
+            .filter(Boolean)
+            .map((x) => serviceName(x!.service, language))
+            .join(', '),
         priceRange: priceRange.trim(),
         workingHours: workingHours.trim() || '09:00 - 20:00',
         experienceYears: expYears,
@@ -424,32 +439,31 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
             </div>
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
               <Briefcase className="w-3.5 h-3.5 text-sky-600" />
-              <span>{t.fieldCategory}</span>
+              <span>{language === 'kz' ? 'Қандай қызметтер көрсетесіз?' : 'Какие услуги вы оказываете?'}</span>
               <span className="text-rose-500">*</span>
             </label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full h-12 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white transition-colors"
-            >
-              {CATEGORIES_LIST.map((cat) => {
-                const catName = language === 'tr' ? (cat.tr || cat.ru) : language === 'kz' ? cat.kz : cat.ru;
-                return (
-                  <option key={cat.id} value={catName}>
-                    {catName}
-                  </option>
-                );
-              })}
-            </select>
+            <p className="text-[11px] text-slate-500">
+              {language === 'kz'
+                ? 'Бірнеше қызметті таңдай аласыз. Тек таңдалған қызметтер бойынша өтініштер келеді.'
+                : 'Можно выбрать несколько. Заявки будут приходить только по выбранным услугам.'}
+            </p>
+            <ServicePicker
+              language={language}
+              selected={serviceIds}
+              onChange={(ids) => {
+                setServiceIds(ids);
+                if (stepError) setStepError(null);
+              }}
+            />
           </div>
 
           <div className="space-y-1">
             <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
               <Wrench className="w-3.5 h-3.5 text-sky-600" />
-              <span>{t.providerServicesField}</span>
+              <span>{language === 'kz' ? 'Қосымша (міндетті емес)' : 'Дополнительно (необязательно)'}</span>
             </label>
             <input
               type="text"

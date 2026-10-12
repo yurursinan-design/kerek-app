@@ -423,6 +423,10 @@ export interface Provider {
   district: string;
   category: string;
   categoryId?: string;
+  /** All catalogue groups the provider works in (categoryId is the first one) */
+  categoryIds?: string[];
+  /** Catalogue services the provider offers */
+  serviceIds?: string[];
   services: string;
   priceRange: string;
   workingHours: string;

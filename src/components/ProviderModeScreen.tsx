@@ -29,6 +29,7 @@ import { ProviderOnboarding } from './ProviderOnboarding';
 import { ChatScreen } from './ChatScreen';
 import { AppointmentSection } from './AppointmentSection';
 import { RequestMediaView } from './RequestMediaView';
+import { providerGroupIds } from '../data/serviceCatalog';
 import {
   Briefcase,
   CheckCircle,
@@ -222,11 +223,11 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
           requestsUnsubscribeRef.current = null;
         }
 
+        // Requests of the provider's city; the provider's groups (several since the full catalogue)
+        // are matched on the device in the new-requests filter below
         const filter = {
           city: myProv.city,
           cityId: myProv.cityId ? (normalizeCityId(myProv.cityId) || myProv.cityId) : normalizeCityId(myProv.city),
-          category: myProv.category,
-          categoryId: myProv.categoryId ? normalizeCategoryId(myProv.categoryId) : normalizeCategoryId(myProv.category),
         };
 
         const unsub = repository.subscribeToRequests(
@@ -342,6 +343,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         district: (providerData.district || '').trim(),
         category: targetCategory,
         categoryId: catId,
+        ...(providerData.serviceIds ? { serviceIds: providerData.serviceIds } : {}),
         services: (providerData.services || '').trim(),
         priceRange: (providerData.priceRange || '').trim(),
         workingHours: (providerData.workingHours || '').trim() || '09:00 - 20:00',
@@ -366,8 +368,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       const newFilter = {
         city: savedProvider.city,
         cityId: savedProvider.cityId ? (normalizeCityId(savedProvider.cityId) || savedProvider.cityId) : cId,
-        category: savedProvider.category,
-        categoryId: savedProvider.categoryId ? normalizeCategoryId(savedProvider.categoryId) : catId,
       };
       requestsUnsubscribeRef.current = repository.subscribeToRequests(
         newFilter,
@@ -510,6 +510,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     : provider?.category
     ? normalizeCategoryId(provider.category)
     : '';
+  // All groups the provider works in (several since the full catalogue; legacy profiles have one)
+  const pGroupIds = provider ? (providerGroupIds(provider).length ? providerGroupIds(provider).map((g) => normalizeCategoryId(g)) : pCatId ? [pCatId] : []) : [];
 
   const isAnonymousSession = Boolean(
     !auth?.currentUser ||
@@ -593,9 +595,10 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     const rCityId = normalizeCityId(r.cityId || r.city) || r.cityId || 'belirtilmemiş';
     const rCatId = normalizeCategoryId(r.categoryId || r.category) || 'belirtilmemiş';
 
-    if (pCityId && pCatId) {
+    if (pCityId && pGroupIds.length > 0) {
       if (rCityId !== pCityId) return false;
-      const isCatMatched = rCatId === 'other' || rCatId === pCatId || isCategoryMatch(rCatId, pCatId);
+      const isCatMatched =
+        rCatId === 'other' || pGroupIds.some((g) => rCatId === g || isCategoryMatch(rCatId, g));
       if (!isCatMatched) return false;
     }
     return true;

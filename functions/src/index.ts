@@ -163,11 +163,13 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
 
     try {
       // Find matching providers with same cityId and categoryId
-      const queryRef = db
-        .collection('providers')
-        .where('cityId', '==', cityId)
-        .where('categoryId', '==', categoryId);
-      const providersSnap = await queryRef.get();
+      // Providers list every group they work in (categoryIds); older profiles have only categoryId
+      const [byList, byMain] = await Promise.all([
+        db.collection('providers').where('cityId', '==', cityId).where('categoryIds', 'array-contains', categoryId).get(),
+        db.collection('providers').where('cityId', '==', cityId).where('categoryId', '==', categoryId).get(),
+      ]);
+      const seen = new Set<string>();
+      const providersSnap = { docs: [...byList.docs, ...byMain.docs].filter((d) => !seen.has(d.id) && (seen.add(d.id), true)) };
 
       // A Firestore batch holds at most 500 writes, so notifications are written in chunks
       const BATCH_LIMIT = 450;
