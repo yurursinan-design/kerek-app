@@ -2,11 +2,14 @@ import {
   ConfirmationResult,
   PhoneAuthProvider,
   RecaptchaVerifier,
+  linkWithCredential,
   linkWithPhoneNumber,
   signInWithCredential,
   signInWithPhoneNumber,
   signOut,
 } from 'firebase/auth';
+import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { auth, ensureFirebaseAuth, isFirebaseConfigured } from './firebase';
 import { clearPersonalLocalData } from './storage';
 
@@ -65,6 +68,7 @@ function resetVerifier() {
 export async function sendSmsCode(phoneE164: string, containerId: string): Promise<ConfirmationResult> {
   if (!auth) throw new Error('Firebase Auth is not configured');
   await ensureFirebaseAuth();
+  if (Capacitor.isNativePlatform()) return sendSmsCodeNative(phoneE164);
   if (auth.emulatorConfig) {
     // The Auth emulator has no reCAPTCHA
     auth.settings.appVerificationDisabledForTesting = true;
@@ -82,6 +86,55 @@ export async function sendSmsCode(phoneE164: string, containerId: string): Promi
     resetVerifier();
     throw err;
   }
+}
+
+/**
+ * In the Android/iPhone app the phone's own Firebase SDK sends the SMS (Play Integrity / APNs
+ * instead of the picture puzzle). It only returns a verification id; the code is then confirmed
+ * with the web SDK, which keeps linking the anonymous account exactly as on the website.
+ */
+async function sendSmsCodeNative(phoneE164: string): Promise<ConfirmationResult> {
+  const verificationId = await new Promise<string>((resolve, reject) => {
+    const handles: Array<Promise<{ remove: () => Promise<void> }>> = [];
+    const done = (fn: () => void) => {
+      clearTimeout(timer);
+      handles.forEach((h) => h.then((x) => x.remove()).catch(() => {}));
+      fn();
+    };
+    const timer = setTimeout(
+      () => done(() => reject(Object.assign(new Error('SMS was not sent in time'), { code: 'auth/timeout' }))),
+      90000
+    );
+    handles.push(FirebaseAuthentication.addListener('phoneCodeSent', (e) => done(() => resolve(e.verificationId))));
+    handles.push(
+      FirebaseAuthentication.addListener('phoneVerificationFailed', (e) =>
+        done(() => reject(Object.assign(new Error(e.message), { code: nativeErrorCode(e.message) })))
+      )
+    );
+    FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: phoneE164 }).catch((err) =>
+      done(() => reject(Object.assign(new Error(err?.message || String(err)), { code: nativeErrorCode(err?.message) })))
+    );
+  });
+  return {
+    verificationId,
+    confirm: async (code: string) => {
+      if (!auth) throw new Error('Firebase Auth is not configured');
+      const credential = PhoneAuthProvider.credential(verificationId, code);
+      const user = auth.currentUser;
+      return user && user.isAnonymous ? linkWithCredential(user, credential) : signInWithCredential(auth, credential);
+    },
+  } as ConfirmationResult;
+}
+
+/** Native SDK errors arrive as text; map the common ones to the web error codes. */
+function nativeErrorCode(message?: string): string {
+  const m = String(message || '').toLowerCase();
+  if (m.includes('blocked') || m.includes('too many') || m.includes('unusual activity')) return 'auth/too-many-requests';
+  if (m.includes('invalid format') || m.includes('invalid phone')) return 'auth/invalid-phone-number';
+  if (m.includes('quota')) return 'auth/quota-exceeded';
+  if (m.includes('network')) return 'auth/network-request-failed';
+  if (m.includes('region') || m.includes('not enabled') || m.includes('not allowed')) return 'auth/operation-not-allowed';
+  return 'auth/native-error';
 }
 
 /**
@@ -139,7 +192,11 @@ export function phoneAuthErrorMessage(err: any, lang: Lang): string {
       return m('SMS арқылы кіру әлі қосылмаған.', 'Вход по SMS ещё не включён.');
     case 'auth/network-request-failed':
       return m('Интернет байланысы жоқ сияқты.', 'Похоже, нет подключения к интернету.');
-    default:
-      return m('SMS жіберу мүмкін болмады. Қайталап көріңіз.', 'Не удалось отправить SMS. Попробуйте снова.');
+    default: {
+      // The technical reason in small print helps to find the cause when someone reports it
+      const detail = code && code !== 'auth/native-error' ? code : String(err?.message || code).slice(0, 80);
+      const base = m('SMS жіберу мүмкін болмады. Қайталап көріңіз.', 'Не удалось отправить SMS. Попробуйте снова.');
+      return detail ? `${base} (${detail})` : base;
+    }
   }
 }
