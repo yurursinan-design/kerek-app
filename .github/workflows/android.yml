@@ -32,42 +32,62 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The native Firebase SDK (SMS login) needs the app's Firebase file; an APK without it would
+      # close on start, so the previous test APK stays published until the file is added.
+      - name: Firebase dosyası var mı
+        id: cfg
+        run: |
+          if [ -f android/app/google-services.json ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::android/app/google-services.json yok: yeni APK oluşturulmadı"
+          fi
+
       - uses: oven-sh/setup-bun@v2
+        if: steps.cfg.outputs.ok == 'true'
         with:
           bun-version: 1.4.2
 
       - uses: actions/setup-node@v4
+        if: steps.cfg.outputs.ok == 'true'
         with:
           node-version: 22
 
       - uses: actions/setup-java@v4
+        if: steps.cfg.outputs.ok == 'true'
         with:
           distribution: temurin
           java-version: '21'
 
       - name: Bağımlılıkları kur
+        if: steps.cfg.outputs.ok == 'true'
         run: bun install --frozen-lockfile
 
       - name: Web uygulamasını derle
+        if: steps.cfg.outputs.ok == 'true'
         run: bun run build
 
       - name: Android projesine kopyala
+        if: steps.cfg.outputs.ok == 'true'
         run: npx cap sync android
 
       - name: APK oluştur
+        if: steps.cfg.outputs.ok == 'true'
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
 
       - name: Dosyayı adlandır
+        if: steps.cfg.outputs.ok == 'true'
         run: cp android/app/build/outputs/apk/debug/app-debug.apk KEREK-test.apk
 
       - uses: actions/upload-artifact@v4
+        if: steps.cfg.outputs.ok == 'true'
         with:
           name: KEREK-android-test
           path: KEREK-test.apk
           retention-days: 7
 
       - name: Telefona indirme bağlantısını güncelle
+        if: steps.cfg.outputs.ok == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
