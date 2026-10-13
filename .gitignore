@@ -5,6 +5,8 @@ coverage/
 .DS_Store
 *.log
 .env*
+# Non-secret function settings (the secrets live in Secret Manager)
+!functions/.env
 !.env.example
 firebase-applet-config.json
 functions/lib/
