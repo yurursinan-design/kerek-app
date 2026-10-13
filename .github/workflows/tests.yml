@@ -1,7 +1,7 @@
 # Runs the test suites on every Pull Request and on main:
 #   - type check
 #   - Firestore and Storage security rules tests (emulator)
-#   - verify-* tests against the Firestore + Auth emulators
+#   - verify-* tests against the Firestore, Auth and Storage emulators
 name: Testler
 
 on:

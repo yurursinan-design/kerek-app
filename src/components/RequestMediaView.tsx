@@ -10,7 +10,8 @@ import {
   X,
   Maximize2,
 } from 'lucide-react';
-import { safeCoords, safeMediaUrl, safeText } from '../services/safeData';
+import { safeCoords, safeText } from '../services/safeData';
+import { useMediaUrls } from '../services/storageUrls';
 
 interface RequestMediaViewProps {
   attachments?: (RequestAttachment | PendingAttachment)[];
@@ -60,11 +61,8 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
     (a) => a.type === 'audio' || (a as PendingAttachment).mediaType === 'audio'
   );
 
-  const getMediaUrl = (item: RequestAttachment | PendingAttachment): string => {
-    if ('downloadUrl' in item && item.downloadUrl) return safeMediaUrl(item.downloadUrl);
-    if ('previewUrl' in item && item.previewUrl) return safeMediaUrl(item.previewUrl);
-    return '';
-  };
+  const mediaUrls = useMediaUrls((attachments || []) as Array<RequestAttachment & { previewUrl?: string }>);
+  const getMediaUrl = (item: RequestAttachment | PendingAttachment): string => mediaUrls[item.id] || '';
 
   const getMediaName = (item: RequestAttachment | PendingAttachment): string => {
     return safeText((item as any).fileName) || safeText((item as any).name) || 'Media';
@@ -152,7 +150,7 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
                   className="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-square shadow-2xs flex flex-col justify-end"
                 >
                   <img
-                    src={url}
+                    src={url || undefined}
                     alt={name}
                     className="absolute inset-0 w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform duration-200"
                     onClick={() => setActivePreviewImage(url)}
@@ -237,7 +235,7 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
                   </div>
 
                   <video
-                    src={url}
+                    src={url || undefined}
                     controls
                     preload="metadata"
                     className="w-full max-h-56 rounded-lg bg-black object-contain"
@@ -293,7 +291,7 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
                     </div>
                   </div>
 
-                  <audio src={url} controls className="w-full h-9" />
+                  <audio src={url || undefined} controls className="w-full h-9" />
                 </div>
               );
             })}

@@ -1,7 +1,7 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth, signInAnonymously, onAuthStateChanged, connectAuthEmulator, User as FirebaseUser } from 'firebase/auth';
 import { getFirestore, Firestore, doc, getDoc, setDoc, getDocFromServer, connectFirestoreEmulator } from 'firebase/firestore';
-import { getStorage, FirebaseStorage } from 'firebase/storage';
+import { connectStorageEmulator, getStorage, FirebaseStorage } from 'firebase/storage';
 
 /**
  * Firebase Client Initialization
@@ -125,6 +125,13 @@ if (isFirebaseConfigured()) {
     }
     try {
       storage = getStorage(app);
+      // Tests and local development use the Storage emulator too, never the real bucket
+      if (shouldConnectEmulator && storage) {
+        const [sHost, sPort] = (env.FIREBASE_STORAGE_EMULATOR_HOST || '127.0.0.1:9199').split(':');
+        try {
+          connectStorageEmulator(storage, sHost || '127.0.0.1', parseInt(sPort || '9199', 10) || 9199);
+        } catch {}
+      }
     } catch (stErr) {
       console.warn('[KEREK Firebase] Storage init note:', stErr);
       storage = null;

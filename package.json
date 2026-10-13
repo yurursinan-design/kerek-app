@@ -13,7 +13,7 @@
     "test": "npm run test:rules && npm run test:storage && npm run test:verify",
     "test:rules": "npx --yes firebase-tools@15.31.0 emulators:exec --project demo-kerek --only firestore \"npx tsx tests/firestore-rules.spec.ts\"",
     "test:storage": "npx --yes firebase-tools@15.31.0 emulators:exec --project demo-kerek --only firestore,storage \"npx tsx tests/storage-rules.spec.ts\"",
-    "test:verify": "npx --yes firebase-tools@15.31.0 emulators:exec --project demo-kerek --only firestore,auth \"bash scripts/test-verify.sh\"",
+    "test:verify": "npx --yes firebase-tools@15.31.0 emulators:exec --project demo-kerek --only firestore,auth,storage \"bash scripts/test-verify.sh\"",
     "dev:emulator": "npx --yes firebase-tools@15.31.0 emulators:exec --project demo-kerek --only firestore,auth \"vite --config vite.emulator.config.ts\""
   },
   "dependencies": {

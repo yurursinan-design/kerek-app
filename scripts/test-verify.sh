@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs every tests/verify-*.ts against the Firestore + Auth emulators (started by `npm run test:verify`).
+# Runs every tests/verify-*.ts against the Firestore, Auth and Storage emulators (started by `npm run test:verify`).
 # Test users get a verified phone number through the Auth emulator (KEREK_TEST_AUTO_PHONE=1), because
 # publishing requests, offers and provider profiles requires one.
 # verify-ai-parser-e2e calls the real Gemini API and runs only when GEMINI_API_KEY is set.
@@ -14,6 +14,7 @@ export VITE_FIREBASE_STORAGE_BUCKET="${VITE_FIREBASE_STORAGE_BUCKET:-demo-kerek.
 export VITE_USE_EMULATOR=true
 export FIRESTORE_EMULATOR_HOST="${FIRESTORE_EMULATOR_HOST:-127.0.0.1:8088}"
 export FIREBASE_AUTH_EMULATOR_HOST="${FIREBASE_AUTH_EMULATOR_HOST:-127.0.0.1:9099}"
+export FIREBASE_STORAGE_EMULATOR_HOST="${FIREBASE_STORAGE_EMULATOR_HOST:-127.0.0.1:9199}"
 export KEREK_TEST_AUTO_PHONE=1
 
 failed=()

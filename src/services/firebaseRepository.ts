@@ -20,7 +20,6 @@ import {
 import {
   ref as storageRef,
   uploadBytes,
-  getDownloadURL,
 } from 'firebase/storage';
 import {
   Appointment,
@@ -576,14 +575,14 @@ export class FirebaseRepository implements Repository {
         }
       }
       if (!uploadResult) throw lastErr || new Error('No free attachment slot');
-      const downloadUrl = await getDownloadURL(uploadResult.ref);
       const attachmentId = storagePath.split('/').pop() as string;
 
       const attachment: RequestAttachment = {
         id: attachmentId,
         type: validation.type,
         storagePath,
-        downloadUrl,
+        // No stored file link: the viewing address is asked when the file is shown (storageUrls.ts)
+        downloadUrl: '',
         fileName: sanitizedName,
         mimeType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mpeg'),
         sizeBytes: file.size,
@@ -2093,14 +2092,14 @@ export class FirebaseRepository implements Repository {
     };
 
     try {
-      const uploadResult = await uploadBytes(fileRef, blobPayload, metadata);
-      const downloadUrl = await getDownloadURL(uploadResult.ref);
+      await uploadBytes(fileRef, blobPayload, metadata);
 
       const attachment: ChatAttachment = {
         id: attachmentId,
         type: validation.type,
         storagePath,
-        downloadUrl,
+        // No stored file link: the viewing address is asked when the file is shown (storageUrls.ts)
+        downloadUrl: '',
         fileName: sanitizedName,
         mimeType: file.type || (validation.type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
         sizeBytes: file.size,

@@ -25,7 +25,7 @@ import {
   Download,
   X,
 } from 'lucide-react';
-import { safeMediaUrl } from '../services/safeData';
+import { useMediaUrls } from '../services/storageUrls';
 
 interface ChatScreenProps {
   requestId: string;
@@ -54,6 +54,14 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [request, setRequest] = useState<ServiceRequest | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Viewing addresses of the files in the conversation (asked from Cloud Storage when shown)
+  const chatMediaUrls = useMediaUrls(
+    messages.flatMap((m) =>
+      (Array.isArray(m.attachments) ? m.attachments : [])
+        .filter((att) => att && typeof att === 'object')
+        .map((att) => ({ ...att, id: `${m.id}/${att.id}` }))
+    )
+  );
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
@@ -485,10 +493,10 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                           return (
                             <div key={att.id} className="relative group overflow-hidden rounded-xl bg-slate-900/10">
                               <img
-                                src={safeMediaUrl(att.downloadUrl)}
+                                src={chatMediaUrls[`${msg.id}/${att.id}`] || undefined}
                                 alt={att.fileName}
                                 className="w-full max-h-60 object-cover cursor-pointer hover:opacity-95 transition-opacity rounded-xl"
-                                onClick={() => setFullImageViewUrl(safeMediaUrl(att.downloadUrl))}
+                                onClick={() => setFullImageViewUrl(chatMediaUrls[`${msg.id}/${att.id}`] || '')}
                                 loading="lazy"
                               />
                               <div className="flex items-center justify-between text-[10px] mt-1 px-1 opacity-80">
@@ -527,7 +535,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                             </div>
 
                             <a
-                              href={safeMediaUrl(att.downloadUrl) || undefined}
+                              href={chatMediaUrls[`${msg.id}/${att.id}`] || undefined}
                               target="_blank"
                               rel="noopener noreferrer"
                               download={att.fileName}
