@@ -19,8 +19,6 @@ concurrency:
 
 env:
   FIREBASE_PROJECT_ID: kerek-9d153
-  # kzMirrorFileSaved/kzMirrorFileDeleted wait until Cloud Storage has its default bucket (none yet);
-  # storage triggers must run in the bucket's region
   ONLY: functions:requestLoginCode,functions:verifyLoginCode,functions:onNewRequestNotifyProviders,functions:notifyOnOfferCreated,functions:notifyOnOfferUpdated,functions:notifyOnMessageCreated,functions:notifyOnRequestUpdated,functions:notifyOnAppointmentWritten,functions:pushOnNotificationCreated,functions:kzMirrorUsers,functions:kzMirrorProviders,functions:kzMirrorRequests,functions:kzMirrorRequestContacts,functions:kzMirrorOffers,functions:kzMirrorReviews,functions:kzMirrorConversations,functions:kzMirrorMessages,functions:kzMirrorAppointments,functions:kzMirrorNotifications,functions:kzMirrorReports,functions:kzMirrorPushTokens
 
 jobs:
