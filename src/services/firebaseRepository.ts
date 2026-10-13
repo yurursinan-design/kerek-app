@@ -5,6 +5,9 @@ import {
   getDoc,
   getDocs,
   getCountFromServer,
+  getAggregateFromServer,
+  average,
+  count,
   setDoc,
   updateDoc,
   writeBatch,
@@ -16,6 +19,8 @@ import {
   onSnapshot,
   increment,
   type Firestore,
+  type Query,
+  type QuerySnapshot,
 } from 'firebase/firestore';
 import {
   ref as storageRef,
@@ -133,6 +138,38 @@ export function normalizeRequestStatus(status?: string): RequestStatus {
 const PROVIDER_VISIBLE_STATUSES = ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'];
 /** Upper bound for one customer's request list (one read per document) */
 const CUSTOMER_REQUESTS_LIMIT = 200;
+/** Lists read newest first with a cap, so reads don't grow with the whole history */
+const PROVIDER_FEED_LIMIT = 300;
+const PROVIDER_OFFERS_LIMIT = 300;
+const PROVIDER_REVIEWS_LIMIT = 100;
+const NOTIFICATIONS_LIMIT = 50;
+
+/**
+ * Reads the newest documents first, with a cap (firestore.indexes.json has the indexes). Until an
+ * index exists (failed-precondition, e.g. while indexes build right after a release) the plain
+ * query is used, so the screen still works.
+ */
+async function getDocsNewestFirst(newest: Query, plain: Query): Promise<QuerySnapshot> {
+  try {
+    return await getDocs(newest);
+  } catch (err: any) {
+    if (err?.code === 'failed-precondition') return getDocs(plain);
+    throw err;
+  }
+}
+
+function onSnapshotNewestFirst(
+  newest: Query,
+  plain: Query,
+  next: (snap: QuerySnapshot) => void,
+  error: (err: any) => void
+): () => void {
+  let unsub = onSnapshot(newest, next, (err: any) => {
+    if (err?.code === 'failed-precondition') unsub = onSnapshot(plain, next, error);
+    else error(err);
+  });
+  return () => unsub();
+}
 
 /** Request fields written when the selected provider reports the job finished. */
 function providerDoneUpdate(req: ServiceRequest, now: string): Partial<ServiceRequest> & { updatedAt: string } {
@@ -596,6 +633,42 @@ export class FirebaseRepository implements Repository {
     }
   }
 
+  /** A request document as the app uses it, with the private contact added for those allowed to read it. */
+  private async withContacts(firestore: Firestore, requestId: string, data: ServiceRequest): Promise<ServiceRequest> {
+    const cleanSelectedOfferId =
+      typeof data.selectedOfferId === 'string' && data.selectedOfferId.trim()
+        ? data.selectedOfferId.trim()
+        : undefined;
+
+    let customerPhone = data.customerPhone;
+    let preciseLocation: RequestLocation | undefined;
+    try {
+      // Readable only by the customer and the selected provider; everyone else keeps the approximate point
+      const contactRef = doc(firestore, 'requestContacts', requestId);
+      const contactSnap = await getDoc(contactRef);
+      if (contactSnap.exists()) {
+        const contact = contactSnap.data();
+        customerPhone = customerPhone || contact?.customerPhone;
+        if (contact?.location && typeof contact.location.latitude === 'number') {
+          preciseLocation = contact.location as RequestLocation;
+        }
+      }
+    } catch {
+      // Not authorized or no contact document: proceed with the shared data only
+    }
+
+    return {
+      ...data,
+      id: requestId,
+      ...(customerPhone ? { customerPhone } : {}),
+      ...(preciseLocation ? { location: preciseLocation } : {}),
+      status: normalizeRequestStatus(data.status),
+      selectedOfferId: cleanSelectedOfferId,
+      cityId: data.cityId || normalizeCityId(data.city),
+      categoryId: data.categoryId || normalizeCategoryId(data.category),
+    };
+  }
+
   async getRequest(requestId: string): Promise<ServiceRequest | null> {
     await ensureFirebaseAuth();
     const firestore = this.ensureDb();
@@ -603,38 +676,7 @@ export class FirebaseRepository implements Repository {
       const reqRef = doc(firestore, 'requests', requestId);
       const snap = await getDoc(reqRef);
       if (!snap.exists()) return null;
-      const data = snap.data() as ServiceRequest;
-      const cleanSelectedOfferId =
-        typeof data.selectedOfferId === 'string' && data.selectedOfferId.trim()
-          ? data.selectedOfferId.trim()
-          : undefined;
-
-      let customerPhone = data.customerPhone;
-      let preciseLocation: RequestLocation | undefined;
-      try {
-        // Readable only by the customer and the selected provider; everyone else keeps the approximate point
-        const contactRef = doc(firestore, 'requestContacts', requestId);
-        const contactSnap = await getDoc(contactRef);
-        if (contactSnap.exists()) {
-          const contact = contactSnap.data();
-          customerPhone = customerPhone || contact?.customerPhone;
-          if (contact?.location && typeof contact.location.latitude === 'number') {
-            preciseLocation = contact.location as RequestLocation;
-          }
-        }
-      } catch {
-        // Not authorized or no contact document: proceed with the shared data only
-      }
-
-      return {
-        ...data,
-        ...(customerPhone ? { customerPhone } : {}),
-        ...(preciseLocation ? { location: preciseLocation } : {}),
-        status: normalizeRequestStatus(data.status),
-        selectedOfferId: cleanSelectedOfferId,
-        cityId: data.cityId || normalizeCityId(data.city),
-        categoryId: data.categoryId || normalizeCategoryId(data.category),
-      };
+      return await this.withContacts(firestore, requestId, snap.data() as ServiceRequest);
     } catch (err: any) {
       const code = err?.code || '';
       const msg = err?.message || String(err);
@@ -658,7 +700,6 @@ export class FirebaseRepository implements Repository {
 
     try {
       const requestsColl = collection(firestore, 'requests');
-      let q = query(requestsColl);
 
       let snap;
       const targetCityId = filter?.cityId
@@ -675,8 +716,11 @@ export class FirebaseRepository implements Repository {
       if (filter?.customerId) {
         // Customer view: align with authenticated customer ID if available
         const effectiveCustomerId = auth?.currentUser?.uid || filter.customerId;
-        const q = query(requestsColl, where('customerId', '==', effectiveCustomerId), limit(CUSTOMER_REQUESTS_LIMIT));
-        snap = await getDocs(q);
+        const byCustomer = where('customerId', '==', effectiveCustomerId);
+        snap = await getDocsNewestFirst(
+          query(requestsColl, byCustomer, orderBy('createdAt', 'desc'), limit(CUSTOMER_REQUESTS_LIMIT)),
+          query(requestsColl, byCustomer, limit(CUSTOMER_REQUESTS_LIMIT))
+        );
       } else if (targetCityId && targetCatId) {
         // Provider view: query by cityId and categoryId conforming to firestore.rules
         try {
@@ -825,6 +869,93 @@ export class FirebaseRepository implements Repository {
     }
   }
 
+  /**
+   * One request, live. Delivers null when it is gone or this user may no longer read it (another
+   * provider was chosen, the request was closed): no data rather than a guessed state.
+   */
+  subscribeToRequest(
+    requestId: string,
+    onUpdate: (request: ServiceRequest | null) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    const cleanId = (requestId || '').trim();
+    const firestore = db;
+    if (!isFirebaseConfigured() || !firestore || !cleanId) return () => {};
+    let seq = 0;
+    let stopped = false;
+    try {
+      const unsub = onSnapshot(
+        doc(firestore, 'requests', cleanId),
+        (snap) => {
+          const mine = ++seq;
+          if (!snap.exists()) {
+            onUpdate(null);
+            return;
+          }
+          this.withContacts(firestore, cleanId, snap.data() as ServiceRequest).then((req) => {
+            // A newer snapshot may have arrived while the contact was read
+            if (!stopped && mine === seq) onUpdate(req);
+          });
+        },
+        (err: any) => {
+          seq++;
+          if (err?.code === 'permission-denied') onUpdate(null);
+          else console.warn('[FirebaseRepository] subscribeToRequest note:', err?.message || err);
+          if (onError) onError(err);
+        }
+      );
+      return () => {
+        stopped = true;
+        try {
+          unsub();
+        } catch {}
+      };
+    } catch (err) {
+      if (onError) onError(err);
+      return () => {};
+    }
+  }
+
+  /** Offers, live: the customer's offers for one request, or the signed-in provider's own offers. */
+  subscribeToOffers(
+    filter: OfferFilter,
+    onUpdate: (offers: ProviderOffer[]) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    if (!isFirebaseConfigured() || !db || !filter) return () => {};
+    const offersColl = collection(db, 'offers');
+    let newest: Query;
+    let plain: Query;
+    if (filter.requestId) {
+      newest = plain = query(offersColl, where('requestId', '==', filter.requestId));
+    } else {
+      const providerUserId = auth?.currentUser?.uid || filter.providerUserId;
+      if (!providerUserId) return () => {};
+      const byProvider = where('providerUserId', '==', providerUserId);
+      newest = query(offersColl, byProvider, orderBy('createdAt', 'desc'), limit(PROVIDER_OFFERS_LIMIT));
+      plain = query(offersColl, byProvider);
+    }
+    try {
+      const unsub = onSnapshotNewestFirst(
+        newest,
+        plain,
+        (snap) => onUpdate(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProviderOffer))),
+        (err: any) => {
+          console.warn('[FirebaseRepository] subscribeToOffers note:', err?.message || err);
+          if (onError) onError(err);
+        }
+      );
+      return () => {
+        try {
+          unsub();
+        } catch {}
+      };
+    } catch (err) {
+      if (onError) onError(err);
+      return () => {};
+    }
+  }
+
   subscribeToRequests(
     filter: RequestFilter,
     onData: (requests: ServiceRequest[]) => void,
@@ -911,10 +1042,13 @@ export class FirebaseRepository implements Repository {
         onData(formatAndFilter(combined));
       };
 
-      let qPrimary;
+      let qPrimary: Query | undefined;
+      let qPrimaryPlain: Query | undefined;
       if (filter?.customerId) {
         const effectiveCustomerId = auth?.currentUser?.uid || filter.customerId;
-        qPrimary = query(requestsColl, where('customerId', '==', effectiveCustomerId), limit(CUSTOMER_REQUESTS_LIMIT));
+        const byCustomer = where('customerId', '==', effectiveCustomerId);
+        qPrimary = query(requestsColl, byCustomer, orderBy('createdAt', 'desc'), limit(CUSTOMER_REQUESTS_LIMIT));
+        qPrimaryPlain = query(requestsColl, byCustomer, limit(CUSTOMER_REQUESTS_LIMIT));
       }
 
       // Provider queries skip finished requests. If the project lacks an index the filtered query
@@ -929,8 +1063,10 @@ export class FirebaseRepository implements Repository {
         let unsub: () => void = () => {};
         const start = (withStatus: boolean) => {
           const constraints = withStatus ? [...base, where('status', 'in', PROVIDER_VISIBLE_STATUSES)] : base;
-          unsub = onSnapshot(
-            query(requestsColl, ...constraints),
+          const plain = query(requestsColl, ...constraints);
+          unsub = onSnapshotNewestFirst(
+            withStatus ? query(requestsColl, ...constraints, orderBy('createdAt', 'desc'), limit(PROVIDER_FEED_LIMIT)) : plain,
+            plain,
             (snap) => {
               map.clear();
               snap.forEach((d) => {
@@ -949,9 +1085,10 @@ export class FirebaseRepository implements Repository {
       };
 
       let unsubPrimary: () => void;
-      if (qPrimary) {
-        unsubPrimary = onSnapshot(
+      if (qPrimary && qPrimaryPlain) {
+        unsubPrimary = onSnapshotNewestFirst(
           qPrimary,
+          qPrimaryPlain,
           (snap) => {
             primaryMap.clear();
             snap.forEach((d) => {
@@ -1265,8 +1402,11 @@ export class FirebaseRepository implements Repository {
       // Matches Firestore rule: resource.data.providerUserId == request.auth.uid
       const targetProviderUserId = filter.providerUserId || currentUid;
       if (targetProviderUserId) {
-        const q = query(offersColl, where('providerUserId', '==', targetProviderUserId));
-        const snap = await getDocs(q);
+        const byProvider = where('providerUserId', '==', targetProviderUserId);
+        const snap = await getDocsNewestFirst(
+          query(offersColl, byProvider, orderBy('createdAt', 'desc'), limit(PROVIDER_OFFERS_LIMIT)),
+          query(offersColl, byProvider)
+        );
         let offers = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProviderOffer));
 
         if (filter.providerId) {
@@ -1605,7 +1745,6 @@ export class FirebaseRepository implements Repository {
     }
 
     const firestore = this.ensureDb();
-    const currentUid = auth?.currentUser?.uid || getCurrentUserId();
 
     // Check cross-document request state: job must be completed via real completion flow
     const req = await this.getRequest(requestId);
@@ -1727,6 +1866,20 @@ export class FirebaseRepository implements Repository {
     }
   }
 
+  /** Average rating and number of reviews, counted on the server (no review documents downloaded). */
+  async getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }> {
+    const ids = Array.from(new Set(providerIds.map((id) => (id || '').trim()).filter(Boolean))).slice(0, 10);
+    if (ids.length === 0) return { avg: 0, count: 0 };
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const snap = await getAggregateFromServer(query(collection(firestore, 'reviews'), where('providerId', 'in', ids)), {
+      total: count(),
+      avgRating: average('rating'),
+    });
+    const { total, avgRating } = snap.data();
+    return { count: total || 0, avg: total ? Number(avgRating) || 0 : 0 };
+  }
+
   async getReviews(filter?: ReviewFilter): Promise<Review[]> {
     await ensureFirebaseAuth();
     const firestore = this.ensureDb();
@@ -1743,14 +1896,14 @@ export class FirebaseRepository implements Repository {
         return reviews;
       }
 
+      // Never the whole collection: reviews are read per provider, newest first and capped
+      if (!filter?.providerId?.trim()) return reviews;
       const reviewsCol = collection(firestore, 'reviews');
-      let q = query(reviewsCol);
-
-      if (filter?.providerId) {
-        q = query(reviewsCol, where('providerId', '==', filter.providerId.trim()));
-      }
-
-      const querySnapshot = await getDocs(q);
+      const byProvider = where('providerId', '==', filter.providerId.trim());
+      const querySnapshot = await getDocsNewestFirst(
+        query(reviewsCol, byProvider, orderBy('createdAt', 'desc'), limit(PROVIDER_REVIEWS_LIMIT)),
+        query(reviewsCol, byProvider)
+      );
       querySnapshot.forEach((d) => {
         reviews.push(d.data() as Review);
       });
@@ -2147,13 +2300,14 @@ export class FirebaseRepository implements Repository {
 
       const currentUid = auth?.currentUser?.uid || getCurrentUserId();
       const updates: Record<string, any> = {};
-      if (currentUid === conv.customerId && conv.unreadCountCustomer > 0) {
-        updates.unreadCountCustomer = 0;
-      } else if (
-        (currentUid === conv.providerUserId || currentUid === conv.providerId) &&
-        conv.unreadCountProvider > 0
-      ) {
-        updates.unreadCountProvider = 0;
+      // Read mark: everything up to the newest message (its own time) has been seen
+      const readUpTo = typeof conv.lastMessageAt === 'string' ? conv.lastMessageAt : '';
+      if (currentUid === conv.customerId) {
+        if (conv.unreadCountCustomer > 0) updates.unreadCountCustomer = 0;
+        if (readUpTo && readUpTo !== conv.customerLastReadAt) updates.customerLastReadAt = readUpTo;
+      } else if (currentUid === conv.providerUserId || currentUid === conv.providerId) {
+        if (conv.unreadCountProvider > 0) updates.unreadCountProvider = 0;
+        if (readUpTo && readUpTo !== conv.providerLastReadAt) updates.providerLastReadAt = readUpTo;
       }
 
       if (Object.keys(updates).length > 0) {
@@ -2162,6 +2316,33 @@ export class FirebaseRepository implements Repository {
       }
     } catch (err: any) {
       console.warn('[FirebaseRepository] markMessagesAsRead note:', err?.message || err);
+    }
+  }
+
+  subscribeToConversation(
+    conversationId: string,
+    onUpdate: (conversation: Conversation | null) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    const cleanId = (conversationId || '').trim();
+    if (!isFirebaseConfigured() || !db || !cleanId) return () => {};
+    try {
+      const unsub = onSnapshot(
+        doc(db, 'conversations', cleanId),
+        (snap) => onUpdate(snap.exists() ? (snap.data() as Conversation) : null),
+        (err) => {
+          console.warn('[FirebaseRepository] subscribeToConversation note:', err?.message || err);
+          if (onError) onError(err);
+        }
+      );
+      return () => {
+        try {
+          unsub();
+        } catch {}
+      };
+    } catch (err) {
+      if (onError) onError(err);
+      return () => {};
     }
   }
 
@@ -2275,15 +2456,17 @@ export class FirebaseRepository implements Repository {
 
     try {
       const notifsCol = collection(db, 'notifications');
-      const q = query(notifsCol, where('recipientUserId', '==', cleanUid));
-      const snapshot = await getDocs(q);
+      const mine = where('recipientUserId', '==', cleanUid);
+      const snapshot = await getDocsNewestFirst(
+        query(notifsCol, mine, orderBy('createdAt', 'desc'), limit(Math.min(limitCount, NOTIFICATIONS_LIMIT))),
+        query(notifsCol, mine)
+      );
 
       const items: AppNotification[] = [];
       snapshot.forEach((d) => {
         items.push(d.data() as AppNotification);
       });
 
-      // Sort in memory to guarantee ordering without requiring a composite index on Spark
       items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       return items.slice(0, limitCount);
     } catch (error) {
@@ -2350,10 +2533,11 @@ export class FirebaseRepository implements Repository {
 
     try {
       const notifsCol = collection(db, 'notifications');
-      const q = query(notifsCol, where('recipientUserId', '==', cleanUid));
+      const mine = where('recipientUserId', '==', cleanUid);
 
-      const unsubscribe = onSnapshot(
-        q,
+      const unsubscribe = onSnapshotNewestFirst(
+        query(notifsCol, mine, orderBy('createdAt', 'desc'), limit(NOTIFICATIONS_LIMIT)),
+        query(notifsCol, mine),
         (snapshot) => {
           const items: AppNotification[] = [];
           snapshot.forEach((d) => {
@@ -2481,7 +2665,7 @@ export class FirebaseRepository implements Repository {
 
   async confirmAppointment(
     appointmentId: string,
-    confirmedByRole: 'customer' | 'provider'
+    _confirmedByRole: 'customer' | 'provider'
   ): Promise<Appointment> {
     return await this.updateAppointment(appointmentId, {
       status: 'CONFIRMED',

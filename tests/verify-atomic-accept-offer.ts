@@ -82,7 +82,7 @@ async function runAcceptOfferFixTests() {
     let caughtError = false;
     try {
       await resilientRepository.acceptOffer(offlineReqId, offer1.id);
-    } catch (e: any) {
+    } catch {
       caughtError = true;
     }
     const queue = offlineQueueService.getQueue();

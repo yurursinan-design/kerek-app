@@ -69,11 +69,9 @@ function toWhatsAppHref(raw?: string): string | null {
 }
 
 export const ResultScreen: React.FC<ResultScreenProps> = ({
-  need,
   request: initialRequest,
   language,
   onNewSearch,
-  onEditSearch,
 }) => {
   const t = translations[language];
 
@@ -173,10 +171,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
     Promise.all(
       missing.map(async (id) => {
         try {
-          const reviews = await repository.getReviews({ providerId: id });
-          const count = reviews.length;
-          const avg = count ? reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / count : 0;
-          return [id, { avg, count }] as const;
+          return [id, await repository.getRatingSummary([id])] as const;
         } catch {
           return [id, { avg: 0, count: 0 }] as const;
         }

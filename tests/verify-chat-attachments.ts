@@ -2,16 +2,10 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  getConversationId,
-  Conversation,
-  ChatMessage,
-  ChatAttachment,
   validateChatAttachment,
   sanitizeFileName,
-  CHAT_LIMITS,
 } from '../src/types';
 import { localRepository } from '../src/services/localRepository';
-import { resilientRepository } from '../src/services/resilientRepository';
 import { notificationService } from '../src/services/notificationService';
 
 console.log('=== STARTING CHAT 2.0 ATTACHMENTS VERIFICATION ===');
@@ -216,7 +210,7 @@ async function runTests() {
         type: 'application/x-bat',
       },
     });
-  } catch (err) {
+  } catch {
     failedUploadError = true;
   }
   assert.strictEqual(failedUploadError, true);

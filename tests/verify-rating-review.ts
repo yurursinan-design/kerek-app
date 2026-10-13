@@ -1,8 +1,6 @@
 import {
   Language,
-  Provider,
   ProviderOffer,
-  Review,
   ServiceRequest,
 } from '../src/types';
 import { validateReviewData } from '../src/services/validation';
@@ -265,7 +263,7 @@ async function runTests() {
       rating: 4,
       comment: 'Второй отзыв',
     });
-  } catch (err: any) {
+  } catch {
     duplicateThrew = true;
   }
   assert('Duplicate review for same requestId is rejected', duplicateThrew);

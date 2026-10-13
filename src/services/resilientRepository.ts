@@ -512,6 +512,14 @@ export class ResilientRepository implements Repository {
     return Array.from(map.values());
   }
 
+  async getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }> {
+    return this.executeWithFallback(
+      'getRatingSummary',
+      () => this.firebaseRepo.getRatingSummary(providerIds),
+      () => this.localRepo.getRatingSummary(providerIds)
+    );
+  }
+
   // =================== Matching ===================
   async matchProviders(request: ServiceRequest): Promise<Provider[]> {
     return this.executeWithFallback(
@@ -628,6 +636,33 @@ export class ResilientRepository implements Repository {
       if (conv) notificationService.notifyNewMessage(conv, localMsg).catch(() => {});
     }).catch(() => {});
     return localMsg;
+  }
+
+  subscribeToRequest(
+    requestId: string,
+    onUpdate: (request: ServiceRequest | null) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    if (this.firebaseRepo.isAvailable()) return this.firebaseRepo.subscribeToRequest(requestId, onUpdate, onError);
+    return this.localRepo.subscribeToRequest(requestId, onUpdate, onError);
+  }
+
+  subscribeToOffers(
+    filter: OfferFilter,
+    onUpdate: (offers: ProviderOffer[]) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    if (this.firebaseRepo.isAvailable()) return this.firebaseRepo.subscribeToOffers(filter, onUpdate, onError);
+    return this.localRepo.subscribeToOffers(filter, onUpdate, onError);
+  }
+
+  subscribeToConversation(
+    conversationId: string,
+    onUpdate: (conversation: Conversation | null) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    if (this.firebaseRepo.isAvailable()) return this.firebaseRepo.subscribeToConversation(conversationId, onUpdate, onError);
+    return this.localRepo.subscribeToConversation(conversationId, onUpdate, onError);
   }
 
   async markMessagesAsRead(conversationId: string): Promise<void> {

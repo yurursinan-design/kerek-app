@@ -1,5 +1,4 @@
-import { offlineQueueService, QueuedMutation } from '../src/services/offlineQueueService';
-import { resilientRepository } from '../src/services/resilientRepository';
+import { offlineQueueService } from '../src/services/offlineQueueService';
 import { firebaseRepository } from '../src/services/firebaseRepository';
 import { auth } from '../src/services/firebase';
 

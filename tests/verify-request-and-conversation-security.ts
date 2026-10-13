@@ -1,8 +1,8 @@
 import assert from 'node:assert';
-import { db, auth, app, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
+import { db, auth, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { deleteApp } from 'firebase/app';
 import { signInAnonymously } from 'firebase/auth';
-import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { doc, getDocs, collection, setDoc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
 // Mock minimal localStorage for Node environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -22,7 +22,7 @@ async function runSecurityAudit() {
 
   // Authenticate 3 distinct users
   await ensureFirebaseAuth();
-  const customerUid = auth?.currentUser?.uid!;
+  const customerUid = auth!.currentUser!.uid;
   console.log('✓ [Client 1 - Customer] UID:', customerUid);
 
   const selectedProvClient = createSecondaryFirebaseApp(`prov-selected-${Date.now()}`)!;

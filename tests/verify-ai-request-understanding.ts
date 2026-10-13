@@ -1,27 +1,12 @@
 import {
   analyzeRequestUnderstanding,
   understandingToExtractedNeed,
-  validateAndSanitizeRequestUnderstanding,
-  LocalRequestUnderstandingProvider,
-  GeminiRequestUnderstandingProvider,
-  defaultRequestUnderstandingProvider,
   RequestUnderstandingContext,
 } from '../src/services/requestUnderstanding';
-import {
-  normalizeCategoryId,
-  normalizeCityId,
-  getCategoryDisplayName,
-  getCityDisplayName,
-} from '../src/services/taxonomy';
 import { LocalRepository, setCurrentUserId } from '../src/services/localRepository';
 import { matchProviders } from '../src/services/matchingService';
 import {
-  ExtractedNeed,
-  PendingAttachment,
   RequestAttachment,
-  RequestLocation,
-  RequestUnderstanding,
-  ServiceRequest,
 } from '../src/types';
 
 // Mock localStorage for node test runner

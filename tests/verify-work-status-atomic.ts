@@ -6,7 +6,6 @@
 
 import { localRepository, setCurrentUserId } from '../src/services/localRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
-import { WorkStatus } from '../src/types';
 
 async function runPhase3Verification() {
   console.log('====================================================');

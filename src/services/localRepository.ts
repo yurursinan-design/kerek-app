@@ -28,7 +28,7 @@ import {
   RequestFilter,
   ReviewFilter,
 } from './repository';
-import { INITIAL_DEMO_PROVIDERS } from './storage';
+import { INITIAL_DEMO_PROVIDERS, onPersonalDataCleared } from './storage';
 import { matchProviders } from './matchingService';
 import {
   validateOfferData,
@@ -40,6 +40,7 @@ import { logTechnicalError } from './errorHandler';
 import { auth, isFirebaseConfigured } from './firebase';
 import { normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 import { generateOfferId } from './ids';
+import { clearDeviceFiles, dataUrlToBlob, saveDeviceFile } from './deviceFiles';
 
 const STORAGE_KEY_USER_ID = 'kerek_current_user_id_v2';
 const STORAGE_KEY_USERS = 'kerek_users_v2';
@@ -54,24 +55,28 @@ const STORAGE_KEY_NOTIFICATIONS = 'kerek_notifications_v1';
 const STORAGE_KEY_APPOINTMENTS = 'kerek_appointments_v1';
 const STORAGE_KEY_COUNTER = 'kerek_req_counter_v1';
 
+// Fallback for when this browser can't store data (private mode, storage full, no DOM in tests).
+// It only holds what localStorage refused, and is emptied on logout with the stored copy, so the
+// previous user's data can't come back from memory after logout.
 const memoryStore = new Map<string, string>();
+onPersonalDataCleared(() => memoryStore.clear());
 const safeStorage = {
   getItem: (key: string): string | null => {
+    if (memoryStore.has(key)) return memoryStore.get(key) as string;
     try {
-      if (typeof localStorage !== 'undefined') {
-        const val = localStorage.getItem(key);
-        if (val !== null) return val;
-      }
+      if (typeof localStorage !== 'undefined') return localStorage.getItem(key);
     } catch {}
-    return memoryStore.get(key) || null;
+    return null;
   },
   setItem: (key: string, val: string): void => {
-    memoryStore.set(key, val);
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem(key, val);
+        memoryStore.delete(key);
+        return;
       }
     } catch {}
+    memoryStore.set(key, val);
   },
   removeItem: (key: string): void => {
     memoryStore.delete(key);
@@ -82,6 +87,26 @@ const safeStorage = {
     } catch {}
   },
 };
+
+// Device files: kept in IndexedDB under their storage path and opened from there (storageUrls.ts),
+// so they survive a reload; the stored link stays empty. Without IndexedDB (tests, very old
+// browsers) the address of this page session is stored as before.
+onPersonalDataCleared(() => {
+  void clearDeviceFiles();
+});
+async function keepDeviceFile(storagePath: string, data: unknown): Promise<string> {
+  const blob = data instanceof Blob ? data : typeof data === 'string' && data.startsWith('data:') ? dataUrlToBlob(data) : null;
+  if (blob && (await saveDeviceFile(storagePath, blob))) return '';
+  if (data instanceof Blob) {
+    try {
+      return URL.createObjectURL(data);
+    } catch {
+      return `local-blob://${storagePath}`;
+    }
+  }
+  if (typeof data === 'string' && data.startsWith('data:')) return data;
+  return `local-storage://${storagePath}`;
+}
 
 // Generate UUID safely with fallback
 export function generateUUID(): string {
@@ -130,19 +155,6 @@ export function getCurrentUserId(): string {
   }
 }
 
-// Helper: Normalize string for search filtering
-function normalizeText(str: string): string {
-  return (str || '')
-    .toLowerCase()
-    .replace(/қ/g, 'к')
-    .replace(/ө/g, 'о')
-    .replace(/ұ/g, 'у')
-    .replace(/ү/g, 'у')
-    .replace(/і/g, 'и')
-    .replace(/ғ/g, 'г')
-    .replace(/ә/g, 'а')
-    .trim();
-}
 
 export class LocalRepository implements Repository {
   // =================== Users ===================
@@ -436,18 +448,7 @@ export class LocalRepository implements Repository {
     const attachmentId = `att_req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const storagePath = `requests/${cleanId}/${attachmentId}_${sanitizedName}`;
 
-    let downloadUrl = '';
-    if (file.data instanceof Blob) {
-      try {
-        downloadUrl = URL.createObjectURL(file.data);
-      } catch {
-        downloadUrl = `local-blob://${storagePath}`;
-      }
-    } else if (typeof file.data === 'string' && file.data.startsWith('data:')) {
-      downloadUrl = file.data;
-    } else {
-      downloadUrl = `local-storage://${storagePath}`;
-    }
+    const downloadUrl = await keepDeviceFile(storagePath, file.data);
 
     const attachment: RequestAttachment = {
       id: attachmentId,
@@ -1080,6 +1081,13 @@ export class LocalRepository implements Repository {
     }
   }
 
+  async getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }> {
+    const ids = new Set(providerIds.map((id) => (id || '').trim()).filter(Boolean));
+    const reviews = (await this.getAllReviewsRaw()).filter((r) => ids.has((r.providerId || '').trim()));
+    const total = reviews.length;
+    return { count: total, avg: total ? reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / total : 0 };
+  }
+
   private async getAllReviewsRaw(): Promise<Review[]> {
     try {
       const data = safeStorage.getItem(STORAGE_KEY_REVIEWS);
@@ -1296,19 +1304,7 @@ export class LocalRepository implements Repository {
     const attachmentId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const storagePath = `chat/${cleanId}/pending/${attachmentId}_${sanitizedName}`;
 
-    // For local fallback: create an object URL or data URL if available, or simulate offline storage URL
-    let downloadUrl = '';
-    if (file.data instanceof Blob) {
-      try {
-        downloadUrl = URL.createObjectURL(file.data);
-      } catch {
-        downloadUrl = `local-blob://${storagePath}`;
-      }
-    } else if (typeof file.data === 'string' && file.data.startsWith('data:')) {
-      downloadUrl = file.data;
-    } else {
-      downloadUrl = `local-storage://${storagePath}`;
-    }
+    const downloadUrl = await keepDeviceFile(storagePath, file.data);
 
     const attachment: ChatAttachment = {
       id: attachmentId,
@@ -1441,8 +1437,10 @@ export class LocalRepository implements Repository {
         const c = allConvs[convIdx];
         if (currentUid === c.customerId) {
           c.unreadCountCustomer = 0;
+          if (c.lastMessageAt) c.customerLastReadAt = c.lastMessageAt;
         } else if (currentUid === c.providerUserId || currentUid === c.providerId) {
           c.unreadCountProvider = 0;
+          if (c.lastMessageAt) c.providerLastReadAt = c.lastMessageAt;
         }
         allConvs[convIdx] = c;
         safeStorage.setItem(STORAGE_KEY_CONVERSATIONS, JSON.stringify(allConvs));
@@ -1450,6 +1448,50 @@ export class LocalRepository implements Repository {
     } catch (e) {
       logTechnicalError('LocalRepository.markMessagesAsRead', e);
     }
+  }
+
+  // Device mode has one person on one device: the current state is delivered once and screens
+  // update their own copy after each action
+  subscribeToRequest(
+    requestId: string,
+    onUpdate: (request: ServiceRequest | null) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    let active = true;
+    this.getRequest(requestId).then((req) => {
+      if (active) onUpdate(req);
+    });
+    return () => {
+      active = false;
+    };
+  }
+
+  subscribeToOffers(
+    filter: OfferFilter,
+    onUpdate: (offers: ProviderOffer[]) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    let active = true;
+    this.getOffers(filter).then((offers) => {
+      if (active) onUpdate(offers);
+    });
+    return () => {
+      active = false;
+    };
+  }
+
+  subscribeToConversation(
+    conversationId: string,
+    onUpdate: (conversation: Conversation | null) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    let active = true;
+    this.getConversation(conversationId).then((conv) => {
+      if (active) onUpdate(conv);
+    });
+    return () => {
+      active = false;
+    };
   }
 
   subscribeToMessages(
@@ -1811,7 +1853,7 @@ export class LocalRepository implements Repository {
 
   async confirmAppointment(
     appointmentId: string,
-    confirmedByRole: 'customer' | 'provider'
+    _confirmedByRole: 'customer' | 'provider'
   ): Promise<Appointment> {
     const existing = await this.getAppointment(appointmentId);
     if (!existing) {

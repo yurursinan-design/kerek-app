@@ -12,7 +12,6 @@
  */
 
 import { localRepository } from '../src/services/localRepository';
-import { ServiceRequest, Appointment } from '../src/types';
 
 async function runAuditTests() {
   console.log('====================================================');

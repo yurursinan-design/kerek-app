@@ -32,7 +32,6 @@ export const Header: React.FC<HeaderProps> = ({
   onLanguageChange,
   onBack,
   onHomeClick,
-  onDataImported,
   notifications = [],
   unreadCount = 0,
   currentUserId = '',

@@ -1,6 +1,5 @@
 import {
   formatOfferDisplayPrice,
-  Language,
   ProviderOffer,
   ServiceRequest,
 } from '../src/types';
@@ -95,7 +94,6 @@ async function runTests() {
   assert('Fixed display in Russian is "15 000 ₸"', fixedDisplayRu === '15 000 ₸', `Got: ${fixedDisplayRu}`);
   assert('Fixed display in Kazakh is "15 000 ₸"', fixedDisplayKz === '15 000 ₸', `Got: ${fixedDisplayKz}`);
 
-
   // --- TEST 2: From Price Offer ---
   console.log('\n--- 2. Testing From Price Offer ---');
   const fromValid = validateOfferData({
@@ -133,7 +131,6 @@ async function runTests() {
   assert('From display in Russian is "от 10 000 ₸"', fromDisplayRu === 'от 10 000 ₸', `Got: ${fromDisplayRu}`);
   assert('From display in Kazakh is "10 000 ₸ бастап"', fromDisplayKz === '10 000 ₸ бастап', `Got: ${fromDisplayKz}`);
 
-
   // --- TEST 3: Inspection Price Offer ---
   console.log('\n--- 3. Testing Inspection Price Offer ---');
   const inspectionValidNoPrice = validateOfferData({
@@ -162,7 +159,6 @@ async function runTests() {
   assert('Inspection display in Russian is "После осмотра"', inspDisplayRu === 'После осмотра', `Got: ${inspDisplayRu}`);
   assert('Inspection display in Kazakh is "Қарап көрген соң"', inspDisplayKz === 'Қарап көрген соң', `Got: ${inspDisplayKz}`);
 
-
   // --- TEST 4: Invalid priceType rejection ---
   console.log('\n--- 4. Testing Invalid Price Type Validation ---');
   const invalidPriceType = validateOfferData({
@@ -173,7 +169,6 @@ async function runTests() {
     availability: 'Сегодня',
   });
   assert('Validation rejects invalid priceType', !invalidPriceType.valid && invalidPriceType.field === 'priceType');
-
 
   // --- TEST 5: Legacy Offer Compatibility (no priceType) ---
   console.log('\n--- 5. Testing Legacy Offer Compatibility ---');
@@ -218,7 +213,6 @@ async function runTests() {
   };
   assert('Legacy "После осмотра" renders as "После осмотра" in Russian', formatOfferDisplayPrice(legacyInspTextOffer, 'ru') === 'После осмотра');
   assert('Legacy "После осмотра" renders as "Қарап көрген соң" in Kazakh', formatOfferDisplayPrice(legacyInspTextOffer, 'kz') === 'Қарап көрген соң');
-
 
   // --- TEST 6: Accept Offer & Communication Lifecycle ---
   console.log('\n--- 6. Testing Accept Offer & Lifecycle Flow ---');

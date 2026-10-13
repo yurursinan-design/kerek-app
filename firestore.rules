@@ -69,7 +69,7 @@ service cloud.firestore {
     function CONVERSATION_KEYS() {
       return ['id', 'requestId', 'customerId', 'customerName', 'providerId', 'providerUserId', 'providerName', 'status',
         'lastMessageText', 'lastMessageSenderId', 'lastMessageAt', 'unreadCountCustomer', 'unreadCountProvider',
-        'createdAt', 'updatedAt'];
+        'customerLastReadAt', 'providerLastReadAt', 'createdAt', 'updatedAt'];
     }
 
     function isOpenStatus(st) {
@@ -517,11 +517,17 @@ service cloud.firestore {
         incoming().get('providerId', null) == existing().get('providerId', null) &&
         incoming().requestId == existing().requestId &&
         incoming().id == existing().id &&
-        // Participants only move the last-message preview and the unread counters
+        // Participants only move the last-message preview, the unread counters and their own read mark
         incoming().diff(existing()).affectedKeys().hasOnly([
-          'lastMessageText', 'lastMessageSenderId', 'lastMessageAt', 'unreadCountCustomer', 'unreadCountProvider', 'updatedAt'
+          'lastMessageText', 'lastMessageSenderId', 'lastMessageAt', 'unreadCountCustomer', 'unreadCountProvider',
+          'customerLastReadAt', 'providerLastReadAt', 'updatedAt'
         ]) &&
         (!incoming().diff(existing()).affectedKeys().hasAny(['lastMessageSenderId']) || incoming().lastMessageSenderId == request.auth.uid) &&
+        (!incoming().diff(existing()).affectedKeys().hasAny(['customerLastReadAt']) ||
+          (existing().customerId == request.auth.uid && strMax(incoming(), 'customerLastReadAt', 40))) &&
+        (!incoming().diff(existing()).affectedKeys().hasAny(['providerLastReadAt']) ||
+          ((existing().providerUserId == request.auth.uid || existing().get('providerId', null) == request.auth.uid) &&
+           strMax(incoming(), 'providerLastReadAt', 40))) &&
         strMax(incoming(), 'lastMessageText', 300) &&
         incoming().get('unreadCountCustomer', 0) is int && incoming().get('unreadCountCustomer', 0) <= 100000 &&
         incoming().get('unreadCountProvider', 0) is int && incoming().get('unreadCountProvider', 0) <= 100000

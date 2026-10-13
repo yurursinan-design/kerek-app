@@ -1,5 +1,4 @@
 import { parseTextWithGemini } from '../functions/src/geminiParser';
-import { GEMINI_CONFIG } from '../functions/src/config';
 import {
   normalizeCategoryId,
   normalizeCityId,

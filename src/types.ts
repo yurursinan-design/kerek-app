@@ -113,6 +113,8 @@ export interface ExtractedNeed {
   categoryId?: string;
   serviceId?: string;
   service: string;
+  /** Full description: the customer's words plus the details added on the confirmation screen */
+  description?: string;
   date: string;
   budget: string;
   urgency: Urgency;
@@ -454,6 +456,10 @@ export interface Conversation {
 
   unreadCountCustomer: number;
   unreadCountProvider: number;
+
+  /** Time of the newest message each side has seen (the message's own time, so clocks don't matter) */
+  customerLastReadAt?: string;
+  providerLastReadAt?: string;
 
   createdAt: string;
   updatedAt: string;

@@ -7,8 +7,6 @@ import {
 import {
   CANONICAL_CATEGORIES as FRONTEND_CATEGORIES,
   CANONICAL_CITIES as FRONTEND_CITIES,
-  normalizeCategoryId,
-  normalizeCityId,
 } from '../src/services/taxonomy';
 import { GEMINI_CONFIG } from '../functions/src/config';
 import { parseServiceRequest } from '../src/services/aiRequestParser';

@@ -1679,6 +1679,17 @@ async function runTestSuite() {
       await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { lastMessageSenderId: 'prov_a', lastMessageText: 'Клиент: согласен на 50 000' }));
     });
 
+    await test('Each participant sets only their own read mark', async () => {
+      const t = new Date().toISOString();
+      await assertSucceeds(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { customerLastReadAt: t, unreadCountCustomer: 0 }));
+      await assertSucceeds(updateDoc(doc(provA(), 'conversations', 'conv_req_a'), { providerLastReadAt: t, unreadCountProvider: 0 }));
+      const later = new Date(Date.now() + 60000).toISOString();
+      await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { providerLastReadAt: later }));
+      await assertFails(updateDoc(doc(provA(), 'conversations', 'conv_req_a'), { customerLastReadAt: later }));
+      await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { customerLastReadAt: 'x'.repeat(41) }));
+      await assertFails(updateDoc(doc(phoneUser('outsider_x').firestore(), 'conversations', 'conv_req_a'), { customerLastReadAt: later }));
+    });
+
     await test('Messages accept only the known fields', async () => {
       await assertFails(setDoc(doc(custA(), 'conversations', 'conv_req_a', 'messages', 'm1'), {
         id: 'm1', conversationId: 'conv_req_a', requestId: 'req_a', senderId: 'cust_a', senderRole: 'customer', type: 'text', text: 'x', createdAt: new Date().toISOString(), extra: 'x',

@@ -1,8 +1,7 @@
 import assert from 'node:assert';
-import { localRepository } from '../src/services/localRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
-import { ensureFirebaseAuth, auth } from '../src/services/firebase';
-import { Provider, ProviderOffer, ServiceRequest } from '../src/types';
+import { ensureFirebaseAuth } from '../src/services/firebase';
+import { ProviderOffer, ServiceRequest } from '../src/types';
 import { actAs } from './helpers/actors';
 
 // Mock localStorage for node environment
@@ -98,8 +97,6 @@ async function runTest() {
   console.log('✓ Step 5: Provider requests list includes request via missingReqs resolution');
 
   // 6. Test visibleRequests filter logic
-  const pCityId = 'kyzylorda';
-  const pCatId = 'appliance_repair';
   const dismissedReqIds: string[] = [];
 
   const visibleRequests = combinedRequests.filter((r) => {

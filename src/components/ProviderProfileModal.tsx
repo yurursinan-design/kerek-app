@@ -31,6 +31,8 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
 }) => {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [isLoadingReviews, setIsLoadingReviews] = useState<boolean>(false);
+  // Counted on the server over all reviews (the list below shows the newest ones)
+  const [ratingSummary, setRatingSummary] = useState<{ avg: number; count: number } | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -40,6 +42,12 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
       const uId = provider.userId?.trim();
 
       const fetchReviewList = async () => {
+        repository
+          .getRatingSummary([pId, uId || ''])
+          .then((summary) => {
+            if (isMounted) setRatingSummary(summary);
+          })
+          .catch(() => {});
         try {
           const promises = [repository.getReviews({ providerId: pId })];
           if (uId && uId !== pId) {
@@ -64,6 +72,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
       fetchReviewList();
     } else {
       setReviews([]);
+      setRatingSummary(null);
     }
     return () => {
       isMounted = false;
@@ -74,12 +83,14 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
 
   const t = translations[language];
 
-  // Dynamic rating aggregation (strictly computed from verified review docs)
-  const reviewsCount = reviews.length;
-  const averageRating =
-    reviewsCount > 0
-      ? (reviews.reduce((acc, r) => acc + (Number(r.rating) || 0), 0) / reviewsCount).toFixed(1)
-      : null;
+  // Rating from real reviews: the server count over all of them, or the loaded list until it arrives
+  const reviewsCount = ratingSummary ? ratingSummary.count : reviews.length;
+  const ratingAvg = ratingSummary
+    ? ratingSummary.avg
+    : reviews.length > 0
+    ? reviews.reduce((acc, r) => acc + (Number(r.rating) || 0), 0) / reviews.length
+    : 0;
+  const averageRating = reviewsCount > 0 ? ratingAvg.toFixed(1) : null;
 
   // First letter of provider name for clean typography-based avatar
   const initialLetter = (provider.name || '').trim().charAt(0).toUpperCase() || 'M';

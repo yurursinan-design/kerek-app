@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ReportButton } from './ReportButton';
 import {
   formatDynamicBudget,
@@ -9,7 +9,6 @@ import {
   OfferPriceType,
   Provider,
   ProviderOffer,
-  Review,
   ServiceRequest,
 } from '../types';
 import { translations } from '../i18n/translations';
@@ -98,7 +97,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [provider, setProvider] = useState<Provider | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isProfilePreviewOpen, setIsProfilePreviewOpen] = useState(false);
-  const [providerReviews, setProviderReviews] = useState<Review[]>([]);
+  const [providerRating, setProviderRating] = useState<{ avg: number; count: number }>({ avg: 0, count: 0 });
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(null);
 
   // Profile fallbacks used when saving
@@ -111,8 +110,20 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       : 'Ремонт бытовой техники'
   );
 
-  // Requests state (Matching provider's profile)
-  const [requests, setRequests] = useState<ServiceRequest[]>([]);
+  // Open requests of the provider's city (live feed) and, watched one by one, the requests the
+  // provider has offered on (a job they were chosen for is no longer in the open feed)
+  const [feedRequests, setFeedRequests] = useState<ServiceRequest[]>([]);
+  const [offeredRequests, setOfferedRequests] = useState<Record<string, ServiceRequest>>({});
+  const requests = useMemo(() => {
+    const merged = new Map<string, ServiceRequest>();
+    feedRequests.forEach((r) => merged.set(r.id, r));
+    Object.values(offeredRequests).forEach((r) => merged.set(r.id, r));
+    return Array.from(merged.values());
+  }, [feedRequests, offeredRequests]);
+  const patchRequest = (id: string, patch: Partial<ServiceRequest>) => {
+    setFeedRequests((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    setOfferedRequests((prev) => (prev[id] ? { ...prev, [id]: { ...prev[id], ...patch } } : prev));
+  };
   const [dismissedReqIds, setDismissedReqIds] = useState<string[]>([]);
   const [sentOffersMap, setSentOffersMap] = useState<Record<string, ProviderOffer>>({});
   // Same map for the live request feed, which keeps one subscription for the whole screen
@@ -154,6 +165,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [debugError, setDebugError] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<string>('');
   const requestsUnsubscribeRef = useRef<(() => void) | null>(null);
+  const requestWatchersRef = useRef(new Map<string, () => void>());
 
   const handlePriceAmountChange = (val: string) => {
     const digitsOnly = val.replace(/[^\d]/g, '');
@@ -168,6 +180,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   // Load provider profile and matching requests
   useEffect(() => {
     let isMounted = true;
+    let stopOffers: (() => void) | null = null;
+    const watchers = requestWatchersRef.current;
 
     const loadData = async () => {
       const uid = getCurrentUserId();
@@ -186,26 +200,29 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
           setCategory(myProv.category);
         }
 
-        // Load existing offers sent by this provider
-        const myOffers = await repository.getOffers({
-          providerId: myProv.id,
-          providerUserId: myProv.userId || myProv.id,
-        });
-        const offersMap: Record<string, ProviderOffer> = {};
-        myOffers.forEach((o) => {
-          offersMap[o.requestId] = o;
-        });
-
-        offersMapRef.current = offersMap;
-        if (isMounted) {
-          setSentOffersMap(offersMap);
-        }
+        // The provider's offers, live: an accepted or declined offer shows at once, and each
+        // offered request is watched so a job the customer completes or cancels updates here
+        if (!isMounted) return;
+        stopOffers?.();
+        stopOffers = repository.subscribeToOffers(
+          { providerId: myProv.id, providerUserId: myProv.userId || myProv.id },
+          (myOffers) => {
+            if (!isMounted) return;
+            const offersMap: Record<string, ProviderOffer> = {};
+            myOffers.forEach((o) => {
+              offersMap[o.requestId] = o;
+            });
+            offersMapRef.current = offersMap;
+            setSentOffersMap(offersMap);
+            syncRequestWatchers(offersMap);
+          }
+        );
 
         startRequestFeed(myProv, () => isMounted);
 
         try {
-          const revs = await repository.getReviews({ providerId: myProv.id });
-          if (isMounted) setProviderReviews(revs);
+          const rating = await repository.getRatingSummary([myProv.id, myProv.userId || '']);
+          if (isMounted) setProviderRating(rating);
         } catch {}
       } else {
         if (isMounted) {
@@ -222,11 +239,41 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         requestsUnsubscribeRef.current();
         requestsUnsubscribeRef.current = null;
       }
+      stopOffers?.();
+      watchers.forEach((stop) => stop());
+      watchers.clear();
     };
   }, []);
 
-  // Live list of the provider's city requests, plus the requests this provider has offered on
-  // (jobs they were chosen for are no longer in the city feed and are read one by one)
+  // One live watcher per offered request (declined offers lead nowhere and are not watched).
+  // A request the provider can no longer read (another provider chosen, closed) drops out;
+  // nothing is made up in its place.
+  const syncRequestWatchers = (offersMap: Record<string, ProviderOffer>) => {
+    const wanted = new Set(Object.keys(offersMap).filter((id) => offersMap[id]?.status !== 'REJECTED'));
+    const dropFromOffered = (id: string) =>
+      setOfferedRequests((prev) => {
+        if (!(id in prev)) return prev;
+        const { [id]: _gone, ...rest } = prev;
+        return rest;
+      });
+    requestWatchersRef.current.forEach((stop, id) => {
+      if (wanted.has(id)) return;
+      stop();
+      requestWatchersRef.current.delete(id);
+      dropFromOffered(id);
+    });
+    wanted.forEach((id) => {
+      if (requestWatchersRef.current.has(id)) return;
+      const stop = repository.subscribeToRequest(id, (req) => {
+        if (!mountedRef.current) return;
+        if (req) setOfferedRequests((prev) => ({ ...prev, [id]: req }));
+        else dropFromOffered(id);
+      });
+      requestWatchersRef.current.set(id, stop);
+    });
+  };
+
+  // Live list of the provider's city requests (open ones; offered requests are watched separately)
   const startRequestFeed = (myProv: Provider, isAlive: () => boolean) => {
     // Clean up previous subscription if any
     if (requestsUnsubscribeRef.current) {
@@ -248,49 +295,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         setDebugError(null);
         setDebugInfo('✅ ' + matchingRequests.length + ' talep bulundu');
 
-        // Requests this provider has offered on stay in the list (the city feed only holds open
-        // requests; a job the provider was chosen for is read on its own). The ref also holds
-        // offers sent after this screen opened.
-        const offersMap = offersMapRef.current;
-        // Declined offers lead nowhere: their requests are not read again on every update
-        const offeredReqIds = Object.keys(offersMap).filter((id) => offersMap[id]?.status !== 'REJECTED');
-        const existingReqIds = new Set(matchingRequests.map((r) => r.id));
-        const missingReqPromises = offeredReqIds
-          .filter((id) => !existingReqIds.has(id))
-          .map(async (id) => {
-            const fetched = await repository.getRequest(id);
-            if (fetched) return fetched;
-            const off = offersMap[id];
-            if (off) {
-              const fallbackReq: ServiceRequest = {
-                id,
-                customerId: '',
-                customerName: language === 'kz' ? 'Клиент' : 'Клиент',
-                requestText: off.message || (language === 'kz' ? 'Өтініш' : 'Заявка клиента'),
-                service: language === 'kz' ? 'Тапсырыс' : 'Услуга',
-                city: myProv.city,
-                cityId: myProv.cityId,
-                category: myProv.category,
-                categoryId: myProv.categoryId,
-                date: language === 'kz' ? 'Бүгін' : 'Сегодня',
-                budget: off.price,
-                urgency: 'normal',
-                status: off.status === 'ACCEPTED' ? 'PROVIDER_SELECTED' : 'OPEN',
-                createdAt: off.createdAt || new Date().toISOString(),
-                selectedOfferId: off.status === 'ACCEPTED' ? off.id : undefined,
-              };
-              return fallbackReq;
-            }
-            return null;
-          });
-
-        const missingReqs = (await Promise.all(missingReqPromises)).filter(
-          (r): r is ServiceRequest => r !== null
-        );
-
-        const combinedRequests = [...matchingRequests, ...missingReqs];
         if (isAlive()) {
-          setRequests(combinedRequests);
+          setFeedRequests(matchingRequests);
         }
       },
       (err: any) => {
@@ -463,7 +469,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       }));
 
       // Ensure the request is always present in requests feed
-      setRequests((prev) => {
+      setFeedRequests((prev) => {
         if (!prev.some((r) => r.id === selectedRequestForOffer.id)) {
           return [selectedRequestForOffer, ...prev];
         }
@@ -510,9 +516,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     try {
       const updated = await repository.updateRequestStatus(requestId, 'IN_PROGRESS');
       if (updated) {
-        setRequests((prev) =>
-          prev.map((r) => (r.id === requestId ? { ...r, status: 'IN_PROGRESS' } : r))
-        );
+        patchRequest(requestId, { status: 'IN_PROGRESS' });
         setNotification(
           language === 'kz'
             ? 'Жұмыс басталды'
@@ -536,9 +540,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       const doneAt = new Date().toISOString();
       const updated = await repository.updateRequest(requestId, { providerDoneAt: doneAt });
       if (updated) {
-        setRequests((prev) =>
-          prev.map((r) => (r.id === requestId ? { ...r, providerDoneAt: doneAt } : r))
-        );
+        patchRequest(requestId, { providerDoneAt: doneAt });
         notificationService.notifyProviderReportedDone(updated).catch(() => {});
         setNotification(
           language === 'kz'
@@ -755,12 +757,12 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     </div>
                   </div>
 
-                  {providerReviews.length > 0 && (
+                  {providerRating.count > 0 && (
                     <div className="pt-1.5 flex items-center gap-2">
                       <div className="inline-flex items-center gap-1 text-xs font-bold text-amber-900 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">
                         <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
                         <span>
-                          {(providerReviews.reduce((a, b) => a + (Number(b.rating) || 0), 0) / providerReviews.length).toFixed(1)} / 5 ({providerReviews.length} {t.reviewsCountUnit})
+                          {providerRating.avg.toFixed(1)} / 5 ({providerRating.count} {t.reviewsCountUnit})
                         </span>
                       </div>
                     </div>

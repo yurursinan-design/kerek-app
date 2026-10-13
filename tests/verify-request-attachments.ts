@@ -2,12 +2,9 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  ServiceRequest,
-  RequestAttachment,
   RequestLocation,
   validateRequestAttachment,
   sanitizeFileName,
-  REQUEST_LIMITS,
   normalizeRequestStatus,
 } from '../src/types';
 import { localRepository } from '../src/services/localRepository';

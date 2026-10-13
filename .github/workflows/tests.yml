@@ -1,5 +1,5 @@
 # Runs the test suites on every Pull Request and on main:
-#   - type check
+#   - type check (strict) and lint (React hooks, TypeScript and correctness rules, oxlint)
 #   - Firestore and Storage security rules tests (emulator)
 #   - verify-* tests against the Firestore, Auth and Storage emulators
 name: Testler
@@ -48,8 +48,8 @@ jobs:
       - name: Bağımlılıkları kur
         run: bun install --frozen-lockfile
 
-      - name: Tip kontrolü
-        run: bun run typecheck
+      - name: Tip kontrolü ve kod denetimi (lint)
+        run: bun run lint
 
       - name: Cloud Functions derleme kontrolü
         run: npm --prefix functions ci && npm --prefix functions run build

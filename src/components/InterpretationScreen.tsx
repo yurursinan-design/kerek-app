@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ExtractedNeed, Language, Urgency, PendingAttachment, RequestLocation } from '../types';
 import { translations } from '../i18n/translations';
 import { ALL_CITIES_LIST } from '../services/analyzer';
-import { SERVICE_CATALOG, getGroup, groupName } from '../data/serviceCatalog';
+import { SERVICE_CATALOG, getGroup, getService, groupName, searchServices } from '../data/serviceCatalog';
 import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { RequestMediaView } from './RequestMediaView';
 import {
@@ -101,7 +101,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
       normalizeCategoryId(initialNeed.category) &&
       normalizeCategoryId(initialNeed.category) !== 'other'
     );
-    setIsEditingManual(!Boolean((initialNeed.confidence ?? 0.95) >= 0.7 && hasCity && hasCat));
+    setIsEditingManual(!((initialNeed.confidence ?? 0.95) >= 0.7 && hasCity && hasCat));
     setFormError(null);
   }, [initialNeed]);
 
@@ -143,16 +143,37 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
     setFormError(null);
 
-    // Merge any user answered clarifications into finalService / description
-    let finalService =
+    // The corrected need is put together in one place: the title stays a short title, added details
+    // go to the full description (nothing is cut off), and catalogue data recognised for another
+    // category or title is not carried over
+    const finalService =
       (service || '').trim() ||
       initialNeed.service ||
       initialNeed.originalQuery ||
       finalCategory;
-
-    if (addedClarifications.length > 0) {
-      finalService = `${finalService} [${addedClarifications.join('; ')}]`;
+    const baseDescription = (initialNeed.description || initialNeed.originalQuery || finalService).trim();
+    const finalDescription = [baseDescription, ...addedClarifications].filter(Boolean).join('\n').slice(0, 5000);
+    const categoryChanged = resolvedCategoryId !== normalizeCategoryId(initialNeed.categoryId || initialNeed.category || '');
+    const serviceEdited = finalService !== (initialNeed.service || '').trim();
+    let serviceId: string | undefined = initialNeed.serviceId;
+    if (serviceId && (serviceEdited || getService(serviceId)?.group.id !== resolvedCategoryId)) serviceId = undefined;
+    if (!serviceId && serviceEdited) {
+      serviceId = searchServices(finalService, 20).find((m) => m.group.id === resolvedCategoryId)?.service.id;
     }
+    const understanding = initialNeed.understanding
+      ? {
+          ...initialNeed.understanding,
+          city: finalCity,
+          cityId: resolvedCityId,
+          category: finalCategory,
+          categoryId: resolvedCategoryId,
+          service: finalService.slice(0, 300),
+          serviceId,
+          description: finalDescription,
+          // Questions were suggested for the category that was recognised, not the chosen one
+          ...(categoryChanged ? { suggestedQuestions: [] } : {}),
+        }
+      : undefined;
 
     onContinue({
       ...initialNeed,
@@ -160,14 +181,16 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
       cityId: resolvedCityId,
       category: finalCategory,
       categoryId: resolvedCategoryId,
+      serviceId,
       service: finalService,
+      description: finalDescription,
       date: (date || '').trim() || initialNeed.date || (language === 'kz' ? 'Бүгін' : 'Сегодня'),
       budget:
         (budget || '').trim() || initialNeed.budget || (language === 'kz' ? 'Келісімді' : 'Договорная'),
       urgency,
       pendingAttachments,
       location,
-      understanding: initialNeed.understanding,
+      understanding,
     });
   };
 

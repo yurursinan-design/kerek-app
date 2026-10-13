@@ -11,7 +11,7 @@ import { allowCall, clientIp, DAY_MS } from './limits';
  *
  * 1. requestLoginCode: the app (signed in anonymously) asks for a code; a 6-digit code is texted
  *    and only its hash is stored in loginCodes/{phone hash} (no client access: default-deny rules).
- * 2. verifyLoginCode: the code is checked (5 tries, 5 minutes). The number is then put on the
+ * 2. verifyLoginCode: the code is checked (5 tries, 10 minutes). The number is then put on the
  *    caller's own account, so requests made before logging in stay theirs, or, when another account
  *    already has this number (the same person on another device), that account is used. Either way
  *    the app gets a custom token and signs in fresh, which also counts as a recent sign-in (needed
@@ -21,7 +21,8 @@ import { allowCall, clientIp, DAY_MS } from './limits';
 const mobizonApiKey = defineSecret('MOBIZON_API_KEY');
 
 const REGION = 'asia-south1';
-const CODE_TTL_MS = 5 * 60 * 1000;
+// 10 minutes: Mobizon may hold a message for moderation for a few minutes before delivering it
+const CODE_TTL_MS = 10 * 60 * 1000;
 const MAX_TRIES = 5;
 /** All SMS sent by the app in one day; protects the Mobizon balance from abuse */
 const GLOBAL_DAILY_SMS = 1000;

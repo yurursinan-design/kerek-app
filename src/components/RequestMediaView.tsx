@@ -39,6 +39,8 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
   location = coords ? { ...(location as RequestLocation), ...coords } : undefined;
   const hasAttachments = Boolean(attachments && attachments.length > 0);
   const hasLocation = Boolean(coords);
+  // Hooks run on every render, before the early return below
+  const mediaUrls = useMediaUrls((attachments || []) as Array<RequestAttachment & { previewUrl?: string }>);
 
   if (!hasAttachments && !hasLocation) {
     return null;
@@ -61,7 +63,6 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
     (a) => a.type === 'audio' || (a as PendingAttachment).mediaType === 'audio'
   );
 
-  const mediaUrls = useMediaUrls((attachments || []) as Array<RequestAttachment & { previewUrl?: string }>);
   const getMediaUrl = (item: RequestAttachment | PendingAttachment): string => mediaUrls[item.id] || '';
 
   const getMediaName = (item: RequestAttachment | PendingAttachment): string => {

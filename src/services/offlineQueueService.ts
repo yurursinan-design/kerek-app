@@ -142,7 +142,7 @@ export class OfflineQueueService {
       } else {
         memoryQueueStore = queue;
       }
-    } catch (e) {
+    } catch {
       memoryQueueStore = queue;
     }
     this.notifyListeners();

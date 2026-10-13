@@ -6,7 +6,7 @@ import {
   getCityDisplayName,
 } from '../src/services/taxonomy';
 import { LocalRepository } from '../src/services/localRepository';
-import { ExtractedNeed, ServiceRequest } from '../src/types';
+import { ServiceRequest } from '../src/types';
 
 // Mock localStorage
 const storage: Record<string, string> = {};

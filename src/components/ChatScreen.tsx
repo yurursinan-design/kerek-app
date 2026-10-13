@@ -65,7 +65,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const [, setUploadProgress] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Attachment state
@@ -144,7 +144,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         setIsLoading(false);
         setErrorMessage(
           err?.message?.includes('OPEN requests')
-            ? t.chatOpenWarning
+            ? translations[language].chatOpenWarning
             : getFriendlyErrorMessage(err, language)
         );
       }
@@ -159,13 +159,29 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           unsubscribe();
         } catch {}
       }
-      if (pendingAttachment?.previewUrl) {
+    };
+  }, [requestId, language]);
+
+  // A photo picked but not sent is freed when it is replaced (below) or the chat closes
+  useEffect(() => {
+    const url = pendingAttachment?.previewUrl || null;
+    return () => {
+      if (url) {
         try {
-          URL.revokeObjectURL(pendingAttachment.previewUrl);
+          URL.revokeObjectURL(url);
         } catch {}
       }
     };
-  }, [requestId, language]);
+  }, [pendingAttachment]);
+
+  // Live conversation: the other side's read mark turns sent ticks into double ticks
+  const conversationId = conversation?.id;
+  useEffect(() => {
+    if (!conversationId) return;
+    return repository.subscribeToConversation(conversationId, (conv) => {
+      if (conv) setConversation(conv);
+    });
+  }, [conversationId]);
 
   const handleFileSelected = (file: File, forcedType?: 'image' | 'file') => {
     setIsAttachmentMenuOpen(false);
@@ -297,6 +313,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     : conversation
     ? currentUid === conversation.customerId || (Boolean(auth?.currentUser?.uid) && auth?.currentUser?.uid === conversation.customerId)
     : true;
+  const otherLastReadAt = isCustomer ? conversation?.providerLastReadAt : conversation?.customerLastReadAt;
   const otherPartyName = conversation
     ? isCustomer
       ? conversation.providerName || t.chatParticipantMaster
@@ -568,7 +585,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                   >
                     <span>{formatMessageTime(msg.createdAt)}</span>
                     {isMe && (
-                      msg.isRead ? (
+                      msg.isRead || Boolean(otherLastReadAt && msg.createdAt <= otherLastReadAt) ? (
                         <CheckCheck className="w-3.5 h-3.5 text-emerald-300" />
                       ) : (
                         <Check className="w-3.5 h-3.5 text-sky-200" />

@@ -7,12 +7,8 @@
 import {
   isValidWorkStatusTransition,
   getNextWorkStatus,
-  WorkStatus,
-  ServiceRequest,
-  Provider,
 } from '../src/types';
 import { localRepository } from '../src/services/localRepository';
-import { resilientRepository } from '../src/services/resilientRepository';
 import { notificationService } from '../src/services/notificationService';
 
 function assert(condition: boolean, msg: string) {
@@ -384,7 +380,7 @@ async function runTests() {
   let afterCancelError = false;
   try {
     await localRepository.updateWorkStatus(appt2.id, 'WORK_STARTED', providerUserId);
-  } catch (err: any) {
+  } catch {
     afterCancelError = true;
   }
   assert(afterCancelError, '6.2 Further updates after CANCELLED are rejected');

@@ -3,11 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   getConversationId,
-  Conversation,
-  ChatMessage,
-  ServiceRequest,
-  ProviderOffer,
-  Provider,
 } from '../src/types';
 import { localRepository } from '../src/services/localRepository';
 

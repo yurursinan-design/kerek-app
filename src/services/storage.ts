@@ -464,11 +464,23 @@ export function clearAllKerekLocalStorage(): string[] {
 /** Settings that are not personal and survive logout: screen language and customer/provider mode. */
 const KEEP_ON_LOGOUT = ['kerek_language_v1', 'kerek_app_mode_v1'];
 
+const personalDataClearHooks: Array<() => void> = [];
+
+/** Lets in-memory copies of the user's data (device store) be emptied together with the stored copy. */
+export function onPersonalDataCleared(hook: () => void): void {
+  personalDataClearHooks.push(hook);
+}
+
 /**
  * Removes this device's copy of the user's data (requests, offers, chats, contacts, location,
  * queued changes) on logout or account deletion, so the next person on the phone can't read it.
  */
 export function clearPersonalLocalData(): void {
+  personalDataClearHooks.forEach((hook) => {
+    try {
+      hook();
+    } catch {}
+  });
   try {
     const keys: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {

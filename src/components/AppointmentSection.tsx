@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Appointment,
   AppointmentStatus,
@@ -70,9 +70,14 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   })();
+  // The date field starts at today (set once when the section opens)
+  const todayRef = useRef(localToday);
   useEffect(() => {
-    setDateStr(localToday);
+    setDateStr(todayRef.current);
   }, []);
+  // Latest callback from the parent, without re-subscribing when the parent re-renders
+  const onChangedRef = useRef(onAppointmentChanged);
+  onChangedRef.current = onAppointmentChanged;
 
   // Subscribe to appointment changes
   useEffect(() => {
@@ -85,9 +90,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
         if (!isMounted) return;
         setAppointment(appt);
         setLoading(false);
-        if (onAppointmentChanged) {
-          onAppointmentChanged(appt);
-        }
+        onChangedRef.current?.(appt);
       },
       (err) => {
         console.warn('[AppointmentSection] subscription note:', err);

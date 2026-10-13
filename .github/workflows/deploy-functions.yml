@@ -1,7 +1,8 @@
 # Uploads selected Cloud Functions before a full release, e.g. the SMS login functions so they can
 # be tried on the preview and the Android test app. Runs only for a commit on a claude/** branch
-# whose message contains "[deploy-functions]", and only the functions listed in ONLY (never the
-# website or the database rules; those go live with deploy.yml after "canlıya al").
+# whose message starts with "[deploy-functions]" (a mention further down doesn't count), and only
+# the functions listed in ONLY (never the website or the database rules; those go live with
+# deploy.yml after "canlıya al").
 name: Fonksiyonları yükle
 
 on:
@@ -22,7 +23,7 @@ env:
 
 jobs:
   deploy:
-    if: contains(github.event.head_commit.message, '[deploy-functions]')
+    if: startsWith(github.event.head_commit.message, '[deploy-functions]')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

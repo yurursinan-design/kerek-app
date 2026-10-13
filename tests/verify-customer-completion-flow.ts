@@ -13,7 +13,7 @@ import { localRepository, setCurrentUserId } from '../src/services/localReposito
 import { firebaseRepository } from '../src/services/firebaseRepository';
 import { matchProviders } from '../src/services/matchingService';
 import { analyzeRequestUnderstanding } from '../src/services/requestUnderstanding';
-import { ServiceRequest, ProviderOffer } from '../src/types';
+import { ServiceRequest } from '../src/types';
 
 async function runCustomerCompletionFlowTests() {
   console.log('====================================================');

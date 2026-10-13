@@ -1,7 +1,5 @@
 import assert from 'node:assert';
 import { db, auth, ensureFirebaseAuth } from '../src/services/firebase';
-import { firebaseRepository } from '../src/services/firebaseRepository';
-import { localRepository } from '../src/services/localRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { actAs } from './helpers/actors';

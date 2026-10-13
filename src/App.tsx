@@ -376,7 +376,7 @@ export default function App() {
         id: targetRequestId,
         customerId: currentUserId,
         requestText: text,
-        description: text,
+        description: updatedNeed.description?.trim() || text,
         city,
         cityId,
         category,

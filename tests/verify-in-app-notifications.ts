@@ -1,11 +1,10 @@
 import { localRepository } from '../src/services/localRepository';
-import { firebaseRepository } from '../src/services/firebaseRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
 import { notificationService } from '../src/services/notificationService';
 import { ensureFirebaseAuth, auth, db, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { signInAnonymously } from 'firebase/auth';
-import { collection, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
-import { AppNotification, ServiceRequest, ProviderOffer, Conversation, ChatMessage } from '../src/types';
+import { doc, setDoc } from 'firebase/firestore';
+import { AppNotification, ProviderOffer, Conversation, ChatMessage } from '../src/types';
 
 async function runNotificationsVerification() {
   console.log('====================================================');
@@ -247,7 +246,7 @@ async function runNotificationsVerification() {
         createdAt: new Date().toISOString(),
         // No valid request or offer backing this write!
       });
-    } catch (secErr: any) {
+    } catch {
       securityBlocked = true;
     }
 
@@ -276,7 +275,7 @@ async function runNotificationsVerification() {
   // --- Test 11: Realtime listener subscription & unsubscribe ---
   let receivedUpdatesCount = 0;
   const testSubUser = `user_sub_${Date.now()}`;
-  const unsub = localRepository.subscribeToNotifications(testSubUser, (items) => {
+  const unsub = localRepository.subscribeToNotifications(testSubUser, () => {
     receivedUpdatesCount++;
   });
 
