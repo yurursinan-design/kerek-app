@@ -6,6 +6,14 @@ import { LEGAL_VERSION } from '../data/legalTexts';
 import { clearPersonalLocalData } from './storage';
 
 /** Deleting an account needs a recent sign-in (Firebase rule); older sessions confirm by SMS again. */
+/** A provider with a job in progress can't delete the account until the job is finished or cancelled. */
+export class ActiveJobsError extends Error {
+  constructor() {
+    super('active-jobs');
+    this.name = 'ActiveJobsError';
+  }
+}
+
 export class RecentLoginRequiredError extends Error {
   constructor() {
     super('auth/requires-recent-login');
@@ -67,6 +75,17 @@ export async function deleteMyAccount(): Promise<void> {
   const firestore = db;
   const now = new Date().toISOString();
 
+  // A customer would be left with a job whose provider no longer exists
+  const accepted = await getDocs(
+    query(collection(firestore, 'offers'), where('providerUserId', '==', uid), where('status', '==', 'ACCEPTED'))
+  );
+  for (const offer of accepted.docs) {
+    const req = await getDoc(doc(firestore, 'requests', String(offer.data().requestId || '-')));
+    if (req.exists() && ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'].includes(req.data().status)) {
+      throw new ActiveJobsError();
+    }
+  }
+
   const requests = await getDocs(query(collection(firestore, 'requests'), where('customerId', '==', uid)));
   for (const snap of requests.docs) {
     const data = snap.data();
@@ -77,8 +96,10 @@ export async function deleteMyAccount(): Promise<void> {
     // Photos, videos and voice notes go, then the name, text and location in the request itself
     await deleteRequestFiles(snap.id, Array.isArray(data.attachments) ? data.attachments.length : 0);
     const personal = ['customerName', 'requestText', 'description', 'attachments', 'location', 'understanding'].filter((k) => k in data);
-    if (personal.length) {
-      await updateDoc(snap.ref, { ...Object.fromEntries(personal.map((k) => [k, deleteField()])), updatedAt: now });
+    // The short title can echo the customer's own words; it becomes the category name
+    const titleUpdate = typeof data.category === 'string' && data.service !== data.category ? { service: data.category } : {};
+    if (personal.length || Object.keys(titleUpdate).length) {
+      await updateDoc(snap.ref, { ...Object.fromEntries(personal.map((k) => [k, deleteField()])), ...titleUpdate, updatedAt: now });
     }
   }
 

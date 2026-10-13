@@ -19,7 +19,7 @@ export function getRequestTitle(
   const catalog = getService(req.serviceId);
   if (catalog) return serviceName(catalog.service, language);
 
-  const stored = (req.service || '').trim();
+  const stored = (typeof req.service === 'string' ? req.service : '').trim();
   const key = `${req.id}|${language}|${stored}`;
   const hit = cache.get(key);
   if (hit !== undefined) return hit;

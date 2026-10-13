@@ -220,13 +220,15 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
         district: district.trim(),
         category: category.trim(),
         serviceIds,
-        services:
+        // Free-text summary (the service ids are the real data); capped at the 1000-character limit
+        services: (
           services.trim() ||
           serviceIds
             .map((id) => getService(id))
             .filter(Boolean)
             .map((x) => serviceName(x!.service, language))
-            .join(', '),
+            .join(', ')
+        ).slice(0, 1000),
         priceRange: priceRange.trim(),
         workingHours: workingHours.trim() || '09:00 - 20:00',
         experienceYears: expYears,

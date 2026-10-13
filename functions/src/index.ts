@@ -198,6 +198,15 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
       const seen = new Set<string>();
       const providersSnap = { docs: [...byList.docs, ...byMain.docs].filter((d) => !seen.has(d.id) && (seen.add(d.id), true)) };
 
+      // Events can be delivered more than once: notices that already exist are left as they are
+      // (a provider may have read them)
+      const candidateRefs = providersSnap.docs.map((d) => db.collection('notifications').doc(`notif_new_request_${requestId}_${d.id}`));
+      const existing = new Set<string>();
+      for (let i = 0; i < candidateRefs.length; i += 100) {
+        const snaps = await db.getAll(...candidateRefs.slice(i, i + 100));
+        snaps.forEach((s) => s.exists && existing.add(s.id));
+      }
+
       // A Firestore batch holds at most 500 writes, so notifications are written in chunks
       const BATCH_LIMIT = 450;
       let batch = db.batch();
@@ -215,6 +224,7 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
         if (providerData.blocked === true || providerData.hidden === true) continue;
 
         const notifId = `notif_new_request_${requestId}_${providerId}`;
+        if (existing.has(notifId)) continue;
         const notifRef = db.collection('notifications').doc(notifId);
 
         batch.set(
@@ -237,8 +247,7 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
             isRead: false,
             readAt: null,
             createdAt: now,
-          },
-          { merge: true }
+          }
         );
         count++;
         inBatch++;

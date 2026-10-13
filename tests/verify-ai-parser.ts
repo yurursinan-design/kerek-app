@@ -150,10 +150,10 @@ async function runTests() {
       typeof response.error?.message === 'string'
   );
 
-  console.log('\n=============================================');
-  console.log('ALL AI PARSER TESTS PASSED SUCCESSFULLY');
-  console.log('=============================================\n');
-  process.exit(0);
+  const failed = process.exitCode === 1;
+  console.log(failed ? '\nSOME CHECKS FAILED (see [FAIL] lines above)\n' : '\nALL AI PARSER TESTS PASSED\n');
+  // Exit with the real result: a [FAIL] above must fail the run
+  process.exit(failed ? 1 : 0);
 }
 
 runTests().catch((err) => {

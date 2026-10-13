@@ -22,7 +22,7 @@ import { InAppToast } from './components/InAppToast';
 import { PhoneLoginModal, PhoneLoginReason } from './components/PhoneLoginModal';
 import { onAuthStateChanged } from 'firebase/auth';
 import { logoutToAnonymous, requiresPhoneLogin } from './services/phoneAuth';
-import { deleteMyAccount, RecentLoginRequiredError } from './services/account';
+import { ActiveJobsError, deleteMyAccount, RecentLoginRequiredError } from './services/account';
 import { generateRequestId } from './services/ids';
 import { localRepository } from './services/localRepository';
 import {
@@ -136,6 +136,14 @@ export default function App() {
           handleDeleteAccount();
         };
         setPhoneLogin('delete');
+        return;
+      }
+      if (err instanceof ActiveJobsError) {
+        setAppError(
+          language === 'kz'
+            ? 'Сізде аяқталмаған жұмыс бар. Алдымен оны аяқтаңыз немесе тапсырыс берушімен келісіп болдырмаңыз.'
+            : 'У вас есть незавершённая работа. Сначала завершите её или отмените по договорённости с заказчиком.'
+        );
         return;
       }
       setAppError(getFriendlyErrorMessage(err, language));

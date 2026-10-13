@@ -256,7 +256,8 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
     setActionError(null);
 
     try {
-      const updated = await repository.updateRequestStatus(request.id, 'COMPLETED');
+      // Same atomic completion as the appointment section: request and appointment together
+      const { request: updated } = await repository.confirmCustomerCompletion(request.id);
       if (updated) {
         const fresh = (await repository.getRequest(request.id)) || updated;
         const normalized = { ...fresh, status: normalizeRequestStatus(fresh.status) };

@@ -1,7 +1,8 @@
 /**
  * Photos are redrawn before upload. This drops hidden metadata (EXIF: GPS position, camera,
  * owner name) that would otherwise reveal the customer's exact address to every provider, and
- * shrinks very large photos. Outside a browser, or if anything fails, the original is kept.
+ * shrinks very large photos. If that fails the photo is not uploaded (the caller shows an error);
+ * outside a browser (tests) the original is used.
  */
 const MAX_SIDE = 2560;
 
@@ -15,13 +16,14 @@ export async function cleanImageForUpload(blob: Blob): Promise<Blob> {
     canvas.width = Math.round(bitmap.width * scale);
     canvas.height = Math.round(bitmap.height * scale);
     const ctx = canvas.getContext('2d');
-    if (!ctx) return blob;
+    if (!ctx) throw new Error('image-clean-failed');
     ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close?.();
     const type = blob.type === 'image/png' ? 'image/png' : 'image/jpeg';
     const out = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, 0.86));
-    return out && out.size > 0 ? out : blob;
+    if (!out || out.size === 0) throw new Error('image-clean-failed');
+    return out;
   } catch {
-    return blob;
+    throw new Error('image-clean-failed');
   }
 }

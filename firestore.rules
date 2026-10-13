@@ -48,6 +48,7 @@ service cloud.firestore {
       return strMax(m, 'requestText', 5000) && strMax(m, 'description', 5000)
         && strMax(m, 'customerName', 100) && strMax(m, 'budget', 100)
         && strMax(m, 'date', 100) && strMax(m, 'urgency', 20)
+        && strMax(m, 'service', 150) && strMax(m, 'category', 100) && strMax(m, 'city', 50)
         && strMax(m, 'cityId', 64) && strMax(m, 'categoryId', 64) && strMax(m, 'serviceId', 64);
     }
 
@@ -153,6 +154,9 @@ service cloud.firestore {
                     && incoming().keys().hasOnly(PROVIDER_KEYS())
                     && noTrustBadges(incoming())
                     && falseOrAbsent(incoming(), 'blocked') && falseOrAbsent(incoming(), 'hidden') && falseOrAbsent(incoming(), 'isDemo')
+                    // Operator bans live in bans/{uid} (console only), so deleting and recreating the
+                    // profile doesn't lift a block
+                    && !exists(/databases/$(database)/documents/bans/$(request.auth.uid))
                     && providerFieldLimits(incoming());
       allow update: if hasVerifiedPhone()
                     && isValidId(providerId)
@@ -309,7 +313,8 @@ service cloud.firestore {
         (existing().customerId == request.auth.uid &&
          incoming().customerId == existing().customerId &&
          incoming().status == existing().status &&
-         changed.hasOnly(['customerName', 'requestText', 'description', 'attachments', 'location', 'understanding', 'updatedAt']) &&
+         changed.hasOnly(['customerName', 'requestText', 'description', 'attachments', 'location', 'understanding', 'service', 'updatedAt']) &&
+         (incoming().get('service', '') == existing().get('service', '') || incoming().get('service', '') == existing().get('category', '')) &&
          changed.hasAny(['customerName', 'requestText', 'description', 'attachments', 'location', 'understanding']) &&
          !('customerName' in incoming()) && !('requestText' in incoming()) && !('description' in incoming()) &&
          !('attachments' in incoming()) && !('location' in incoming()) && !('understanding' in incoming()))
@@ -634,7 +639,7 @@ service cloud.firestore {
             && t in ['CUSTOMER_APPOINTMENT_CREATED', 'CUSTOMER_APPOINTMENT_UPDATED', 'CUSTOMER_APPOINTMENT_CANCELLED',
                      'PROVIDER_APPOINTMENT_CREATED', 'PROVIDER_APPOINTMENT_UPDATED', 'PROVIDER_APPOINTMENT_CANCELLED',
                      'CUSTOMER_PROVIDER_ON_THE_WAY', 'CUSTOMER_PROVIDER_ARRIVED', 'CUSTOMER_WORK_STARTED',
-                     'PROVIDER_WORK_STATUS_UPDATED']
+                     'CUSTOMER_WORK_COMPLETED', 'PROVIDER_WORK_STATUS_UPDATED']
             && req.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS']);
     }
 
@@ -697,6 +702,11 @@ service cloud.firestore {
 
       // The recipient can clear their own notifications
       allow delete: if isSignedIn() && isValidId(notificationId) && resource.data.recipientUserId == request.auth.uid;
+    }
+
+    // Operator bans (document id = user id), managed in the Firebase console only
+    match /bans/{uid} {
+      allow read, write: if false;
     }
 
     // =================== Reports Collection ===================
@@ -832,8 +842,9 @@ service cloud.firestore {
                       (resource.data.status == 'CONFIRMED' && incoming().status in ['CONFIRMED', 'RESCHEDULED', 'CANCELLED', 'COMPLETED']) ||
                       (resource.data.status == 'RESCHEDULED' && incoming().status in ['RESCHEDULED', 'CONFIRMED', 'CANCELLED']) ||
                       (resource.data.status == 'COMPLETED' && incoming().status == 'COMPLETED') ||
-                      (resource.data.status == 'CANCELLED' && incoming().status == 'CANCELLED')
+                      (resource.data.status == 'CANCELLED' && incoming().status in ['CANCELLED', 'PROPOSED'])
                     )
+                    && (incoming().scheduledAt == resource.data.scheduledAt || incoming().status in ['PROPOSED', 'RESCHEDULED'])
                     // A proposed or rescheduled time is confirmed by the other side, not by whoever proposed it
                     && (
                       incoming().status != 'CONFIRMED' || resource.data.status == 'CONFIRMED' ||

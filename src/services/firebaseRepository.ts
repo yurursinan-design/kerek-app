@@ -266,7 +266,7 @@ export class FirebaseRepository implements Repository {
       priceRange: providerData.priceRange?.trim() || '',
       workingHours: providerData.workingHours?.trim() || '09:00 - 20:00',
       description: providerData.description?.trim() || '',
-      ...(providerData.experienceYears !== undefined && providerData.experienceYears > 0
+      ...(typeof providerData.experienceYears === 'number' && providerData.experienceYears >= 0
         ? { experienceYears: providerData.experienceYears }
         : {}),
       availability: providerData.availability || providerData.workingHours || '09:00 - 20:00',
@@ -455,7 +455,11 @@ export class FirebaseRepository implements Repository {
 
       // Privacy: phone number and exact location live in the restricted requestContacts document
       let customerPhone: string | undefined = undefined;
-      if (requestData.customerPhone && requestData.customerPhone.trim()) {
+      // The SMS-verified number of the signed-in customer, so the chosen provider can call them
+      const verifiedPhone = auth?.currentUser?.phoneNumber || '';
+      if (verifiedPhone) {
+        customerPhone = verifiedPhone;
+      } else if (requestData.customerPhone && requestData.customerPhone.trim()) {
         customerPhone = requestData.customerPhone.trim();
       }
       if (customerPhone || newRequest.location) {
@@ -677,7 +681,8 @@ export class FirebaseRepository implements Repository {
           const q = query(
             requestsColl,
             where('cityId', '==', targetCityId),
-            where('categoryId', '==', targetCatId)
+            where('categoryId', '==', targetCatId),
+            where('status', 'in', PROVIDER_VISIBLE_STATUSES)
           );
           snap = await getDocs(q);
 
@@ -687,7 +692,8 @@ export class FirebaseRepository implements Repository {
               const qLegacy = query(
                 requestsColl,
                 where('cityId', '==', targetCityId),
-                where('categoryId', '==', 'appliance_repair')
+                where('categoryId', '==', 'appliance_repair'),
+                where('status', 'in', PROVIDER_VISIBLE_STATUSES)
               );
               const snapLegacy = await getDocs(qLegacy);
               const existingIds = new Set(snap.docs.map((d) => d.id));

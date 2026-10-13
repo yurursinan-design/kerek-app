@@ -480,7 +480,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                   {/* Attachments rendering */}
                   {hasAttachments && (
                     <div className="space-y-2 mb-2">
-                      {msg.attachments!.map((att) => {
+                      {msg.attachments!.filter((att) => att && typeof att === 'object').map((att) => {
                         if (att.type === 'image') {
                           return (
                             <div key={att.id} className="relative group overflow-hidden rounded-xl bg-slate-900/10">

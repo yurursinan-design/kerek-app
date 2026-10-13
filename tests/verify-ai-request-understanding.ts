@@ -442,7 +442,7 @@ async function runAllTests() {
   if (failCount > 0) {
     process.exit(1);
   } else {
-    process.exit(0);
+    process.exit(process.exitCode === 1 ? 1 : 0);
   }
 }
 

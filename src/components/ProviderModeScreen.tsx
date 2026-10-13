@@ -343,6 +343,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         workingHours: (providerData.workingHours || '').trim() || '09:00 - 20:00',
         experienceYears: expYears,
         description: (providerData.description || '').trim(),
+        ...(providerData.tradeLicense ? { tradeLicense: String(providerData.tradeLicense).trim() } : {}),
         verified: isAlreadyVerified, // Secure: false for new providers!
         isDemo: false,
       });

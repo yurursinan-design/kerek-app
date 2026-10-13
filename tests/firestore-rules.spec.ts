@@ -1809,6 +1809,58 @@ async function runTestSuite() {
       await assertSucceeds(updateDoc(doc(phoneUser('prov_ap').firestore(), 'appointments', 'appointment_req_ap'), confirm));
     });
 
+    // ---------------- 20. Second audit ----------------
+    await test('Audit 2: banned user cannot recreate a provider profile', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'bans', 'prov_banned'), { reason: 'fraud' });
+      });
+      const profile = { id: 'prov_banned', userId: 'prov_banned', name: 'B', phone: '+77011112233', city: 'Алматы', cityId: 'almaty', category: 'x', categoryId: 'plumbing' };
+      await assertFails(setDoc(doc(phoneUser('prov_banned').firestore(), 'providers', 'prov_banned'), profile));
+      await assertFails(getDoc(doc(phoneUser('prov_banned').firestore(), 'bans', 'prov_banned')));
+    });
+
+    await test('Audit 2: request title must be text', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'requests', 'req_svc'), {
+          id: 'req_svc', customerId: 'cust_svc', city: 'Алматы', cityId: 'almaty', category: 'Сантехника', service: 'Кран', status: 'OPEN',
+        });
+      });
+      await assertFails(updateDoc(doc(phoneUser('cust_svc').firestore(), 'requests', 'req_svc'), { service: { x: 1 } }));
+      await assertSucceeds(updateDoc(doc(phoneUser('cust_svc').firestore(), 'requests', 'req_svc'), { service: 'Кран ағады' }));
+    });
+
+    await test('Audit 2: account deletion may replace the title with the category, nothing else', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'requests', 'req_del2'), {
+          id: 'req_del2', customerId: 'cust_d2', customerName: 'А', city: 'Алматы', cityId: 'almaty', category: 'Сантехника', service: 'Айгүлдің краны', status: 'CANCELLED',
+        });
+      });
+      const db = phoneUser('cust_d2').firestore();
+      await assertFails(updateDoc(doc(db, 'requests', 'req_del2'), { customerName: deleteField(), service: 'Басқа мәтін' }));
+      await assertSucceeds(updateDoc(doc(db, 'requests', 'req_del2'), { customerName: deleteField(), service: 'Сантехника' }));
+    });
+
+    await test('Audit 2: a confirmed time changes only through a new proposal; a cancelled appointment can be proposed again', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        await setDoc(doc(db, 'requests', 'req_ap2'), {
+          id: 'req_ap2', customerId: 'cust_ap2', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-req_ap2-prov_ap2',
+        });
+        await setDoc(doc(db, 'offers', 'OFFER-req_ap2-prov_ap2'), {
+          id: 'OFFER-req_ap2-prov_ap2', requestId: 'req_ap2', providerId: 'prov_ap2', providerUserId: 'prov_ap2', providerName: 'P', price: '1', status: 'ACCEPTED',
+        });
+        const base = { id: 'appointment_req_ap2', requestId: 'req_ap2', customerId: 'cust_ap2', providerId: 'prov_ap2', providerUserId: 'prov_ap2',
+          proposedBy: 'customer', scheduledAt: '2026-10-20T10:00:00.000Z', workStatus: 'NOT_STARTED', createdAt: '2026-10-13T10:00:00.000Z', updatedAt: '2026-10-13T10:00:00.000Z' };
+        await setDoc(doc(db, 'appointments', 'appointment_req_ap2'), { ...base, status: 'CONFIRMED' });
+        await setDoc(doc(db, 'appointments', 'appointment_req_ap3'), { ...base, id: 'appointment_req_ap3', status: 'CANCELLED' });
+      });
+      const cust = phoneUser('cust_ap2').firestore();
+      const later = '2026-10-21T10:00:00.000Z';
+      await assertFails(updateDoc(doc(cust, 'appointments', 'appointment_req_ap2'), { scheduledAt: later, updatedAt: later }));
+      await assertSucceeds(updateDoc(doc(cust, 'appointments', 'appointment_req_ap2'), { scheduledAt: later, status: 'RESCHEDULED', updatedAt: later }));
+      await assertSucceeds(updateDoc(doc(cust, 'appointments', 'appointment_req_ap3'), { status: 'PROPOSED', scheduledAt: later, updatedAt: later }));
+    });
+
   } finally {
     // Isolated Emulator Cleanup
     console.log('\n--- CLEANUP: Clearing Emulator Data ---');

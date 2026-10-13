@@ -1453,8 +1453,8 @@ export class LocalRepository implements Repository {
 
       const notif: AppNotification = {
         ...notificationData,
-        isRead: false,
-        readAt: null,
+        isRead: notificationData.isRead === true,
+        readAt: notificationData.readAt ?? null,
         createdAt: notificationData.createdAt || new Date().toISOString(),
       };
 
