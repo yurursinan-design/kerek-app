@@ -18,6 +18,23 @@ export {
   notifyOnAppointmentWritten,
   pushOnNotificationCreated,
 } from './notifications';
+// Copy of all personal data in Kazakhstan (Law 94-V art. 12 p. 2); see kzMirror.ts
+export {
+  kzMirrorUsers,
+  kzMirrorProviders,
+  kzMirrorRequests,
+  kzMirrorRequestContacts,
+  kzMirrorOffers,
+  kzMirrorReviews,
+  kzMirrorConversations,
+  kzMirrorMessages,
+  kzMirrorAppointments,
+  kzMirrorNotifications,
+  kzMirrorReports,
+  kzMirrorPushTokens,
+  kzMirrorFileSaved,
+  kzMirrorFileDeleted,
+} from './kzMirror';
 
 const db = getFirestore();
 
