@@ -1,0 +1,79 @@
+# Builds the Android test app (APK) from the same web build and publishes it as the
+# "android-test" pre-release, so it can be downloaded and installed straight on a phone.
+# Test builds are signed with the committed test key (android/app/kerek-debug.keystore);
+# store releases will use a separate private key.
+name: Android
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Firebase web ayarları herkese açıktır (derlenen uygulamanın içinde zaten görünür).
+  VITE_FIREBASE_API_KEY: AIzaSyA2tm7w5In7uV6qEPbfCjSOKZ6Sj2fRoHI
+  VITE_FIREBASE_AUTH_DOMAIN: kerek-9d153.firebaseapp.com
+  VITE_FIREBASE_PROJECT_ID: kerek-9d153
+  VITE_FIREBASE_STORAGE_BUCKET: kerek-9d153.firebasestorage.app
+  VITE_FIREBASE_MESSAGING_SENDER_ID: "24155315039"
+  VITE_FIREBASE_APP_ID: 1:24155315039:web:203f5b6fb4aa78d62574ea
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Bağımlılıkları kur
+        run: bun install --frozen-lockfile
+
+      - name: Web uygulamasını derle
+        run: bun run build
+
+      - name: Android projesine kopyala
+        run: npx cap sync android
+
+      - name: APK oluştur
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Dosyayı adlandır
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk KEREK-test.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KEREK-android-test
+          path: KEREK-test.apk
+          retention-days: 7
+
+      - name: Telefona indirme bağlantısını güncelle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-test --yes --cleanup-tag || true
+          gh release create android-test KEREK-test.apk \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "KEREK Android test sürümü" \
+            --notes "Telefona kurmak için KEREK-test.apk dosyasını indirip açın. Kaynak: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"

@@ -17,12 +17,16 @@
     "dev:emulator": "npx --yes firebase-tools@15.31.0 emulators:exec --project demo-kerek --only firestore,auth \"vite --config vite.emulator.config.ts\""
   },
   "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "8.5.3",
     "firebase": "^12.19.0",
     "lucide-react": "^0.546.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.3",
     "@firebase/rules-unit-testing": "^5.0.2",
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
