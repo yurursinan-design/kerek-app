@@ -10,6 +10,9 @@ N=$(gcloud projects describe $P --format='value(projectNumber)'); RT=$N-compute@
 gcloud services enable secretmanager.googleapis.com iamcredentials.googleapis.com fcm.googleapis.com -q
 for r in cloudfunctions.admin run.admin iam.serviceAccountUser artifactregistry.admin secretmanager.admin eventarc.admin pubsub.admin firebasestorage.admin serviceusage.serviceUsageViewer datastore.viewer datastore.indexAdmin; do gcloud projects add-iam-policy-binding $P --member=serviceAccount:$SA --role=roles/$r --condition=None -q >/dev/null && echo "Yetki: $r"; done
 gcloud iam service-accounts add-iam-policy-binding $RT --member=serviceAccount:$RT --role=roles/iam.serviceAccountTokenCreator -q >/dev/null && echo "Giris anahtari imzalama: tamam"
+# Firestore-triggered functions (notifications): event delivery between Firestore, Eventarc and Cloud Run
+gcloud projects add-iam-policy-binding $P --member=serviceAccount:service-$N@gcp-sa-pubsub.iam.gserviceaccount.com --role=roles/iam.serviceAccountTokenCreator --condition=None -q >/dev/null && echo "Olay iletimi: tamam"
+for r in run.invoker eventarc.eventReceiver; do gcloud projects add-iam-policy-binding $P --member=serviceAccount:$RT --role=roles/$r --condition=None -q >/dev/null && echo "Yetki: $r"; done
 # The functions send push messages to phones (Firebase Cloud Messaging)
 gcloud projects add-iam-policy-binding $P --member=serviceAccount:$RT --role=roles/firebasecloudmessaging.admin --condition=None -q >/dev/null && echo "Telefon bildirimleri: tamam"
 # Pasted from a phone, "read" takes the next pasted line instead of the key: paste the lines above
