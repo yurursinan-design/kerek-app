@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { Language } from '../types';
 import { getLegalDocument, LegalDocId } from '../data/legalTexts';
@@ -9,18 +10,22 @@ interface LegalModalProps {
   onClose: () => void;
 }
 
-/** Full-screen sheet with the privacy policy or the terms of use. */
+/**
+ * Full-screen sheet with the privacy policy or the terms of use. Drawn at the top level of the
+ * page: opened from the account menu or the login dialog, a parent with blur or a transform
+ * would otherwise squeeze it into a thin strip under that menu.
+ */
 export const LegalModal: React.FC<LegalModalProps> = ({ doc, language, onClose }) => {
   if (!doc) return null;
   const content = getLegalDocument(doc, language);
   const closeLabel = language === 'kz' ? 'Жабу' : 'Закрыть';
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="legal-title"
-      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-xs animate-fadeIn"
+      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-xs animate-fadeIn"
     >
       <div className="w-full sm:max-w-lg max-h-[92vh] bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col">
         <div className="flex items-start justify-between gap-3 p-5 pb-3 border-b border-slate-100">
@@ -50,7 +55,8 @@ export const LegalModal: React.FC<LegalModalProps> = ({ doc, language, onClose }
           ))}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
