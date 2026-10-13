@@ -4,6 +4,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  getCountFromServer,
   setDoc,
   updateDoc,
   writeBatch,
@@ -131,6 +132,8 @@ export function normalizeRequestStatus(status?: string): RequestStatus {
 // over time) are left out of provider queries so the provider screen doesn't download all history.
 /** Requests providers of a city can see (firestore.rules isOpenStatus); jobs a provider was chosen for are read one by one. */
 const PROVIDER_VISIBLE_STATUSES = ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'];
+/** Upper bound for one customer's request list (one read per document) */
+const CUSTOMER_REQUESTS_LIMIT = 200;
 
 /** Request fields written when the selected provider reports the job finished. */
 function providerDoneUpdate(req: ServiceRequest, now: string): Partial<ServiceRequest> & { updatedAt: string } {
@@ -673,7 +676,7 @@ export class FirebaseRepository implements Repository {
       if (filter?.customerId) {
         // Customer view: align with authenticated customer ID if available
         const effectiveCustomerId = auth?.currentUser?.uid || filter.customerId;
-        const q = query(requestsColl, where('customerId', '==', effectiveCustomerId));
+        const q = query(requestsColl, where('customerId', '==', effectiveCustomerId), limit(CUSTOMER_REQUESTS_LIMIT));
         snap = await getDocs(q);
       } else if (targetCityId && targetCatId) {
         // Provider view: query by cityId and categoryId conforming to firestore.rules
@@ -728,7 +731,7 @@ export class FirebaseRepository implements Repository {
             // query current user's customer requests on same session/auth UID so they can be viewed
             const currentUid = auth?.currentUser?.uid;
             if (currentUid) {
-              const qUser = query(requestsColl, where('customerId', '==', currentUid));
+              const qUser = query(requestsColl, where('customerId', '==', currentUid), limit(CUSTOMER_REQUESTS_LIMIT));
               snap = await getDocs(qUser);
             } else {
               throw idErr;
@@ -912,7 +915,7 @@ export class FirebaseRepository implements Repository {
       let qPrimary;
       if (filter?.customerId) {
         const effectiveCustomerId = auth?.currentUser?.uid || filter.customerId;
-        qPrimary = query(requestsColl, where('customerId', '==', effectiveCustomerId));
+        qPrimary = query(requestsColl, where('customerId', '==', effectiveCustomerId), limit(CUSTOMER_REQUESTS_LIMIT));
       }
 
       // Provider queries skip finished requests. If the project lacks an index the filtered query
@@ -1229,6 +1232,13 @@ export class FirebaseRepository implements Repository {
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `offers/${id}`);
     }
+  }
+
+  async countOffers(requestId: string): Promise<number> {
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const snap = await getCountFromServer(query(collection(firestore, 'offers'), where('requestId', '==', requestId)));
+    return snap.data().count;
   }
 
   async getOffers(filter?: OfferFilter): Promise<ProviderOffer[]> {

@@ -168,3 +168,8 @@
     transform: none;
   }
 }
+
+/* Dialogs take focus when they open (see dialogA11y.ts); no ring around the whole sheet */
+[role="dialog"]:focus {
+  outline: none;
+}

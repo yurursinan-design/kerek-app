@@ -163,6 +163,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
+                data-dialog-close
                 className="p-1 text-slate-400 hover:text-slate-700 rounded transition-colors"
               >
                 <X className="w-4 h-4" />

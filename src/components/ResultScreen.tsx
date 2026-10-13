@@ -970,6 +970,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
               </div>
               <button
                 onClick={() => setActiveModal(null)}
+                data-dialog-close
                 className="min-h-[44px] min-w-[44px] -mr-2 -mt-2 flex items-center justify-center text-slate-400 hover:text-slate-600"
               >
                 <X className="w-5 h-5" />
@@ -1039,6 +1040,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 type="button"
                 disabled={isSubmittingCompletion}
                 onClick={() => setShowCompletionConfirmModal(false)}
+                data-dialog-close
                 className="flex-1 min-h-[44px] rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 active:scale-[0.99] text-slate-700 font-bold text-xs transition-colors cursor-pointer"
               >
                 {t.btnCancelCompleteWorkModal}

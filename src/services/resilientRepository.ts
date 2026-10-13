@@ -29,6 +29,16 @@ import { notificationService } from './notificationService';
 import { offlineQueueService } from './offlineQueueService';
 
 /**
+ * Saving needs the connection: offline, Firestore would wait silently until the phone is back online
+ * while the screen shows a spinner, so the person is told right away instead.
+ */
+function requireOnline(): void {
+  if (isFirebaseConfigured() && typeof navigator !== 'undefined' && navigator.onLine === false) {
+    throw Object.assign(new Error('offline: no internet connection'), { code: 'unavailable' });
+  }
+}
+
+/**
  * Resilient Repository:
  * Implements the Firebase cloud-with-fallback architecture:
  *
@@ -42,19 +52,25 @@ import { offlineQueueService } from './offlineQueueService';
  * Does not silently lose data.
  * Does not overwrite local data automatically.
  */
+/** The device store, optionally able to keep exact copies of cloud documents (LocalRepository is) */
+type DeviceRepository = Repository & {
+  cacheRequests?(requests: ServiceRequest[]): Promise<void>;
+  cacheOffers?(offers: ProviderOffer[]): Promise<void>;
+};
+
 export class ResilientRepository implements Repository {
-  private localRepoInstance?: Repository;
+  private localRepoInstance?: DeviceRepository;
   private firebaseRepoInstance?: FirebaseRepository;
 
   constructor(
-    localRepo?: Repository,
+    localRepo?: DeviceRepository,
     firebaseRepo?: FirebaseRepository
   ) {
     if (localRepo) this.localRepoInstance = localRepo;
     if (firebaseRepo) this.firebaseRepoInstance = firebaseRepo;
   }
 
-  private get localRepo(): Repository {
+  private get localRepo(): DeviceRepository {
     return this.localRepoInstance || localRepository;
   }
 
@@ -127,6 +143,7 @@ export class ResilientRepository implements Repository {
 
   // =================== Providers ===================
   async createProvider(providerData: Partial<Provider>): Promise<Provider> {
+    requireOnline();
     if (this.firebaseRepo.isAvailable()) {
       try {
         const cloudProv = await this.firebaseRepo.createProvider(providerData);
@@ -162,11 +179,12 @@ export class ResilientRepository implements Repository {
 
   // =================== Requests ===================
   async createRequest(requestData: Partial<ServiceRequest>): Promise<ServiceRequest> {
+    requireOnline();
     if (isFirebaseConfigured()) {
       try {
         const cloudReq = await this.firebaseRepo.createRequest(requestData);
         try {
-          await this.localRepo.createRequest({ ...cloudReq, ...requestData });
+          await this.localRepo.cacheRequests?.([cloudReq]);
         } catch (localErr) {
           console.warn('[ResilientRepository] Local sync note for createRequest:', localErr);
         }
@@ -189,6 +207,7 @@ export class ResilientRepository implements Repository {
     customerId?: string,
     slot?: number
   ): Promise<RequestAttachment> {
+    requireOnline();
     if (this.firebaseRepo.isAvailable()) {
       // Cloud mode uploads only to Cloud Storage. A local fallback would store the file on this
       // device and put a link into the shared request that no provider can open.
@@ -251,12 +270,9 @@ export class ResilientRepository implements Repository {
 
       // Merge cloud and local requests so requests created in either store are available!
       const map = new Map<string, ServiceRequest>();
-      (cloudReqs || []).forEach((r) => {
-        map.set(r.id, r);
-        try {
-          this.localRepo.createRequest(r).catch(() => {});
-        } catch {}
-      });
+      (cloudReqs || []).forEach((r) => map.set(r.id, r));
+      // One write for the whole list, fields kept as they are
+      this.localRepo.cacheRequests?.(cloudReqs || [])?.catch(() => {});
       (localReqs || []).forEach((r) => {
         if (!map.has(r.id)) {
           map.set(r.id, r);
@@ -289,6 +305,7 @@ export class ResilientRepository implements Repository {
     requestId: string,
     updates: Partial<ServiceRequest>
   ): Promise<ServiceRequest | null> {
+    requireOnline();
     const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     let result: ServiceRequest | null = null;
     if (this.firebaseRepo.isAvailable()) {
@@ -306,6 +323,7 @@ export class ResilientRepository implements Repository {
     status: RequestStatus,
     selectedOfferId?: string
   ): Promise<ServiceRequest | null> {
+    requireOnline();
     const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     const canonicalStatus = normalizeRequestStatus(status);
     let result: ServiceRequest | null = null;
@@ -332,11 +350,12 @@ export class ResilientRepository implements Repository {
 
   // =================== Offers ===================
   async createOffer(offerData: Partial<ProviderOffer>): Promise<ProviderOffer> {
+    requireOnline();
     if (isFirebaseConfigured()) {
       try {
         const cloudOffer = await this.firebaseRepo.createOffer(offerData);
         try {
-          await this.localRepo.createOffer({ ...cloudOffer, ...offerData });
+          await this.localRepo.cacheOffers?.([cloudOffer]);
         } catch (localErr) {
           console.warn('[ResilientRepository] Local sync note for createOffer:', localErr);
         }
@@ -356,6 +375,14 @@ export class ResilientRepository implements Repository {
       }).catch(() => {});
     }
     return localOffer;
+  }
+
+  async countOffers(requestId: string): Promise<number> {
+    return this.executeWithFallback(
+      'countOffers',
+      () => this.firebaseRepo.countOffers(requestId),
+      () => this.localRepo.countOffers(requestId)
+    );
   }
 
   async getOffers(filter?: OfferFilter): Promise<ProviderOffer[]> {
@@ -395,6 +422,7 @@ export class ResilientRepository implements Repository {
     offerId: string,
     updates: Partial<ProviderOffer>
   ): Promise<ProviderOffer | null> {
+    requireOnline();
     const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     let result: ProviderOffer | null = null;
     if (this.firebaseRepo.isAvailable()) {
@@ -411,6 +439,7 @@ export class ResilientRepository implements Repository {
     requestId: string,
     offerId: string
   ): Promise<{ request: ServiceRequest | null; offer: ProviderOffer | null }> {
+    requireOnline();
     if (isFirebaseConfigured()) {
       try {
         const result = await this.firebaseRepo.acceptOffer(requestId, offerId);
@@ -436,6 +465,7 @@ export class ResilientRepository implements Repository {
 
   // =================== Reviews ===================
   async createReview(reviewData: Partial<Review>): Promise<Review> {
+    requireOnline();
     const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     const isAnonymousSession = Boolean(
       !auth?.currentUser ||
@@ -554,6 +584,7 @@ export class ResilientRepository implements Repository {
   }
 
   async sendMessage(conversationId: string, messageData: Partial<ChatMessage>): Promise<ChatMessage> {
+    requireOnline();
     const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     if (this.firebaseRepo.isAvailable()) {
       return await this.firebaseRepo.sendMessage(conversationId, messageData);
@@ -570,6 +601,7 @@ export class ResilientRepository implements Repository {
     conversationId: string,
     file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string }
   ): Promise<ChatAttachment> {
+    requireOnline();
     if (this.firebaseRepo.isAvailable()) {
       // Upload strictly to Cloud Storage
       return await this.firebaseRepo.uploadChatAttachment(conversationId, file);
@@ -587,6 +619,7 @@ export class ResilientRepository implements Repository {
       file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string };
     }
   ): Promise<ChatMessage> {
+    requireOnline();
     if (this.firebaseRepo.isAvailable()) {
       return await this.firebaseRepo.sendChatMessageWithAttachment(conversationId, messageData);
     }
@@ -851,6 +884,7 @@ export class ResilientRepository implements Repository {
   async createAppointment(
     appointmentData: Omit<Appointment, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<Appointment> {
+    requireOnline();
     const appt = await this.executeWithFallback(
       'createAppointment',
       () => this.firebaseRepo.createAppointment(appointmentData),
@@ -876,6 +910,7 @@ export class ResilientRepository implements Repository {
   }
 
   async updateAppointment(appointmentId: string, updates: Partial<Appointment>): Promise<Appointment> {
+    requireOnline();
     const updated = await this.executeWithFallback(
       'updateAppointment',
       () => this.firebaseRepo.updateAppointment(appointmentId, updates),
@@ -895,6 +930,7 @@ export class ResilientRepository implements Repository {
     cancelledByRole: 'customer' | 'provider',
     reason?: string
   ): Promise<Appointment> {
+    requireOnline();
     const appt = await this.executeWithFallback(
       'cancelAppointment',
       () => this.firebaseRepo.cancelAppointment(appointmentId, cancelledByRole, reason),
@@ -924,6 +960,7 @@ export class ResilientRepository implements Repository {
     appointmentId: string,
     confirmedByRole: 'customer' | 'provider'
   ): Promise<Appointment> {
+    requireOnline();
     const appt = await this.executeWithFallback(
       'confirmAppointment',
       () => this.firebaseRepo.confirmAppointment(appointmentId, confirmedByRole),
@@ -955,6 +992,7 @@ export class ResilientRepository implements Repository {
     proposedBy: 'customer' | 'provider',
     note?: string
   ): Promise<Appointment> {
+    requireOnline();
     const appt = await this.executeWithFallback(
       'rescheduleAppointment',
       () => this.firebaseRepo.rescheduleAppointment(appointmentId, scheduledAt, proposedBy, note),
@@ -981,6 +1019,7 @@ export class ResilientRepository implements Repository {
   }
 
   async completeAppointment(appointmentId: string): Promise<Appointment> {
+    requireOnline();
     const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     let appt: Appointment;
     if (this.firebaseRepo.isAvailable()) {
@@ -999,6 +1038,7 @@ export class ResilientRepository implements Repository {
     requestId: string,
     appointmentId?: string
   ): Promise<{ request: ServiceRequest; appointment?: Appointment }> {
+    requireOnline();
     const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     if (this.firebaseRepo.isAvailable()) {
       const result = await this.firebaseRepo.confirmCustomerCompletion(requestId, appointmentId);
@@ -1022,6 +1062,7 @@ export class ResilientRepository implements Repository {
     workStatus: WorkStatus,
     providerUserId: string
   ): Promise<Appointment> {
+    requireOnline();
     const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     let appt: Appointment;
     if (this.firebaseRepo.isAvailable()) {

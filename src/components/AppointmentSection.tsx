@@ -834,6 +834,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               <button
                 type="button"
                 onClick={() => setIsCancelDialogOpen(false)}
+                data-dialog-close
                 className="text-slate-400 hover:text-slate-600"
               >
                 <X className="w-4 h-4" />

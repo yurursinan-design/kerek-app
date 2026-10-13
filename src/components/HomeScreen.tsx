@@ -322,7 +322,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   // Attachment removals
   const handleRemoveAttachment = (id: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
+    setAttachments((prev) => {
+      // Free the preview of the removed file
+      const removed = prev.find((a) => a.id === id);
+      if (removed?.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(removed.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
   };
 
   const handleRemoveLocation = () => {

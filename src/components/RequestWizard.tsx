@@ -287,7 +287,10 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
                   <img src={p.previewUrl} alt="" className="w-full h-full object-cover" />
                   <button
                     type="button"
-                    onClick={() => setPhotos((prev) => prev.filter((x) => x.id !== p.id))}
+                    onClick={() => {
+                      if (p.previewUrl.startsWith('blob:')) URL.revokeObjectURL(p.previewUrl);
+                      setPhotos((prev) => prev.filter((x) => x.id !== p.id));
+                    }}
                     className="absolute top-1 right-1 w-6 h-6 rounded-full bg-slate-900/70 text-white flex items-center justify-center"
                     aria-label="×"
                   >

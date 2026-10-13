@@ -615,6 +615,27 @@ export class LocalRepository implements Repository {
     return this.updateRequest(requestId, updates);
   }
 
+  /**
+   * Device copy of documents read from or written to the cloud: stored exactly as they are (same
+   * id, createdAt, selectedOfferId, …), unlike createRequest/createOffer, which make new records.
+   * Many documents are written in one go, so parallel calls can't overwrite each other's work.
+   */
+  async cacheRequests(requests: ServiceRequest[]): Promise<void> {
+    if (!requests.length) return;
+    const all = await this.getAllRequestsRaw();
+    const byId = new Map(all.map((r) => [r.id, r]));
+    for (const r of requests) if (r?.id) byId.set(r.id, { ...byId.get(r.id), ...r });
+    safeStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify([...byId.values()]));
+  }
+
+  async cacheOffers(offers: ProviderOffer[]): Promise<void> {
+    if (!offers.length) return;
+    const all = await this.getAllOffersRaw();
+    const byId = new Map(all.map((o) => [o.id, o]));
+    for (const o of offers) if (o?.id) byId.set(o.id, { ...byId.get(o.id), ...o });
+    safeStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify([...byId.values()]));
+  }
+
   private async getAllRequestsRaw(): Promise<ServiceRequest[]> {
     try {
       const data = safeStorage.getItem(STORAGE_KEY_REQUESTS);
@@ -680,6 +701,10 @@ export class LocalRepository implements Repository {
       logTechnicalError('LocalRepository.createOffer', e);
       throw e;
     }
+  }
+
+  async countOffers(requestId: string): Promise<number> {
+    return (await this.getOffers({ requestId })).length;
   }
 
   async getOffers(filter?: OfferFilter): Promise<ProviderOffer[]> {
@@ -788,12 +813,22 @@ export class LocalRepository implements Repository {
     requestId: string,
     offerId: string
   ): Promise<{ request: ServiceRequest | null; offer: ProviderOffer | null }> {
+    const cleanReqId = (requestId || '').trim();
+    const cleanOfferId = (offerId || '').trim();
+    // Same preconditions as the cloud accept; nothing is written when one of them fails
+    const allOffers = await this.getAllOffersRaw();
+    const target = allOffers.find((o) => o.id === cleanOfferId);
+    const request = await this.getRequest(cleanReqId);
+    if (!target || !request) throw new Error(`Offer not found: ${cleanOfferId}`);
+    if (target.requestId !== cleanReqId) throw new Error('Validation Error: Offer does not belong to this request.');
+    // Accepting the offer that is already the chosen one changes nothing
+    if (request.selectedOfferId === cleanOfferId && target.status === 'ACCEPTED') return { request, offer: target };
+    if (request.selectedOfferId || !['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'].includes(normalizeRequestStatus(request.status))) {
+      throw new Error('Validation Error: Request has already been accepted.');
+    }
+    if ((target.status || 'PENDING') !== 'PENDING') throw new Error('Validation Error: Offer is no longer pending.');
     try {
-      const cleanReqId = (requestId || '').trim();
-      const cleanOfferId = (offerId || '').trim();
-
       // 1. Update all offers for this request
-      const allOffers = await this.getAllOffersRaw();
       let updatedOffer: ProviderOffer | null = null;
 
       for (let i = 0; i < allOffers.length; i++) {
@@ -1142,7 +1177,8 @@ export class LocalRepository implements Repository {
 
   async sendMessage(conversationId: string, messageData: Partial<ChatMessage>): Promise<ChatMessage> {
     const text = (messageData.text || '').trim();
-    if (!text) {
+    const hasAttachment = Array.isArray(messageData.attachments) && messageData.attachments.length > 0;
+    if (!text && !hasAttachment) {
       throw new Error('Validation Error: Message text cannot be empty');
     }
     if (text.length > 2000) {
@@ -1980,4 +2016,4 @@ export class LocalRepository implements Repository {
 }
 
 // Export singleton instance conforming to the Repository interface
-export const localRepository: Repository = new LocalRepository();
+export const localRepository = new LocalRepository();

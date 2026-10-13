@@ -77,6 +77,8 @@ export interface Repository {
   // Offers
   createOffer(offerData: Partial<ProviderOffer>): Promise<ProviderOffer>;
   getOffers(filter?: OfferFilter): Promise<ProviderOffer[]>;
+  /** Number of offers on a request, without downloading them */
+  countOffers(requestId: string): Promise<number>;
   updateOffer(offerId: string, updates: Partial<ProviderOffer>): Promise<ProviderOffer | null>;
   acceptOffer(requestId: string, offerId: string): Promise<{ request: ServiceRequest | null; offer: ProviderOffer | null }>;
 

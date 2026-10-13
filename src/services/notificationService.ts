@@ -16,13 +16,18 @@ import { getCurrentUserId } from './localRepository';
  * Plays a subtle, pleasant chime for incoming in-app notifications using Web Audio API.
  * Gracefully silent if user has not interacted with DOM yet or audio context is unavailable.
  */
+let chimeContext: AudioContext | null = null;
+
 export function playNotificationSound(): void {
   try {
     if (typeof window === 'undefined') return;
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) return;
 
-    const ctx = new AudioContextClass();
+    // One audio context for the whole session (browsers limit how many can be open)
+    chimeContext = chimeContext || new AudioContextClass();
+    const ctx = chimeContext;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     const now = ctx.currentTime;
 
     const osc = ctx.createOscillator();

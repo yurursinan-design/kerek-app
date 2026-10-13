@@ -50,8 +50,8 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
       const entries = await Promise.all(
         requests.map(async (req) => {
           try {
-            const offers = await repository.getOffers({ requestId: req.id });
-            return [req.id, offers.length] as const;
+            // A count query: the offers themselves are not downloaded
+            return [req.id, await repository.countOffers(req.id)] as const;
           } catch {
             return [req.id, 0] as const;
           }

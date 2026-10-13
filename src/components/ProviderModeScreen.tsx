@@ -1267,6 +1267,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               <button
                 type="button"
                 onClick={() => setSelectedRequestForOffer(null)}
+                data-dialog-close
                 className="min-h-[44px] min-w-[44px] -mr-2 -mt-2 flex items-center justify-center text-slate-400 hover:text-slate-600"
               >
                 <X className="w-5 h-5" />
