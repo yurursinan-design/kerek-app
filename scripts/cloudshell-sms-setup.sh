@@ -9,7 +9,9 @@ N=$(gcloud projects describe $P --format='value(projectNumber)'); RT=$N-compute@
 gcloud services enable secretmanager.googleapis.com iamcredentials.googleapis.com -q
 for r in cloudfunctions.admin run.admin iam.serviceAccountUser artifactregistry.admin secretmanager.admin eventarc.admin pubsub.admin firebasestorage.admin serviceusage.serviceUsageViewer; do gcloud projects add-iam-policy-binding $P --member=serviceAccount:$SA --role=roles/$r --condition=None -q >/dev/null && echo "Yetki: $r"; done
 gcloud iam service-accounts add-iam-policy-binding $RT --member=serviceAccount:$RT --role=roles/iam.serviceAccountTokenCreator -q >/dev/null && echo "Giris anahtari imzalama: tamam"
-read -rsp "Mobizon API anahtari (yazarken gorunmez): " K; echo
+# Pasted from a phone, "read" takes the next pasted line instead of the key: paste the lines above
+# first, then this line on its own, and only then the key
+read -rsp "Mobizon API anahtari (yazarken gorunmez): " K; echo; echo "Uzunluk: ${#K}"
 if gcloud secrets describe MOBIZON_API_KEY >/dev/null 2>&1; then printf '%s' "$K" | gcloud secrets versions add MOBIZON_API_KEY --data-file=- -q >/dev/null; else printf '%s' "$K" | gcloud secrets create MOBIZON_API_KEY --data-file=- -q >/dev/null; fi && echo "Mobizon anahtari: kaydedildi"
 gcloud firestore fields ttls update expireAt --collection-group=loginCodes --enable-ttl --async -q >/dev/null 2>&1; gcloud firestore fields ttls update expireAt --collection-group=rateLimits --enable-ttl --async -q >/dev/null 2>&1; echo "Otomatik temizlik: tamam"
 echo "KEREK_SMS_TAMAM"
