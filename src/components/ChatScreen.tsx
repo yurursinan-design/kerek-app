@@ -77,12 +77,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const photoInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Scrolls only the message list: scrollIntoView would also scroll the page and push the chat
+  // header (who you are talking to) under the app's sticky header
   const scrollToBottom = (smooth = true) => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({
-        behavior: smooth ? 'smooth' : 'auto',
-      });
-    }
+    const list = messagesEndRef.current?.parentElement;
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
   };
 
   // Load conversation, request, and subscribe to messages
@@ -356,7 +355,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-70px)] sm:h-[650px] max-w-xl mx-auto bg-slate-50 border border-slate-200/90 rounded-none sm:rounded-3xl shadow-sm overflow-hidden animate-fadeIn relative">
+    <div className="flex flex-col h-[calc(100vh-139px)] supports-[height:100dvh]:h-[calc(100dvh-139px)] sm:h-[650px] max-w-xl mx-auto bg-slate-50 border border-slate-200/90 rounded-none sm:rounded-3xl shadow-sm overflow-hidden animate-fadeIn relative">
       {/* Hidden File Pickers */}
       <input
         ref={photoInputRef}
@@ -404,8 +403,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       )}
 
       {/* Chat Top Header */}
-      <header className="p-3.5 sm:p-4 bg-white border-b border-slate-200/90 flex items-center justify-between shrink-0 shadow-2xs">
-        <div className="flex items-center gap-3">
+      <header className="p-3.5 sm:p-4 bg-white border-b border-slate-200/90 flex items-center justify-between gap-2 shrink-0 shadow-2xs">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
             onClick={onBack}
@@ -415,12 +414,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             <ChevronLeft className="w-5 h-5 stroke-[2.5]" />
           </button>
 
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-sky-600 text-white font-extrabold text-base flex items-center justify-center font-display shadow-xs">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-10 h-10 shrink-0 rounded-2xl bg-sky-600 text-white font-extrabold text-base flex items-center justify-center font-display shadow-xs">
               {otherPartyName.charAt(0).toUpperCase() || 'K'}
             </div>
 
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-sm font-bold text-slate-900 leading-tight">
                   {otherPartyName}
@@ -438,7 +437,15 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             </div>
           </div>
         </div>
-        {conversation?.id && <ReportButton language={language} targetType="conversation" targetId={conversation.id} requestId={requestId} />}
+        {conversation?.id && (
+          <ReportButton
+            language={language}
+            targetType="conversation"
+            targetId={conversation.id}
+            requestId={requestId}
+            className="inline-flex shrink-0 items-center gap-1.5 min-h-[40px] px-2 text-xs font-semibold text-slate-500 hover:text-rose-600"
+          />
+        )}
       </header>
 
       {/* Error Banner */}
