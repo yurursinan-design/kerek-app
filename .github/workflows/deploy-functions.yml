@@ -1,4 +1,4 @@
-# Uploads selected Cloud Functions before a full release, e.g. the SMS login functions so they can
+# Uploads selected Cloud Functions before a full release, e.g. the SMS login and notification functions so they can
 # be tried on the preview and the Android test app. Runs only for a commit on a claude/** branch
 # whose message starts with "[deploy-functions]" (a mention further down doesn't count), and only
 # the functions listed in ONLY (never the website or the database rules; those go live with
@@ -19,7 +19,7 @@ concurrency:
 
 env:
   FIREBASE_PROJECT_ID: kerek-9d153
-  ONLY: functions:requestLoginCode,functions:verifyLoginCode
+  ONLY: functions:requestLoginCode,functions:verifyLoginCode,functions:onNewRequestNotifyProviders,functions:notifyOnOfferCreated,functions:notifyOnOfferUpdated,functions:notifyOnMessageCreated,functions:notifyOnRequestUpdated,functions:notifyOnAppointmentWritten,functions:pushOnNotificationCreated
 
 jobs:
   deploy:
