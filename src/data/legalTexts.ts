@@ -14,9 +14,10 @@
 export const LEGAL_VERSION = '2026-10-13';
 
 export const LEGAL_OPERATOR = {
-  name: 'ИП «КЕРЕК»',
-  // IIN of the entrepreneur (used as BIN), to be filled in when the registration is confirmed
-  iin: '[ЖСН / ИИН]',
+  // Registered 13.10.2026, notification № KZ39UUZ00592012 (УГД по г. Кызылорда)
+  name: 'ИП «КЕРЕК» (Ибрагимова Мадина Нышановна)',
+  // IIN of the entrepreneur, used as the BIN
+  iin: '920104401844',
   city: 'Қызылорда қ. / г. Кызылорда',
   email: '[email]',
 };
