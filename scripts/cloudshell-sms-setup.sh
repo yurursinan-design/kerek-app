@@ -1,5 +1,5 @@
 # One-time setup for SMS login (Mobizon), pasted into Google Cloud Shell by the project owner:
-# - roles that let GitHub (github-deploy) upload Cloud Functions and storage rules
+# - roles that let GitHub (github-deploy) upload Cloud Functions, storage rules and Firestore indexes
 # - lets the functions' service account sign login tokens (custom tokens)
 # - stores the Mobizon API key in Secret Manager (typed in, not shown)
 # - automatic clean-up of old login codes and rate-limit counters (Firestore TTL)
@@ -7,7 +7,7 @@ P=kerek-9d153; SA=github-deploy@$P.iam.gserviceaccount.com
 gcloud config set project $P -q
 N=$(gcloud projects describe $P --format='value(projectNumber)'); RT=$N-compute@developer.gserviceaccount.com
 gcloud services enable secretmanager.googleapis.com iamcredentials.googleapis.com -q
-for r in cloudfunctions.admin run.admin iam.serviceAccountUser artifactregistry.admin secretmanager.admin eventarc.admin pubsub.admin firebasestorage.admin serviceusage.serviceUsageViewer; do gcloud projects add-iam-policy-binding $P --member=serviceAccount:$SA --role=roles/$r --condition=None -q >/dev/null && echo "Yetki: $r"; done
+for r in cloudfunctions.admin run.admin iam.serviceAccountUser artifactregistry.admin secretmanager.admin eventarc.admin pubsub.admin firebasestorage.admin serviceusage.serviceUsageViewer datastore.viewer datastore.indexAdmin; do gcloud projects add-iam-policy-binding $P --member=serviceAccount:$SA --role=roles/$r --condition=None -q >/dev/null && echo "Yetki: $r"; done
 gcloud iam service-accounts add-iam-policy-binding $RT --member=serviceAccount:$RT --role=roles/iam.serviceAccountTokenCreator -q >/dev/null && echo "Giris anahtari imzalama: tamam"
 # Pasted from a phone, "read" takes the next pasted line instead of the key: paste the lines above
 # first, then this line on its own, and only then the key
