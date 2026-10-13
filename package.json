@@ -17,7 +17,6 @@
     "dev:emulator": "npx --yes firebase-tools@15.31.0 emulators:exec --project demo-kerek --only firestore,auth \"vite --config vite.emulator.config.ts\""
   },
   "dependencies": {
-    "@capacitor-firebase/authentication": "8.5.2",
     "@capacitor/android": "8.5.3",
     "@capacitor/app": "^8.1.2",
     "@capacitor/core": "8.5.3",

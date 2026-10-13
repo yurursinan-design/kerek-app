@@ -2,15 +2,14 @@ import {
   ConfirmationResult,
   PhoneAuthProvider,
   RecaptchaVerifier,
-  linkWithCredential,
   linkWithPhoneNumber,
   signInWithCredential,
+  signInWithCustomToken,
   signInWithPhoneNumber,
   signOut,
 } from 'firebase/auth';
-import { Capacitor } from '@capacitor/core';
-import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
-import { auth, ensureFirebaseAuth, isFirebaseConfigured } from './firebase';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { app, auth, ensureFirebaseAuth, isFirebaseConfigured } from './firebase';
 import { clearPersonalLocalData } from './storage';
 
 /**
@@ -20,6 +19,10 @@ import { clearPersonalLocalData } from './storage';
  * account, so requests and a provider profile created before logging in are kept, and the same
  * number later signs in to the same account on any device. Publishing (requests, offers, provider
  * profiles) requires a verified phone; the Firestore rules enforce that as well.
+ *
+ * The code is texted by the requestLoginCode / verifyLoginCode cloud functions through a
+ * Kazakhstan SMS gateway (Firebase's own SMS doesn't reach +7 numbers for this project). Against
+ * the Auth emulator (tests) Firebase's phone sign-in is used, as the emulator prints the codes.
  */
 
 /** Normalizes Kazakhstan numbers typed as "+7 701 …", "8 701 …" or "701 …" to E.164 (+77011234567). */
@@ -50,6 +53,8 @@ export function maskPhone(phone?: string | null): string {
   return phone.length > 6 ? `${phone.slice(0, 2)} ••• ${phone.slice(-4, -2)} ${phone.slice(-2)}` : phone;
 }
 
+type Lang = 'kz' | 'ru';
+
 let verifier: RecaptchaVerifier | null = null;
 
 /** Drops the invisible reCAPTCHA; call when the login dialog closes (its host element goes away). */
@@ -64,11 +69,14 @@ function resetVerifier() {
   verifier = null;
 }
 
-/** Sends an SMS code. `containerId` is an element that hosts the invisible reCAPTCHA. */
-export async function sendSmsCode(phoneE164: string, containerId: string): Promise<ConfirmationResult> {
+/**
+ * Sends an SMS code. `containerId` hosts the invisible reCAPTCHA of the emulator flow; `lang` picks
+ * the SMS text.
+ */
+export async function sendSmsCode(phoneE164: string, containerId: string, lang: Lang = 'ru'): Promise<ConfirmationResult> {
   if (!auth) throw new Error('Firebase Auth is not configured');
   await ensureFirebaseAuth();
-  if (Capacitor.isNativePlatform()) return sendSmsCodeNative(phoneE164);
+  if (!auth.emulatorConfig) return sendSmsCodeViaGateway(phoneE164, lang);
   if (auth.emulatorConfig) {
     // The Auth emulator has no reCAPTCHA
     auth.settings.appVerificationDisabledForTesting = true;
@@ -89,52 +97,27 @@ export async function sendSmsCode(phoneE164: string, containerId: string): Promi
 }
 
 /**
- * In the Android/iPhone app the phone's own Firebase SDK sends the SMS (Play Integrity / APNs
- * instead of the picture puzzle). It only returns a verification id; the code is then confirmed
- * with the web SDK, which keeps linking the anonymous account exactly as on the website.
+ * Code texted by the requestLoginCode function. Confirming it returns a custom token for the
+ * account that now carries this number (the caller's own, or the one already registered with it);
+ * signing in with it is a fresh sign-in, so the phone_number claim is there right away.
  */
-async function sendSmsCodeNative(phoneE164: string): Promise<ConfirmationResult> {
-  const verificationId = await new Promise<string>((resolve, reject) => {
-    const handles: Array<Promise<{ remove: () => Promise<void> }>> = [];
-    const done = (fn: () => void) => {
-      clearTimeout(timer);
-      handles.forEach((h) => h.then((x) => x.remove()).catch(() => {}));
-      fn();
-    };
-    const timer = setTimeout(
-      () => done(() => reject(Object.assign(new Error('SMS was not sent in time'), { code: 'auth/timeout' }))),
-      90000
-    );
-    handles.push(FirebaseAuthentication.addListener('phoneCodeSent', (e) => done(() => resolve(e.verificationId))));
-    handles.push(
-      FirebaseAuthentication.addListener('phoneVerificationFailed', (e) =>
-        done(() => reject(Object.assign(new Error(e.message), { code: nativeErrorCode(e.message) })))
-      )
-    );
-    FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber: phoneE164 }).catch((err) =>
-      done(() => reject(Object.assign(new Error(err?.message || String(err)), { code: nativeErrorCode(err?.message) })))
-    );
+async function sendSmsCodeViaGateway(phoneE164: string, lang: Lang): Promise<ConfirmationResult> {
+  const functions = getFunctions(app!, 'asia-south1');
+  await httpsCallable<{ phone: string; lang: Lang }, { ok: true; retryAfter: number }>(functions, 'requestLoginCode')({
+    phone: phoneE164,
+    lang,
   });
   return {
-    verificationId,
+    verificationId: 'sms-gateway',
     confirm: async (code: string) => {
       if (!auth) throw new Error('Firebase Auth is not configured');
-      const credential = PhoneAuthProvider.credential(verificationId, code);
-      const user = auth.currentUser;
-      return user && user.isAnonymous ? linkWithCredential(user, credential) : signInWithCredential(auth, credential);
+      const { data } = await httpsCallable<{ phone: string; code: string }, { token: string }>(functions, 'verifyLoginCode')({
+        phone: phoneE164,
+        code,
+      });
+      return signInWithCustomToken(auth, data.token);
     },
   } as ConfirmationResult;
-}
-
-/** Native SDK errors arrive as text; map the common ones to the web error codes. */
-function nativeErrorCode(message?: string): string {
-  const m = String(message || '').toLowerCase();
-  if (m.includes('blocked') || m.includes('too many') || m.includes('unusual activity')) return 'auth/too-many-requests';
-  if (m.includes('invalid format') || m.includes('invalid phone')) return 'auth/invalid-phone-number';
-  if (m.includes('quota')) return 'auth/quota-exceeded';
-  if (m.includes('network')) return 'auth/network-request-failed';
-  if (m.includes('region') || m.includes('not enabled') || m.includes('not allowed')) return 'auth/operation-not-allowed';
-  return 'auth/native-error';
 }
 
 /**
@@ -168,13 +151,24 @@ export async function logoutToAnonymous(): Promise<void> {
   await ensureFirebaseAuth();
 }
 
-type Lang = 'kz' | 'ru';
 
 /** Localized message for Firebase phone-auth errors. */
 export function phoneAuthErrorMessage(err: any, lang: Lang): string {
   const code = String(err?.code || '');
   const m = (kz: string, ru: string) => (lang === 'kz' ? kz : ru);
+  const message = String(err?.message || '');
   switch (code) {
+    case 'functions/invalid-argument':
+      return /code/i.test(message)
+        ? m('Код қате. Қайта тексеріңіз.', 'Неверный код. Проверьте и попробуйте снова.')
+        : m('Телефон нөмірі қате. Мысалы: +7 701 123 45 67', 'Неверный номер. Например: +7 701 123 45 67');
+    case 'functions/deadline-exceeded':
+      return m('Кодтың мерзімі өтті. Жаңа код сұраңыз.', 'Срок действия кода истёк. Запросите новый.');
+    case 'functions/resource-exhausted':
+      return m('Тым көп әрекет. Бір минуттан кейін қайталаңыз.', 'Слишком много попыток. Попробуйте через минуту.');
+    case 'functions/unavailable':
+    case 'functions/internal':
+      return m('SMS жіберу мүмкін болмады. Біраз уақыттан кейін қайталаңыз.', 'Не удалось отправить SMS. Попробуйте чуть позже.');
     case 'auth/invalid-phone-number':
     case 'auth/missing-phone-number':
       return m('Телефон нөмірі қате. Мысалы: +7 701 123 45 67', 'Неверный номер. Например: +7 701 123 45 67');
@@ -194,7 +188,7 @@ export function phoneAuthErrorMessage(err: any, lang: Lang): string {
       return m('Интернет байланысы жоқ сияқты.', 'Похоже, нет подключения к интернету.');
     default: {
       // The technical reason in small print helps to find the cause when someone reports it
-      const detail = code && code !== 'auth/native-error' ? code : String(err?.message || code).slice(0, 80);
+      const detail = code || message.slice(0, 80);
       const base = m('SMS жіберу мүмкін болмады. Қайталап көріңіз.', 'Не удалось отправить SMS. Попробуйте снова.');
       return detail ? `${base} (${detail})` : base;
     }

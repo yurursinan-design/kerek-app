@@ -1,16 +1,14 @@
 import * as crypto from 'crypto';
-import { getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { getFirestore } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import { GEMINI_CONFIG } from './config';
 import { parseTextWithGemini, ParsedServiceRequest } from './geminiParser';
+import { allowCall, clientIp, DAY_MS } from './limits';
 
-// Initialize Firebase Admin SDK safely (singleton pattern)
-if (!getApps().length) {
-  initializeApp();
-}
+// SMS login through Mobizon (Kazakhstan); see smsLogin.ts
+export { requestLoginCode, verifyLoginCode } from './smsLogin';
 
 const db = getFirestore();
 
@@ -20,40 +18,6 @@ const geminiApiKey = defineSecret('GEMINI_API_KEY');
 // Payments are made directly between customer and provider for now. The Kaspi escrow webhook stub
 // (and its KASPI_WEBHOOK_SECRET, which blocked deploying functions while undefined) was removed;
 // add a real integration once the Kaspi merchant specifications are available.
-
-/**
- * Counts calls per key in a time window (rateLimits/{key}); false once max is reached.
- * expireAt lets a Firestore TTL policy on rateLimits delete old counters automatically.
- */
-async function allowCall(key: string, max: number, now: number, windowMs = 60000): Promise<boolean> {
-  const ref = db.collection('rateLimits').doc(key);
-  const expireAt = Timestamp.fromMillis(now + Math.max(windowMs, 60000) + 24 * 3600 * 1000);
-  return db.runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const data = snap.exists ? snap.data() || {} : {};
-    const windowStart = typeof data.windowStart === 'number' ? data.windowStart : 0;
-    const count = typeof data.callCount === 'number' ? data.callCount : 0;
-    if (now - windowStart >= windowMs) {
-      tx.set(ref, { windowStart: now, callCount: 1, lastCallAt: now, expireAt });
-      return true;
-    }
-    if (count >= max) return false;
-    tx.set(ref, { windowStart, callCount: count + 1, lastCallAt: now, expireAt });
-    return true;
-  });
-}
-
-/**
- * Caller's address. Google's front end appends the address it saw to X-Forwarded-For, so the last
- * entry is the real one; earlier entries can be anything the caller sent.
- */
-function clientIp(req: { ip?: string; headers?: Record<string, string | string[] | undefined> } | undefined): string {
-  const fwd = req?.headers?.['x-forwarded-for'];
-  const parts = (Array.isArray(fwd) ? fwd.join(',') : fwd || '').split(',').map((p) => p.trim()).filter(Boolean);
-  return parts[parts.length - 1] || req?.ip || '';
-}
-
-const DAY_MS = 24 * 3600 * 1000;
 
 /** Request text shown to other people: no links or phone numbers, short. */
 function cleanForNotification(text: unknown): string {

@@ -111,7 +111,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
     setBusy(true);
     setError(null);
     try {
-      const result = await sendSmsCode(normalized, 'kerek-recaptcha');
+      const result = await sendSmsCode(normalized, 'kerek-recaptcha', lang === 'kz' ? 'kz' : 'ru');
       setConfirmation(result);
       setSentTo(normalized);
       setSecondsLeft(RESEND_SECONDS);

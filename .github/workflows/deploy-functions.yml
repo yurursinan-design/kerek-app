@@ -1,0 +1,49 @@
+# Uploads selected Cloud Functions before a full release, e.g. the SMS login functions so they can
+# be tried on the preview and the Android test app. Runs only for a commit on a claude/** branch
+# whose message contains "[deploy-functions]", and only the functions listed in ONLY (never the
+# website or the database rules; those go live with deploy.yml after "canlıya al").
+name: Fonksiyonları yükle
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-functions
+  cancel-in-progress: false
+
+env:
+  FIREBASE_PROJECT_ID: kerek-9d153
+  ONLY: functions:requestLoginCode,functions:verifyLoginCode
+
+jobs:
+  deploy:
+    if: contains(github.event.head_commit.message, '[deploy-functions]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Fonksiyon bağımlılıklarını kur
+        run: npm --prefix functions ci
+
+      - name: Google Cloud'a giriş
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
+          service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
+
+      - name: Seçili fonksiyonları yükle
+        run: |
+          # Only function targets are accepted here
+          for t in ${ONLY//,/ }; do case "$t" in functions:*) ;; *) echo "Not a function: $t"; exit 1 ;; esac; done
+          echo "Yüklenenler: $ONLY → $FIREBASE_PROJECT_ID"
+          npx --yes firebase-tools@15.31.0 deploy --only "$ONLY" --project "$FIREBASE_PROJECT_ID" --non-interactive --force
