@@ -1,3 +1,6 @@
+// Device mode: the app makes notices itself only without the cloud (with it, the server does;
+// see verify-server-notifications.ts)
+import './helpers/deviceMode';
 import { localRepository } from '../src/services/localRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
 import { notificationService } from '../src/services/notificationService';

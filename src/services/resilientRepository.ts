@@ -773,32 +773,13 @@ export class ResilientRepository implements Repository {
   // =================== In-App Notifications ===================
 
   async createNotification(notificationData: AppNotification): Promise<AppNotification> {
-    // Providers are not notified about their own actions (e.g. marking their own job completed);
-    // the security rules reject such self-notifications, so skip them instead of failing.
+    // With the cloud, notices are made by the server from the real event (functions/src/
+    // notifications.ts) and also reach the phone as a push message; the app doesn't write them.
+    if (this.firebaseRepo.isAvailable()) return notificationData;
+    // Device mode: kept on this device. Nobody is notified about their own action.
     const currentUid = auth?.currentUser?.uid || getCurrentUserId();
     if (notificationData.recipientRole === 'provider' && notificationData.recipientUserId === currentUid) {
       return notificationData;
-    }
-    if (this.firebaseRepo.isAvailable()) {
-      try {
-        const cloudNotif = await this.firebaseRepo.createNotification(notificationData);
-        // Also sync into local repository
-        try {
-          await this.localRepo.createNotification(cloudNotif);
-        } catch {}
-        return cloudNotif;
-      } catch (err: any) {
-        const isPermission =
-          err?.code === 'permission-denied' ||
-          String(err?.message || err).includes('permission') ||
-          String(err?.message || err).includes('PERMISSION_DENIED');
-        // Do not silently mask authorization / security rule rejections: log it, then fall back to local store
-        if (isPermission) {
-          logTechnicalError('ResilientRepository.createNotification (Unauthorized)', err);
-        } else {
-          console.warn('[ResilientRepository] createNotification cloud error, falling back locally:', err?.message || err);
-        }
-      }
     }
     return await this.localRepo.createNotification(notificationData);
   }

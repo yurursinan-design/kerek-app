@@ -32,6 +32,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Push messages (Android 13 and later ask the user) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Approximate location for a request, photos/videos and voice notes; asked only when used -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />

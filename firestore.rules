@@ -567,131 +567,30 @@ service cloud.firestore {
       }
     }
 
+    // =================== Push tokens (phones that receive push messages) ===================
+    // The document id is the phone's push token. A signed-in user registers their own phone; a
+    // phone someone else used before is taken over by the new user. Only the server reads them.
+    match /pushTokens/{token} {
+      allow get, list: if false;
+      allow create, update: if isSignedIn() && token.size() >= 20 && token.size() <= 4096
+                            && incoming().keys().hasOnly(['uid', 'platform', 'lang', 'updatedAt'])
+                            && incoming().uid == request.auth.uid
+                            && incoming().platform in ['android', 'ios', 'web']
+                            && incoming().lang in ['kz', 'ru']
+                            && incoming().updatedAt is string && incoming().updatedAt.size() <= 40;
+      allow delete: if isSignedIn() && resource.data.uid == request.auth.uid;
+    }
+
     // =================== Notifications Collection ===================
-    // Each related document is read once (missing documents read as an empty map) and passed on as
-    // a value, which keeps the create rule under the 1000-expression evaluation limit.
-    function offerOrEmpty(offerId) {
-      return offerId is string && offerId != '' && exists(/databases/$(database)/documents/offers/$(offerId))
-        ? get(/databases/$(database)/documents/offers/$(offerId)).data : {};
-    }
-
-    function conversationOrEmpty(conversationId) {
-      return conversationId is string && conversationId != '' && exists(/databases/$(database)/documents/conversations/$(conversationId))
-        ? get(/databases/$(database)/documents/conversations/$(conversationId)).data : {};
-    }
-
-    function appointmentOrEmpty(requestId) {
-      return exists(/databases/$(database)/documents/appointments/$('appointment_' + requestId))
-        ? get(/databases/$(database)/documents/appointments/$('appointment_' + requestId)).data : {};
-    }
-
-    // True when uid is the provider on an offer, conversation or appointment document
-    function isProviderOn(d, uid) {
-      return d.get('providerUserId', '') == uid || d.get('providerId', '') == uid;
-    }
-
-    // Is uid the provider working on this request: the selected offer, a still-pending offer named in
-    // the notification, the request's conversation, or its appointment
-    function isProviderOfRequest(n, req, uid, d) {
-      return isProviderOn(d.sel, uid)
-        || (isProviderOn(d.named, uid) && d.named.get('status', '') == 'PENDING')
-        || (d.conv.get('requestId', '') == n.requestId && d.conv.get('customerId', '') == req.customerId && isProviderOn(d.conv, uid))
-        || (d.appt.get('customerId', '') == req.customerId && isProviderOn(d.appt, uid));
-    }
-
-    function notificationSenderAllowed(n, req, d) {
-      let uid = request.auth.uid;
-      return (
-        // 1. The customer confirming something to themselves (offer accepted, completion, review prompt)
-        (n.recipientUserId == uid && n.recipientRole == 'customer' && req.customerId == uid
-          && n.type in ['CUSTOMER_OFFER_ACCEPTED', 'CUSTOMER_WORK_COMPLETED', 'CUSTOMER_REVIEW_REQUIRED'])
-        // 2. The customer notifying a provider who works on, or offered for, this request
-        || (req.customerId == uid && n.recipientRole == 'provider' && n.recipientUserId != uid
-          && isProviderOfRequest(n, req, n.recipientUserId, d))
-        // 3. A provider of this request notifying its customer
-        || (n.recipientUserId == req.customerId && n.recipientRole == 'customer' && n.recipientUserId != uid
-          && isProviderOfRequest(n, req, uid, d))
-      );
-    }
-
-    // Title and body are short texts per language
-    function notifTextOk(t, n) {
-      return t is map && t.keys().hasOnly(['kz', 'ru']) && strMax(t, 'kz', n) && strMax(t, 'ru', n);
-    }
-
-    function messageSentByCaller(conversationId, messageId) {
-      let path = /databases/$(database)/documents/conversations/$(conversationId)/messages/$(messageId);
-      return exists(path) && get(path).data.get('senderId', '') == request.auth.uid;
-    }
-
-    // Each notification id is derived from the thing it reports, so one sender can't create an
-    // endless stream: one per offer, per accepted offer, per message, per request event, and per
-    // appointment change of an active job.
-    function notificationIdMatches(id, n, req, d) {
-      let t = n.type;
-      let rid = n.requestId;
-      let oid = n.get('offerId', '');
-      return (t == 'CUSTOMER_NEW_OFFER' && id == 'notif_offer_' + oid && d.named.get('status', '') == 'PENDING')
-        || (t == 'PROVIDER_OFFER_ACCEPTED' && id == 'notif_offer_accepted_prov_' + oid && req.get('selectedOfferId', '') == oid)
-        || (t == 'CUSTOMER_OFFER_ACCEPTED' && id == 'notif_offer_accepted_cust_' + oid && req.get('selectedOfferId', '') == oid)
-        || (t in ['CUSTOMER_NEW_MESSAGE', 'CUSTOMER_NEW_ATTACHMENT', 'PROVIDER_NEW_MESSAGE', 'PROVIDER_NEW_ATTACHMENT']
-            && id.matches('notif_msg_[A-Za-z0-9_-]+')
-            && messageSentByCaller(n.get('conversationId', '-'), id.split('notif_msg_')[1]))
-        || (t == 'CUSTOMER_WORK_COMPLETED' && (id == 'notif_done_cust_' + rid || id == 'notif_completed_cust_' + rid))
-        || (t == 'CUSTOMER_REVIEW_REQUIRED' && id == 'notif_review_' + rid)
-        || (t == 'PROVIDER_WORK_COMPLETED' && id == 'notif_completed_prov_' + rid)
-        || (t == 'PROVIDER_REQUEST_CANCELLED' && id == 'notif_cancelled_' + rid && req.status == 'CANCELLED')
-        || (id.matches('notif_(appt_create|appt_upd|appt_cancel|workstatus)_appointment_' + rid + '_[a-z0-9_]+')
-            && t in ['CUSTOMER_APPOINTMENT_CREATED', 'CUSTOMER_APPOINTMENT_UPDATED', 'CUSTOMER_APPOINTMENT_CANCELLED',
-                     'PROVIDER_APPOINTMENT_CREATED', 'PROVIDER_APPOINTMENT_UPDATED', 'PROVIDER_APPOINTMENT_CANCELLED',
-                     'CUSTOMER_PROVIDER_ON_THE_WAY', 'CUSTOMER_PROVIDER_ARRIVED', 'CUSTOMER_WORK_STARTED',
-                     'CUSTOMER_WORK_COMPLETED', 'PROVIDER_WORK_STATUS_UPDATED']
-            && req.status in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS']);
-    }
-
-    // Reads the request and its related documents once, then checks the id and the sender
-    function notificationCreateAllowed(id, n) {
-      let req = get(/databases/$(database)/documents/requests/$(n.requestId)).data;
-      let d = {
-        'sel': offerOrEmpty(req.get('selectedOfferId', '')),
-        'named': offerOrEmpty(n.get('offerId', '')),
-        'conv': conversationOrEmpty(n.get('conversationId', '')),
-        'appt': appointmentOrEmpty(n.requestId)
-      };
-      return (!('offerId' in n) || d.named.get('requestId', '') == n.requestId)
-        && notificationIdMatches(id, n, req, d)
-        && notificationSenderAllowed(n, req, d);
-    }
-
     // In-app notifications:
     // - Read, list, mark as read and delete: the recipient only
-    // - Create: a participant of the request (see notificationSenderAllowed), with an id bound to the
-    //   offer, message, request event or appointment change it reports (notificationIdMatches),
-    //   known fields only and short texts. New-request alerts for providers come from Cloud Functions.
+    // - Create: nobody in the app; the server writes them when the event really happens
     match /notifications/{notificationId} {
       allow get: if isSignedIn() && isValidId(notificationId) && resource.data.recipientUserId == request.auth.uid;
       allow list: if isSignedIn() && resource.data.recipientUserId == request.auth.uid;
 
-      allow create: if isSignedIn()
-                    && isValidId(notificationId)
-                    && incoming().id == notificationId
-                    && incoming().keys().hasOnly([
-                      'id', 'recipientUserId', 'recipientRole', 'type', 'title', 'body', 'targetScreen', 'isRead',
-                      'readAt', 'createdAt', 'requestId', 'offerId', 'conversationId', 'providerId'
-                    ])
-                    && notifTextOk(incoming().title, 120) && notifTextOk(incoming().body, 400)
-                    && (!('providerId' in incoming()) || isValidId(incoming().providerId))
-                    && incoming().recipientUserId is string && isValidId(incoming().recipientUserId)
-                    && incoming().recipientRole in ['customer', 'provider']
-                    && incoming().isRead == false
-                    && (!('readAt' in incoming()) || incoming().readAt == null)
-                    && incoming().createdAt is string && incoming().createdAt.size() >= 10 && incoming().createdAt.size() <= 40
-                    && incoming().targetScreen in ['request_detail', 'request_details', 'chat', 'offers_list', 'review_modal']
-                    && ('requestId' in incoming()) && incoming().requestId is string && isValidId(incoming().requestId)
-                    && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
-                    && (!('offerId' in incoming()) || isValidId(incoming().offerId))
-                    && (!('conversationId' in incoming()) || isValidId(incoming().conversationId))
-                    && notificationCreateAllowed(notificationId, incoming());
+      // Made only by Cloud Functions from real events (functions/src/notifications.ts)
+      allow create: if false;
 
       allow update: if isSignedIn()
                     && isValidId(notificationId)

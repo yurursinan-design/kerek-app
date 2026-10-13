@@ -22,6 +22,7 @@ import { InAppToast } from './components/InAppToast';
 import { PhoneLoginModal, PhoneLoginReason } from './components/PhoneLoginModal';
 import { onAuthStateChanged } from 'firebase/auth';
 import { logoutToAnonymous, requiresPhoneLogin } from './services/phoneAuth';
+import { startPushNotifications } from './services/pushNotifications';
 import { ActiveJobsError, deleteMyAccount, RecentLoginRequiredError } from './services/account';
 import { generateRequestId } from './services/ids';
 import { localRepository } from './services/localRepository';
@@ -685,6 +686,26 @@ export default function App() {
   };
 
   notificationClickRef.current = handleNotificationClick;
+
+  // Phone app: push messages for the signed-in account, in the screen language; tapping one opens
+  // it like a tap in the notification list
+  useEffect(() => {
+    if (!authUid) return;
+    void startPushNotifications(language === 'kz' ? 'kz' : 'ru', (data) =>
+      notificationClickRef.current({
+        id: data.notificationId || '',
+        recipientUserId: authUid,
+        recipientRole: data.recipientRole === 'provider' ? 'provider' : 'customer',
+        type: 'CUSTOMER_NEW_MESSAGE',
+        title: { kz: '', ru: '' },
+        body: { kz: '', ru: '' },
+        requestId: data.requestId || undefined,
+        targetScreen: 'request_detail',
+        isRead: !data.notificationId,
+        createdAt: new Date().toISOString(),
+      })
+    );
+  }, [authUid, language]);
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-start sm:py-4">

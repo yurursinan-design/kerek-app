@@ -11,6 +11,7 @@ import {
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app, auth, ensureFirebaseAuth, isFirebaseConfigured } from './firebase';
 import { clearPersonalLocalData } from './storage';
+import { forgetPushToken } from './pushNotifications';
 
 /**
  * SMS login.
@@ -146,6 +147,8 @@ export async function confirmSmsCode(confirmation: ConfirmationResult, code: str
 /** Signs out and continues as a new anonymous visitor. */
 export async function logoutToAnonymous(): Promise<void> {
   if (!auth) return;
+  // This phone stops getting the account's push messages
+  await forgetPushToken();
   await signOut(auth);
   clearPersonalLocalData();
   await ensureFirebaseAuth();

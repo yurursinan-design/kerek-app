@@ -4,6 +4,7 @@ import { deleteObject, ref as storageRef } from 'firebase/storage';
 import { auth, db, isFirebaseConfigured, storage } from './firebase';
 import { LEGAL_VERSION } from '../data/legalTexts';
 import { clearPersonalLocalData } from './storage';
+import { forgetPushToken } from './pushNotifications';
 
 /** Deleting an account needs a recent sign-in (Firebase rule); older sessions confirm by SMS again. */
 /** A provider with a job in progress can't delete the account until the job is finished or cancelled. */
@@ -118,6 +119,8 @@ export async function deleteMyAccount(): Promise<void> {
     await deleteDoc(snap.ref);
   }
 
+  // This phone stops getting push messages for the deleted account
+  await forgetPushToken();
   await deleteIfExists(doc(firestore, 'providers', uid));
   await deleteIfExists(doc(firestore, 'users', uid));
 

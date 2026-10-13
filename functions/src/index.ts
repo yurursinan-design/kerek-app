@@ -1,5 +1,5 @@
 import * as crypto from 'crypto';
-import { getFirestore } from 'firebase-admin/firestore';
+import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { defineSecret } from 'firebase-functions/params';
@@ -9,6 +9,15 @@ import { allowCall, clientIp, DAY_MS } from './limits';
 
 // SMS login through Mobizon (Kazakhstan); see smsLogin.ts
 export { requestLoginCode, verifyLoginCode } from './smsLogin';
+// In-app notices from real events, and push messages to phones; see notifications.ts
+export {
+  notifyOnOfferCreated,
+  notifyOnOfferUpdated,
+  notifyOnMessageCreated,
+  notifyOnRequestUpdated,
+  notifyOnAppointmentWritten,
+  pushOnNotificationCreated,
+} from './notifications';
 
 const db = getFirestore();
 
@@ -127,7 +136,8 @@ export const parseServiceRequest = onCall<
  * Automatically notifies providers matching the same cityId and categoryId.
  */
 export const onNewRequestNotifyProviders = onDocumentCreated(
-  { document: 'requests/{id}', maxInstances: 5 },
+  // Firestore triggers run where the database is (asia-south1)
+  { document: 'requests/{id}', region: 'asia-south1', maxInstances: 5 },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
@@ -211,6 +221,8 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
             isRead: false,
             readAt: null,
             createdAt: now,
+            // Kept 60 days (Firestore TTL on expireAt)
+            expireAt: Timestamp.fromMillis(Date.now() + 60 * DAY_MS),
           }
         );
         count++;

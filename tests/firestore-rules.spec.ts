@@ -1156,97 +1156,41 @@ async function runTestSuite() {
     const rejN = () => phoneUser('prov_rej').firestore();
     const put = (db: any, id: string, extra: Record<string, unknown>) => setDoc(doc(db, 'notifications', id), notif(id, extra));
 
-    await test('Customer can notify themselves that they accepted an offer', async () => {
-      await assertSucceeds(put(aliceN(), 'notif_offer_accepted_cust_OFFER-req_n-prov_master1',
+    await test('Nobody in the app can create a notification (the server makes them from real events)', async () => {
+      await assertFails(put(aliceN(), 'notif_offer_accepted_cust_OFFER-req_n-prov_master1',
         { ...toCustomer, type: 'CUSTOMER_OFFER_ACCEPTED', offerId: 'OFFER-req_n-prov_master1' }));
-    });
-
-    await test('Another user cannot send the customer an "offer accepted" notice', async () => {
-      await assertFails(put(phoneUser('user_bob').firestore(), 'notif_offer_accepted_cust_OFFER-req_n-prov_master1',
-        { ...toCustomer, type: 'CUSTOMER_OFFER_ACCEPTED', offerId: 'OFFER-req_n-prov_master1' }));
-    });
-
-    await test('Customer can tell the selected provider their offer was accepted', async () => {
-      await assertSucceeds(put(aliceN(), 'notif_offer_accepted_prov_OFFER-req_n-prov_master1',
+      await assertFails(put(aliceN(), 'notif_offer_accepted_prov_OFFER-req_n-prov_master1',
         { ...toMaster1, type: 'PROVIDER_OFFER_ACCEPTED', offerId: 'OFFER-req_n-prov_master1' }));
-    });
-
-    await test('A notification id must match what it reports (no free ids, so no endless stream)', async () => {
-      await assertFails(put(aliceN(), 'notif_random_spam_1',
-        { ...toMaster1, type: 'PROVIDER_OFFER_ACCEPTED', offerId: 'OFFER-req_n-prov_master1' }));
-      await assertFails(put(m1N(), 'notif_done_cust_req_n_2',
-        { ...toCustomer, type: 'CUSTOMER_WORK_COMPLETED' }));
-    });
-
-    await test('Provider with a pending offer can tell the customer about it (once, by offer id)', async () => {
-      await assertSucceeds(put(m2N(), 'notif_offer_OFFER-req_n-prov_master2',
+      await assertFails(put(m2N(), 'notif_offer_OFFER-req_n-prov_master2',
         { ...toCustomer, type: 'CUSTOMER_NEW_OFFER', offerId: 'OFFER-req_n-prov_master2', targetScreen: 'offers_list' }));
-    });
-
-    await test('A rejected provider cannot keep sending the customer notifications', async () => {
-      await assertFails(put(rejN(), 'notif_offer_OFFER-req_n-prov_rej',
-        { ...toCustomer, type: 'CUSTOMER_NEW_OFFER', offerId: 'OFFER-req_n-prov_rej', targetScreen: 'offers_list' }));
+      await assertFails(put(m1N(), 'notif_msg_msg_p1',
+        { ...toCustomer, type: 'CUSTOMER_NEW_MESSAGE', conversationId: 'conv_req_n', targetScreen: 'chat' }));
+      await assertFails(put(m1N(), 'notif_workstatus_appointment_req_n_provider_on_the_way_1',
+        { ...toCustomer, type: 'CUSTOMER_PROVIDER_ON_THE_WAY' }));
       await assertFails(put(rejN(), 'notif_appt_create_appointment_req_n_1',
         { ...toCustomer, type: 'CUSTOMER_APPOINTMENT_CREATED', offerId: 'OFFER-req_n-prov_rej' }));
     });
 
-    await test('A "new offer" notice is only for a pending offer', async () => {
-      await assertFails(put(m1N(), 'notif_offer_OFFER-req_n-prov_master1',
-        { ...toCustomer, type: 'CUSTOMER_NEW_OFFER', offerId: 'OFFER-req_n-prov_master1', targetScreen: 'offers_list' }));
+    await test('The recipient marks their notification read; others cannot touch it', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'notifications', 'notif_done_cust_req_n'), notif('notif_done_cust_req_n', { ...toCustomer, type: 'CUSTOMER_WORK_COMPLETED' }));
+      });
+      await assertFails(updateDoc(doc(m1N(), 'notifications', 'notif_done_cust_req_n'), { isRead: true }));
+      await assertFails(updateDoc(doc(aliceN(), 'notifications', 'notif_done_cust_req_n'), { title: { kz: 'x', ru: 'x' } }));
+      await assertSucceeds(updateDoc(doc(aliceN(), 'notifications', 'notif_done_cust_req_n'), { isRead: true, readAt: new Date().toISOString() }));
     });
 
-    await test('Message notification needs a real message written by the sender', async () => {
-      await assertSucceeds(put(m1N(), 'notif_msg_msg_p1',
-        { ...toCustomer, type: 'CUSTOMER_NEW_MESSAGE', conversationId: 'conv_req_n', targetScreen: 'chat' }));
-      await assertSucceeds(put(aliceN(), 'notif_msg_msg_c1',
-        { ...toMaster1, type: 'PROVIDER_NEW_MESSAGE', conversationId: 'conv_req_n', targetScreen: 'chat' }));
-      // The customer cannot use the provider's message, and a missing message gives nothing
-      await assertFails(put(aliceN(), 'notif_msg_msg_p1',
-        { ...toMaster1, type: 'PROVIDER_NEW_MESSAGE', conversationId: 'conv_req_n', targetScreen: 'chat' }));
-      await assertFails(put(m1N(), 'notif_msg_msg_missing',
-        { ...toCustomer, type: 'CUSTOMER_NEW_MESSAGE', conversationId: 'conv_req_n', targetScreen: 'chat' }));
-    });
-
-    await test('Notification text is short and only in Kazakh and Russian; no extra fields', async () => {
-      await assertFails(put(m1N(), 'notif_done_cust_req_n',
-        { ...toCustomer, type: 'CUSTOMER_WORK_COMPLETED', body: { kz: 'x'.repeat(5000), ru: 'x' } }));
-      await assertFails(put(m1N(), 'notif_done_cust_req_n',
-        { ...toCustomer, type: 'CUSTOMER_WORK_COMPLETED', title: 'KEREK: аккаунт заблокирован' }));
-      await assertFails(put(m1N(), 'notif_done_cust_req_n',
-        { ...toCustomer, type: 'CUSTOMER_WORK_COMPLETED', link: 'https://evil.example' }));
-      await assertFails(put(m1N(), 'notif_done_cust_req_n',
-        { ...toCustomer, type: 'CUSTOMER_WORK_COMPLETED', title: null }));
-    });
-
-    await test('Selected provider reports the job done; customer tells the provider it is completed', async () => {
-      await assertSucceeds(put(m1N(), 'notif_done_cust_req_n', { ...toCustomer, type: 'CUSTOMER_WORK_COMPLETED' }));
-      await assertSucceeds(put(aliceN(), 'notif_completed_prov_req_n',
-        { ...toMaster1, type: 'PROVIDER_WORK_COMPLETED', offerId: 'OFFER-req_n-prov_master1' }));
-      await assertSucceeds(put(aliceN(), 'notif_review_req_n', { ...toCustomer, type: 'CUSTOMER_REVIEW_REQUIRED', targetScreen: 'review_modal' }));
-    });
-
-    await test('Appointment notices are bound to the request and allowed only while the job is active', async () => {
-      await assertSucceeds(put(m1N(), 'notif_appt_create_appointment_req_n_1700000000000',
-        { ...toCustomer, type: 'CUSTOMER_APPOINTMENT_CREATED' }));
-      await assertSucceeds(put(m1N(), 'notif_workstatus_appointment_req_n_provider_on_the_way_1',
-        { ...toCustomer, type: 'CUSTOMER_PROVIDER_ON_THE_WAY' }));
-      await assertFails(put(m1N(), 'notif_appt_create_appointment_req_other_1',
-        { ...toCustomer, type: 'CUSTOMER_APPOINTMENT_CREATED' }));
-      await assertFails(put(m1N(), 'notif_appt_create_appointment_req_nc_1',
-        { ...toCustomer, type: 'CUSTOMER_APPOINTMENT_CREATED', requestId: 'req_nc' }));
-    });
-
-    await test('Cancellation notice only for a cancelled request', async () => {
-      await assertSucceeds(put(aliceN(), 'notif_cancelled_req_nc',
-        { ...toMaster1, type: 'PROVIDER_REQUEST_CANCELLED', requestId: 'req_nc' }));
-      await assertFails(put(aliceN(), 'notif_cancelled_req_n',
-        { ...toMaster1, type: 'PROVIDER_REQUEST_CANCELLED' }));
-    });
-
-    await test('Unknown types, client NEW_REQUEST alerts and missing requests are denied', async () => {
-      await assertFails(put(m1N(), 'notif_done_cust_req_n9', { ...toCustomer, type: 'INVALID_SUPER_ADMIN_SPAM' }));
-      await assertFails(put(aliceN(), 'notif_new_request_req_n_prov_master1', { ...toMaster1, type: 'NEW_REQUEST' }));
-      await assertFails(put(m1N(), 'notif_done_cust_req_fake', { ...toCustomer, type: 'CUSTOMER_WORK_COMPLETED', requestId: 'req_fake' }));
+    await test('A phone is registered for push messages only under its own user; tokens are not readable', async () => {
+      const token = 'fcm_token_' + 'a'.repeat(40);
+      const reg = { platform: 'android', lang: 'kz', updatedAt: new Date().toISOString() };
+      await assertFails(setDoc(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'prov_master1' }));
+      await assertSucceeds(setDoc(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'user_alice' }));
+      await assertFails(getDoc(doc(aliceN(), 'pushTokens', token)));
+      await assertFails(setDoc(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'user_alice', extra: 'x' }));
+      // The same phone signed in by someone else is taken over; only the owner removes it
+      await assertSucceeds(setDoc(doc(m1N(), 'pushTokens', token), { ...reg, uid: 'prov_master1' }));
+      await assertFails(deleteDoc(doc(aliceN(), 'pushTokens', token)));
+      await assertSucceeds(deleteDoc(doc(m1N(), 'pushTokens', token)));
     });
 
     await test('The recipient can delete their notification; others cannot', async () => {

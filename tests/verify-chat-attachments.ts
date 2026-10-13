@@ -6,6 +6,7 @@ import {
   sanitizeFileName,
 } from '../src/types';
 import { localRepository } from '../src/services/localRepository';
+import { resilientRepository } from '../src/services/resilientRepository';
 import { notificationService } from '../src/services/notificationService';
 
 console.log('=== STARTING CHAT 2.0 ATTACHMENTS VERIFICATION ===');
@@ -220,9 +221,18 @@ async function runTests() {
 
   // Test 10: Notification recipient & type
   console.log('\n[TEST 10] Notification recipient and type for attachments');
-  await notificationService.notifyNewMessage(conv, imageMsg);
-  const notifications = await localRepository.getNotifications(providerUserId);
-  const attNotif = notifications.find((n) => n.id === `notif_msg_${imageMsg.id}`);
+  // With the cloud the notice is made by the server (functions/src/notifications.ts); in device
+  // mode the app keeps it on the device
+  let attNotif: any;
+  if (resilientRepository.isCloudActive()) {
+    const serverNotifications = '../functions/src/notifications';
+    const { forNewMessage } = await import(serverNotifications);
+    attNotif = forNewMessage(conv.id, imageMsg.id, imageMsg, conv)[0];
+  } else {
+    await notificationService.notifyNewMessage(conv, imageMsg);
+    const notifications = await localRepository.getNotifications(providerUserId);
+    attNotif = notifications.find((n) => n.id === `notif_msg_${imageMsg.id}`);
+  }
   assert(attNotif, 'Notification must exist for recipient provider');
   assert.strictEqual(attNotif.type, 'PROVIDER_NEW_ATTACHMENT');
   assert.strictEqual(attNotif.recipientUserId, providerUserId);
