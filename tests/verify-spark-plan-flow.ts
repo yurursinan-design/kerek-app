@@ -112,10 +112,10 @@ async function runSparkPlanTests() {
   assert('Exactly ONE request exists (no duplicates)', postRequests.length === 1);
   assert('Existing request id matches created id', postRequests[0].id === createdReq.id);
 
-  console.log('\n======================================================');
-  console.log('ALL SPARK PLAN VERIFICATION CHECKS PASSED');
-  console.log('======================================================\n');
-  process.exit(0);
+  const failed = process.exitCode === 1;
+  console.log(failed ? '\nSOME CHECKS FAILED (see [FAIL] lines above)\n' : '\nALL CHECKS PASSED\n');
+  // Exit with the real result: a [FAIL] above must fail the run
+  process.exit(failed ? 1 : 0);
 }
 
 runSparkPlanTests().catch((err) => {

@@ -106,7 +106,7 @@ export function matchProviders(request: ServiceRequest, providers: Provider[]): 
 
     // 3. Matching Service
     let srvMatch = false;
-    if (normSrv && (pSrv.includes(normSrv) || normSrv.includes(pSrv))) {
+    if (normSrv && pSrv && (pSrv.includes(normSrv) || normSrv.includes(pSrv))) {
       score += 20;
       srvMatch = true;
     } else if (normSrv) {

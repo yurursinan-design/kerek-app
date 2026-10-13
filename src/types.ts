@@ -541,7 +541,8 @@ export function validateRequestAttachment(
   file: { name: string; size: number; type: string },
   forcedType?: 'image' | 'video' | 'audio'
 ): { isValid: boolean; errorKey?: string; type: 'image' | 'video' | 'audio' } {
-  const mime = (file.type || '').toLowerCase();
+  // Recorders report codec parameters ("audio/webm;codecs=opus"); only the base type matters here
+  const mime = (file.type || '').toLowerCase().split(';')[0].trim();
   const ext = (file.name.split('.').pop() || '').toLowerCase();
 
   // Guard against executable or dangerous extensions

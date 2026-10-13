@@ -98,13 +98,14 @@ if (isFirebaseConfigured()) {
     db = getFirestore(app);
 
     const isNodeEnv = typeof window === 'undefined' && typeof process !== 'undefined';
+    const env = processEnv();
     const shouldConnectEmulator =
-      Boolean(process.env?.FIRESTORE_EMULATOR_HOST) ||
-      process.env?.VITE_USE_EMULATOR === 'true' ||
-      (isNodeEnv && process.env?.ALLOW_LIVE_FIREBASE !== 'true');
+      Boolean(env.FIRESTORE_EMULATOR_HOST) ||
+      env.VITE_USE_EMULATOR === 'true' ||
+      (isNodeEnv && env.ALLOW_LIVE_FIREBASE !== 'true');
 
     if (shouldConnectEmulator) {
-      const emulatorHostStr = process.env?.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
+      const emulatorHostStr = env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
       const parts = emulatorHostStr.split(':');
       const host = parts[0] && parts[0].trim().length > 0 ? parts[0].trim() : '127.0.0.1';
       const port = parseInt(parts[1] || '8088', 10) || 8088;
@@ -113,7 +114,7 @@ if (isFirebaseConfigured()) {
       } catch {}
 
       if (auth) {
-        const authHostStr = process.env?.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
+        const authHostStr = env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
         const authParts = authHostStr.replace(/^https?:\/\//, '').split(':');
         const authHost = authParts[0] && authParts[0].trim().length > 0 ? authParts[0].trim() : '127.0.0.1';
         const authPort = parseInt(authParts[1] || '9099', 10) || 9099;
@@ -148,6 +149,18 @@ if (isFirebaseConfigured()) {
 
 export { app, auth, db, storage };
 
+/**
+ * Emulator settings: Node tests read process.env; browser builds get it from the Vite config, or
+ * not at all (a browser has no `process`, so reading it must not throw).
+ */
+function processEnv(): Record<string, string | undefined> {
+  try {
+    return process.env || {};
+  } catch {
+    return {};
+  }
+}
+
 export function createSecondaryFirebaseApp(appName: string) {
   if (!app) return null;
   const secondaryApp = initializeApp(app.options, appName);
@@ -155,13 +168,14 @@ export function createSecondaryFirebaseApp(appName: string) {
   const secondaryDb = getFirestore(secondaryApp);
 
   const isNodeEnv = typeof window === 'undefined' && typeof process !== 'undefined';
+  const env = processEnv();
   const shouldConnectEmulator =
-    Boolean(process.env?.FIRESTORE_EMULATOR_HOST) ||
-    process.env?.VITE_USE_EMULATOR === 'true' ||
-    (isNodeEnv && process.env?.ALLOW_LIVE_FIREBASE !== 'true');
+    Boolean(env.FIRESTORE_EMULATOR_HOST) ||
+    env.VITE_USE_EMULATOR === 'true' ||
+    (isNodeEnv && env.ALLOW_LIVE_FIREBASE !== 'true');
 
   if (shouldConnectEmulator) {
-    const emulatorHostStr = process.env?.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
+    const emulatorHostStr = env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
     const parts = emulatorHostStr.split(':');
     const host = parts[0] && parts[0].trim().length > 0 ? parts[0].trim() : '127.0.0.1';
     const port = parseInt(parts[1] || '8088', 10) || 8088;
@@ -169,7 +183,7 @@ export function createSecondaryFirebaseApp(appName: string) {
       connectFirestoreEmulator(secondaryDb, host, port);
     } catch {}
 
-    const authHostStr = process.env?.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
+    const authHostStr = env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
     const authParts = authHostStr.replace(/^https?:\/\//, '').split(':');
     const authHost = authParts[0] && authParts[0].trim().length > 0 ? authParts[0].trim() : '127.0.0.1';
     const authPort = parseInt(authParts[1] || '9099', 10) || 9099;

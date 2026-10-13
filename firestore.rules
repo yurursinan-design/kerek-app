@@ -834,6 +834,12 @@ service cloud.firestore {
                       (resource.data.status == 'COMPLETED' && incoming().status == 'COMPLETED') ||
                       (resource.data.status == 'CANCELLED' && incoming().status == 'CANCELLED')
                     )
+                    // A proposed or rescheduled time is confirmed by the other side, not by whoever proposed it
+                    && (
+                      incoming().status != 'CONFIRMED' || resource.data.status == 'CONFIRMED' ||
+                      (resource.data.proposedBy == 'customer' && (request.auth.uid == resource.data.providerUserId || request.auth.uid == resource.data.providerId)) ||
+                      (resource.data.proposedBy == 'provider' && request.auth.uid == resource.data.customerId)
+                    )
                     && (
                       (!('workStatus' in incoming()) && !('workStatus' in resource.data)) ||
                       (('workStatus' in incoming()) && ('workStatus' in resource.data) && incoming().workStatus == resource.data.workStatus) ||

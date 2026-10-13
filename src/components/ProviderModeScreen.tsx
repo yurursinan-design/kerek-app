@@ -606,12 +606,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     const norm = normalizeRequestStatus(r.status);
     if (norm === 'COMPLETED') return false;
 
-    return (
-      offer.status === 'ACCEPTED' ||
-      r.selectedOfferId === offer.id ||
-      norm === 'PROVIDER_SELECTED' ||
-      norm === 'IN_PROGRESS'
-    );
+    // Only jobs this provider was chosen for; another provider's job is not "active" here
+    return offer.status === 'ACCEPTED' || r.selectedOfferId === offer.id;
   });
 
   const newCount = newRequests.length;

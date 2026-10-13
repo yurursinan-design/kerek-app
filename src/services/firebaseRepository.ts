@@ -89,6 +89,10 @@ export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Rec
       // Only plain objects are cleaned recursively; Firestore values (increment(), timestamps) pass through
       if (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
         clean[key] = sanitizeForFirestore(value);
+      } else if (Array.isArray(value)) {
+        clean[key] = value
+          .filter((v) => v !== undefined)
+          .map((v) => (v !== null && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype ? sanitizeForFirestore(v) : v));
       } else {
         clean[key] = value;
       }

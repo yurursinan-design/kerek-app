@@ -1788,6 +1788,27 @@ async function runTestSuite() {
       await assertSucceeds(updateDoc(doc(phoneUser('prov_d').firestore(), 'offers', 'OFFER-req_del-prov_d'), { providerPhone: deleteField(), providerWhatsapp: deleteField() }));
     });
 
+    // ---------------- 19. Appointment confirmation ----------------
+    await test('Appointments: the side that proposed a time cannot confirm it; the other side can', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        await setDoc(doc(db, 'requests', 'req_ap'), {
+          id: 'req_ap', customerId: 'cust_ap', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-req_ap-prov_ap',
+        });
+        await setDoc(doc(db, 'offers', 'OFFER-req_ap-prov_ap'), {
+          id: 'OFFER-req_ap-prov_ap', requestId: 'req_ap', providerId: 'prov_ap', providerUserId: 'prov_ap', providerName: 'P', price: '1', status: 'ACCEPTED',
+        });
+        await setDoc(doc(db, 'appointments', 'appointment_req_ap'), {
+          id: 'appointment_req_ap', requestId: 'req_ap', customerId: 'cust_ap', providerId: 'prov_ap', providerUserId: 'prov_ap',
+          proposedBy: 'customer', scheduledAt: '2026-10-20T10:00:00.000Z', status: 'PROPOSED', workStatus: 'NOT_STARTED',
+          createdAt: '2026-10-13T10:00:00.000Z', updatedAt: '2026-10-13T10:00:00.000Z',
+        });
+      });
+      const confirm = { status: 'CONFIRMED', updatedAt: new Date().toISOString() };
+      await assertFails(updateDoc(doc(phoneUser('cust_ap').firestore(), 'appointments', 'appointment_req_ap'), confirm));
+      await assertSucceeds(updateDoc(doc(phoneUser('prov_ap').firestore(), 'appointments', 'appointment_req_ap'), confirm));
+    });
+
   } finally {
     // Isolated Emulator Cleanup
     console.log('\n--- CLEANUP: Clearing Emulator Data ---');
