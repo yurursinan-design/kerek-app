@@ -4,7 +4,8 @@
  * Kazakhstan numbers, the code goes out as the authentication template (Kazakh or Russian, Russian
  * when the Kazakh one is missing) and only its hash is stored, wrong codes count, five tries end the
  * code, a minute between codes, the number is put on the caller's own account, a second device with
- * the same number gets that account, and refusals are reported.
+ * the same number gets that account, refusals are reported, and Google Play's review number signs in
+ * with its fixed code without any message.
  */
 process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || process.env.VITE_FIREBASE_PROJECT_ID || 'demo-kerek';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
@@ -141,6 +142,28 @@ async function main() {
   process.env.WHATSAPP_PHONE_NUMBER_ID = '';
   assert((await errCode(run(requestLoginCode, uidC, { phone: `+7708${tail}` }, '10.0.0.7'))) === 'failed-precondition', 'Missing business number is reported as not set up');
   process.env.WHATSAPP_PHONE_NUMBER_ID = '1234567890';
+
+  // 9. Google Play review number: its fixed code, no message (works even before WhatsApp is set up)
+  const reviewPhone = `+7709${tail}`;
+  process.env.PLAY_REVIEW_LOGIN = `${reviewPhone.slice(1)}:246810`;
+  process.env.WHATSAPP_PHONE_NUMBER_ID = '';
+  const uidD = `anonD_${tail}`;
+  await auth.createUser({ uid: uidD });
+  const sentBefore = sent.length;
+  assert((await errCode(run(requestLoginCode, uidD, { phone: reviewPhone }, '10.0.0.8'))) === 'ok', 'Review number gets a code before WhatsApp is set up');
+  assert(sent.length === sentBefore, 'No WhatsApp message for the review number');
+  assert((await errCode(run(verifyLoginCode, uidD, { phone: reviewPhone, code: '135790' }))) === 'invalid-argument', 'Review number refuses a wrong code');
+  const res4 = await run(verifyLoginCode, uidD, { phone: reviewPhone, code: '246810' });
+  assert(typeof res4?.token === 'string' && (await auth.getUser(uidD)).phoneNumber === reviewPhone, 'Review number signs in with its fixed code');
+  process.env.WHATSAPP_PHONE_NUMBER_ID = '1234567890';
+  const other = `+7704${tail}`;
+  assert((await errCode(run(requestLoginCode, uidD, { phone: other }, '10.0.0.9'))) === 'ok', 'Other numbers still get a code');
+  const otherMsg = sent[sent.length - 1];
+  assert(sent.length === sentBefore + 1 && otherMsg.to === other.slice(1), 'Other numbers still get a WhatsApp message');
+  assert((await errCode(run(verifyLoginCode, uidD, { phone: other, code: '246810' }))) === 'invalid-argument' || otherMsg.bodyCode === '246810', 'The review code does not open other numbers');
+  process.env.PLAY_REVIEW_LOGIN = '';
+  await getFirestore().collection('rateLimits').doc(`otp_phone_min_${createHash('sha256').update(`login:${reviewPhone}`).digest('hex').slice(0, 40)}`).delete();
+  assert((await errCode(run(requestLoginCode, uidD, { phone: reviewPhone }, '10.0.0.10'))) === 'ok' && sent[sent.length - 1].to === reviewPhone.slice(1), 'Without the setting the review number is an ordinary number');
 
   console.log(failed ? `\nWHATSAPP LOGIN: ${failed} FAILED` : '\nWHATSAPP LOGIN: ALL CHECKS PASSED');
   process.exit(failed ? 1 : 0);

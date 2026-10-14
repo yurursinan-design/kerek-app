@@ -17,10 +17,18 @@ import { allowCall, clientIp, DAY_MS } from './limits';
  *    already has this number (the same person on another device), that account is used. Either way
  *    the app gets a custom token and signs in fresh, which also counts as a recent sign-in (needed
  *    for account deletion). ID tokens then carry phone_number, which the security rules require.
+ *
+ * Google Play's app reviewers have no Kazakhstan WhatsApp, so one review number gets a fixed code
+ * (PLAY_REVIEW_LOGIN) instead of a message; see reviewCodeFor.
  */
 
 /** Permanent access token of the Meta system user that owns the WhatsApp Business account */
 const whatsappToken = defineSecret('WHATSAPP_TOKEN');
+/**
+ * Sign-in for Google Play's app reviewers: "<number>:<6 digits>", e.g. "+77000000000:123456",
+ * given to Google in Play Console (App access). Made by scripts/cloudshell-login-setup.sh.
+ */
+const playReviewLogin = defineSecret('PLAY_REVIEW_LOGIN');
 /** Settings from functions/.env (not secret) */
 const whatsappPhoneNumberId = defineString('WHATSAPP_PHONE_NUMBER_ID', { default: '' });
 const whatsappTemplate = defineString('WHATSAPP_TEMPLATE', { default: 'kerek_login_code' });
@@ -53,6 +61,15 @@ function codeDocId(phone: string): string {
 
 function codeHash(phone: string, code: string, salt: string): string {
   return sha256(`${salt}:${phone}:${code}`);
+}
+
+/**
+ * The fixed code when this is the review number, else null. No message is sent for that number;
+ * limits, tries and expiry work as for any other number. An empty or other value turns it off.
+ */
+function reviewCodeFor(phone: string): string | null {
+  const m = /^\s*(\+?\d{11})\s*:\s*(\d{6})\s*$/.exec(playReviewLogin.value() || '');
+  return m && normalizeKzPhone(m[1]) === phone ? m[2] : null;
 }
 
 type GraphError = { code?: number; message?: string; error_subcode?: number };
@@ -102,7 +119,7 @@ async function sendWhatsAppCode(phone: string, code: string, appLang: unknown): 
 }
 
 export const requestLoginCode = onCall<{ phone?: string; lang?: string }, Promise<{ ok: true; retryAfter: number }>>(
-  { region: REGION, secrets: [whatsappToken], maxInstances: 5, timeoutSeconds: 20 },
+  { region: REGION, secrets: [whatsappToken, playReviewLogin], maxInstances: 5, timeoutSeconds: 20 },
   async (request) => {
     if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign-in is required.');
     const phone = normalizeKzPhone(request.data?.phone);
@@ -120,7 +137,8 @@ export const requestLoginCode = onCall<{ phone?: string; lang?: string }, Promis
     if (ip && !(await allowCall(`otp_ip_${sha256(ip).slice(0, 32)}`, 10, now, 3600 * 1000))) throw tooMany();
     if (!(await allowCall('otp_global_day', GLOBAL_DAILY_CODES, now, DAY_MS))) throw tooMany();
 
-    const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+    const reviewCode = reviewCodeFor(phone);
+    const code = reviewCode || String(crypto.randomInt(0, 1000000)).padStart(6, '0');
     const salt = crypto.randomBytes(16).toString('hex');
     await getFirestore()
       .collection('loginCodes')
@@ -135,7 +153,7 @@ export const requestLoginCode = onCall<{ phone?: string; lang?: string }, Promis
         expireAt: Timestamp.fromMillis(now + DAY_MS),
       });
 
-    await sendWhatsAppCode(phone, code, request.data?.lang);
+    if (!reviewCode) await sendWhatsAppCode(phone, code, request.data?.lang);
     return { ok: true, retryAfter: 60 };
   }
 );
