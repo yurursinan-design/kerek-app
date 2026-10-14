@@ -1,5 +1,5 @@
-# Uploads selected Cloud Functions before a full release, e.g. the SMS login and notification functions so they can
-# be tried on the preview and the Android test app. Runs only for a commit on a claude/** branch
+# Uploads selected Cloud Functions before a full release, e.g. the WhatsApp login (with Google Play's
+# review sign-in) and notification functions, so they can be tried on the preview and the Android app. Runs only for a commit on a claude/** branch
 # whose message starts with "[deploy-functions]" (a mention further down doesn't count), and only
 # the functions listed in ONLY (never the website or the database rules; those go live with
 # deploy.yml after "canlıya al").
