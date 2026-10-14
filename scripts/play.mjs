@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const PACKAGE = 'kz.kerek.app';
+const PACKAGE = 'kerek.kz.app';
 const API = `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${PACKAGE}`;
 const UPLOAD = `https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/${PACKAGE}`;
 const STORE = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'store');

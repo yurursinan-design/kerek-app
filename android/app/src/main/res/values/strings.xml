@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">KEREK</string>
     <string name="title_activity_main">KEREK</string>
-    <string name="package_name">kz.kerek.app</string>
-    <string name="custom_url_scheme">kz.kerek.app</string>
+    <string name="package_name">kerek.kz.app</string>
+    <string name="custom_url_scheme">kerek.kz.app</string>
 </resources>

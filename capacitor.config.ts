@@ -2,7 +2,8 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 // Android (and later iPhone) app around the same web build in dist/
 const config: CapacitorConfig = {
-  appId: 'kz.kerek.app',
+  // The package name in Google Play (android/app/build.gradle has the same applicationId)
+  appId: 'kerek.kz.app',
   appName: 'KEREK',
   webDir: 'dist',
   plugins: {
