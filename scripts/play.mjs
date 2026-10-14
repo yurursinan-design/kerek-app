@@ -31,7 +31,8 @@ function hint(status, text) {
     return 'Play API bu projede kapalı: Cloud Shell satırını (androidpublisher) çalıştırın.';
   }
   if (status === 401 || status === 403) return 'Robot hesabın bu uygulamada izni yok: Play Console daveti ve izinleri kontrol edilmeli.';
-  if (status === 404) return `Play Console'da ${PACKAGE} paket adlı uygulama bulunamadı.`;
+  // A new app is only visible to the API after its first bundle was uploaded in Play Console
+  if (status === 404) return `Play ${PACKAGE} uygulamasını henüz görmüyor: ilk paket (AAB) Play Console'dan elle yüklenmeli ("[play] bundle").`;
   return '';
 }
 
