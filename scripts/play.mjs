@@ -7,6 +7,8 @@
  *   node scripts/play.mjs release <app.aab>  the app bundle as a draft release on closed testing
  *
  * Nothing here sends a release to users: releases stay drafts until rolled out in Play Console.
+ * The service account only sees the app once its invitation is saved in Play Console (Users and
+ * permissions); until then, and for a new app before its first bundle, Play answers "Package not found".
  * store/<language>/ holds title.txt, short-description.txt, full-description.txt,
  * feature-graphic.jpg and phone-screenshots/1.jpg… (in display order); store/icon.png is shared.
  */
