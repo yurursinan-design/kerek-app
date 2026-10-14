@@ -76,19 +76,29 @@ async function listing(edit) {
   await call('PATCH', `${API}/edits/${edit}/details`, { json: DETAILS });
   console.log('Ayrıntılar:', JSON.stringify(DETAILS));
   for (const language of LANGUAGES) {
-    const texts = { language, title: read(language, 'title.txt'), shortDescription: read(language, 'short-description.txt'), fullDescription: read(language, 'full-description.txt') };
-    await call('PUT', `${API}/edits/${edit}/listings/${language}`, { json: texts });
-    console.log(`${language}: "${texts.title}" (${texts.shortDescription.length}/80, ${texts.fullDescription.length}/4000)`);
-    // Replace the images instead of adding to them
-    for (const kind of ['icon', 'featureGraphic', 'phoneScreenshots']) {
-      await call('DELETE', `${API}/edits/${edit}/listings/${language}/${kind}`);
+    try {
+      await uploadListing(edit, language);
+    } catch (err) {
+      // A translation Play refuses is reported but does not hold back the default listing
+      if (language === DETAILS.defaultLanguage) throw err;
+      console.warn(`UYARI: ${language} yüklenemedi, diğerleri kaydediliyor.\n${err.message || err}`);
     }
-    await uploadImage(edit, language, 'icon', path.join(STORE, 'icon.png'));
-    await uploadImage(edit, language, 'featureGraphic', path.join(STORE, language, 'feature-graphic.jpg'));
-    const dir = path.join(STORE, language, 'phone-screenshots');
-    const shots = fs.readdirSync(dir).filter((f) => /\.(jpe?g|png)$/.test(f)).sort((a, b) => parseInt(a) - parseInt(b));
-    for (const f of shots) await uploadImage(edit, language, 'phoneScreenshots', path.join(dir, f));
   }
+}
+
+async function uploadListing(edit, language) {
+  const texts = { language, title: read(language, 'title.txt'), shortDescription: read(language, 'short-description.txt'), fullDescription: read(language, 'full-description.txt') };
+  await call('PUT', `${API}/edits/${edit}/listings/${language}`, { json: texts });
+  console.log(`${language}: "${texts.title}" (${texts.shortDescription.length}/80, ${texts.fullDescription.length}/4000)`);
+  // Replace the images instead of adding to them
+  for (const kind of ['icon', 'featureGraphic', 'phoneScreenshots']) {
+    await call('DELETE', `${API}/edits/${edit}/listings/${language}/${kind}`);
+  }
+  await uploadImage(edit, language, 'icon', path.join(STORE, 'icon.png'));
+  await uploadImage(edit, language, 'featureGraphic', path.join(STORE, language, 'feature-graphic.jpg'));
+  const dir = path.join(STORE, language, 'phone-screenshots');
+  const shots = fs.readdirSync(dir).filter((f) => /\.(jpe?g|png)$/.test(f)).sort((a, b) => parseInt(a) - parseInt(b));
+  for (const f of shots) await uploadImage(edit, language, 'phoneScreenshots', path.join(dir, f));
 }
 
 async function release(edit, aab) {
