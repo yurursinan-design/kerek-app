@@ -1,7 +1,7 @@
 # Builds the Android test app (APK) from the same web build and publishes it as the
 # "android-test" pre-release, so it can be downloaded and installed straight on a phone.
 # Test builds are signed with the committed test key (android/app/kerek-debug.keystore);
-# store releases will use a separate private key.
+# store releases are signed with the private upload key (see play.yml).
 name: Android
 
 on:
