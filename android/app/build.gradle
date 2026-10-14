@@ -4,7 +4,9 @@ android {
     namespace = "kz.kerek.app"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "kz.kerek.app"
+        // The package name of the app in Google Play (fixed there when the app was created); the
+        // Java code keeps its namespace above
+        applicationId "kerek.kz.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Google Play needs a higher number for every upload; the release workflow (play.yml) sets it
