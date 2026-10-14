@@ -5,6 +5,7 @@
 #   bundle   builds the signed app bundle and puts it on the "play-bundle" GitHub pre-release, for
 #            the first upload, which Play only accepts by hand in Play Console
 #   release  builds it and uploads it to closed testing as a draft
+#   firebase registers the Play package in Firebase and prints its google-services.json
 # Releases stay drafts: rolling them out to testers or users is done in Play Console.
 #
 # The upload key that signs the bundle lives in Secret Manager (ANDROID_UPLOAD_KEY: password on the
@@ -49,7 +50,7 @@ jobs:
         run: |
           # the word after "[play]", without punctuation ("check:" → check)
           mode=$(printf '%s\n' "$MSG" | head -n1 | awk '{print $2}' | tr -cd 'a-z')
-          case "$mode" in check|listing|bundle|release) ;; *) echo "Bilinmeyen iş: $mode (check | listing | bundle | release)"; exit 1 ;; esac
+          case "$mode" in check|listing|bundle|release|firebase) ;; *) echo "Bilinmeyen iş: $mode (check | listing | bundle | release | firebase)"; exit 1 ;; esac
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           case "$mode" in bundle|release) echo "build=true" >> "$GITHUB_OUTPUT" ;; esac
           echo "İş: $mode"
@@ -61,7 +62,7 @@ jobs:
           workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
           service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
           token_format: access_token
-          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher,https://www.googleapis.com/auth/cloud-platform
 
       - uses: actions/setup-node@v4
         with:
@@ -134,8 +135,14 @@ jobs:
             --notes "Play Console'a yüklenecek imzalı paket (AAB). Kaynak: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
 
       # ----
+      - name: Firebase Android uygulaması
+        if: steps.mode.outputs.mode == 'firebase'
+        env:
+          GCP_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: node scripts/firebase-android-app.mjs kerek.kz.app
+
       - name: Google Play
-        if: steps.mode.outputs.mode != 'bundle'
+        if: steps.mode.outputs.mode != 'bundle' && steps.mode.outputs.mode != 'firebase'
         env:
           PLAY_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
