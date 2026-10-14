@@ -1,7 +1,8 @@
 /**
- * Registers an Android package in the Firebase project (if it isn't yet) and prints its
- * google-services.json, which the Android build needs for push messages. Run by play.yml
- * ("[play] firebase") with the github-deploy service account:
+ * Makes sure an Android package is registered in the Firebase project and prints one
+ * google-services.json with every Android app of the project in it, which the Android build needs
+ * for push messages. Run by play.yml ("[play] firebase") with the github-deploy service account,
+ * which can read the project's apps; registering a new one needs Firebase console access.
  *
  *   node scripts/firebase-android-app.mjs <package name>
  */
@@ -23,21 +24,26 @@ async function call(method, url, json) {
 }
 
 const { apps = [] } = await call('GET', `${API}/projects/${PROJECT}/androidApps?pageSize=100`);
-let app = apps.find((a) => a.packageName === pkg);
-if (app) {
-  console.log(`Firebase'de zaten var: ${pkg} (${app.appId})`);
-} else {
+if (!apps.some((a) => a.packageName === pkg)) {
   let op = await call('POST', `${API}/projects/${PROJECT}/androidApps`, { packageName: pkg, displayName: 'KEREK' });
   for (let i = 0; !op.done && i < 30; i++) {
     await new Promise((r) => setTimeout(r, 2000));
     op = await call('GET', `${API}/${op.name}`);
   }
-  if (op.error) throw new Error(`Firebase app not created: ${JSON.stringify(op.error)}`);
-  if (!op.done) throw new Error('Firebase app creation did not finish in time');
-  app = op.response;
-  console.log(`Firebase'e eklendi: ${pkg} (${app.appId})`);
+  if (op.error || !op.done) throw new Error(`Firebase app not created: ${JSON.stringify(op.error || 'timeout')}`);
+  apps.push(op.response);
+  console.log(`Firebase'e eklendi: ${pkg}`);
 }
-const config = await call('GET', `${API}/projects/${PROJECT}/androidApps/${app.appId}/config`);
+
+// One file for all packages: the build picks the entry that matches its applicationId
+let merged = null;
+for (const app of apps) {
+  const { configFileContents } = await call('GET', `${API}/projects/${PROJECT}/androidApps/${app.appId}/config`);
+  const config = JSON.parse(Buffer.from(configFileContents, 'base64').toString('utf8'));
+  if (!merged) merged = config;
+  else merged.client.push(...config.client.filter((c) => !merged.client.some((m) => m.client_info.mobilesdk_app_id === c.client_info.mobilesdk_app_id)));
+  console.log(`${app.packageName}: ${app.appId}`);
+}
 console.log('----- google-services.json -----');
-console.log(Buffer.from(config.configFileContents, 'base64').toString('utf8'));
+console.log(JSON.stringify(merged, null, 2));
 console.log('----- end -----');
