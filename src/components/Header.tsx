@@ -17,7 +17,7 @@ interface HeaderProps {
   unreadCount?: number;
   currentUserId?: string;
   onSelectNotification?: (notif: AppNotification) => void;
-  /** SMS login controls (cloud mode only) */
+  /** Phone login controls (cloud mode only) */
   showAccount?: boolean;
   phoneNumber?: string | null;
   onLoginClick?: () => void;
@@ -111,7 +111,7 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             </div>
 
-            {/* SMS login: "log in" when not verified, otherwise the masked number with a log-out option */}
+            {/* Phone login: "log in" when not verified, otherwise the masked number with a log-out option */}
             {showAccount && (
               <div className="relative">
                 <button

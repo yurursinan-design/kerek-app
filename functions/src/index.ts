@@ -7,8 +7,8 @@ import { GEMINI_CONFIG } from './config';
 import { parseTextWithGemini, ParsedServiceRequest } from './geminiParser';
 import { allowCall, clientIp, DAY_MS } from './limits';
 
-// SMS login through Mobizon (Kazakhstan); see smsLogin.ts
-export { requestLoginCode, verifyLoginCode } from './smsLogin';
+// Phone login with a one-time code sent to WhatsApp; see whatsappLogin.ts
+export { requestLoginCode, verifyLoginCode } from './whatsappLogin';
 // In-app notices from real events, and push messages to phones; see notifications.ts
 export {
   notifyOnOfferCreated,

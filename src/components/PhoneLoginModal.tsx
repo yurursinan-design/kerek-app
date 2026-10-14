@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { ConfirmationResult } from 'firebase/auth';
 import { Loader2, Smartphone, X } from 'lucide-react';
 import { Language } from '../types';
-import { confirmSmsCode, normalizePhone, phoneAuthErrorMessage, resetPhoneVerifier, sendSmsCode } from '../services/phoneAuth';
+import { confirmLoginCode, normalizePhone, phoneAuthErrorMessage, resetPhoneVerifier, sendLoginCode } from '../services/phoneAuth';
 import { recordLegalConsent } from '../services/account';
 import { LegalLinks } from './LegalModal';
 
@@ -40,8 +40,8 @@ const TEXT = {
   },
   phoneLabel: { kz: 'Телефон нөмірі', ru: 'Номер телефона' },
   sendCode: { kz: 'Код жіберу', ru: 'Получить код' },
-  codeLabel: { kz: 'SMS коды', ru: 'Код из SMS' },
-  codeSentTo: { kz: 'Код жіберілді:', ru: 'Код отправлен на' },
+  codeLabel: { kz: 'WhatsApp-тағы код', ru: 'Код из WhatsApp' },
+  codeSentTo: { kz: 'Код WhatsApp-қа жіберілді:', ru: 'Код отправлен в WhatsApp на' },
   confirm: { kz: 'Растау', ru: 'Подтвердить' },
   changeNumber: { kz: 'Нөмірді өзгерту', ru: 'Изменить номер' },
   resendIn: { kz: 'Қайта жіберу:', ru: 'Повторно через' },
@@ -111,7 +111,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
     setBusy(true);
     setError(null);
     try {
-      const result = await sendSmsCode(normalized, 'kerek-recaptcha', lang === 'kz' ? 'kz' : 'ru');
+      const result = await sendLoginCode(normalized, 'kerek-recaptcha', lang === 'kz' ? 'kz' : 'ru');
       setConfirmation(result);
       setSentTo(normalized);
       setSecondsLeft(RESEND_SECONDS);
@@ -128,7 +128,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
     setBusy(true);
     setError(null);
     try {
-      await confirmSmsCode(confirmation, code.replace(/\D/g, ''));
+      await confirmLoginCode(confirmation, code.replace(/\D/g, ''));
       // Keep a record of the consent given in this form (date and policy version)
       recordLegalConsent().catch((err) => console.warn('[PhoneLogin] consent record note:', err));
       onSuccess();
@@ -278,7 +278,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
           </div>
         )}
 
-        {/* Host for the invisible reCAPTCHA that Firebase uses to protect SMS sending */}
+        {/* Host for the invisible reCAPTCHA of the emulator's phone sign-in (tests) */}
         <div id="kerek-recaptcha" />
       </div>
     </div>

@@ -6,7 +6,7 @@ import { LEGAL_VERSION } from '../data/legalTexts';
 import { clearPersonalLocalData } from './storage';
 import { forgetPushToken } from './pushNotifications';
 
-/** Deleting an account needs a recent sign-in (Firebase rule); older sessions confirm by SMS again. */
+/** Deleting an account needs a recent sign-in (Firebase rule); older sessions confirm the number with a new code. */
 /** A provider with a job in progress can't delete the account until the job is finished or cancelled. */
 export class ActiveJobsError extends Error {
   constructor() {

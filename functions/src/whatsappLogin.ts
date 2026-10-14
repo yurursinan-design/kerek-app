@@ -2,15 +2,16 @@ import * as crypto from 'crypto';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { defineSecret } from 'firebase-functions/params';
+import { defineSecret, defineString } from 'firebase-functions/params';
 import { allowCall, clientIp, DAY_MS } from './limits';
 
 /**
- * SMS login with a Kazakhstan SMS gateway (Mobizon) instead of Firebase's own SMS, which does not
- * deliver to +7 numbers for this project.
+ * Phone login with a one-time code sent to WhatsApp (WhatsApp Business Platform, Cloud API), using
+ * an approved authentication template with a copy-code button.
  *
- * 1. requestLoginCode: the app (signed in anonymously) asks for a code; a 6-digit code is texted
- *    and only its hash is stored in loginCodes/{phone hash} (no client access: default-deny rules).
+ * 1. requestLoginCode: the app (signed in anonymously) asks for a code; a 6-digit code goes to the
+ *    number's WhatsApp and only its hash is stored in loginCodes/{phone hash} (no client access:
+ *    default-deny rules).
  * 2. verifyLoginCode: the code is checked (5 tries, 10 minutes). The number is then put on the
  *    caller's own account, so requests made before logging in stay theirs, or, when another account
  *    already has this number (the same person on another device), that account is used. Either way
@@ -18,15 +19,23 @@ import { allowCall, clientIp, DAY_MS } from './limits';
  *    for account deletion). ID tokens then carry phone_number, which the security rules require.
  */
 
-const mobizonApiKey = defineSecret('MOBIZON_API_KEY');
+/** Permanent access token of the Meta system user that owns the WhatsApp Business account */
+const whatsappToken = defineSecret('WHATSAPP_TOKEN');
+/** Settings from functions/.env (not secret) */
+const whatsappPhoneNumberId = defineString('WHATSAPP_PHONE_NUMBER_ID', { default: '' });
+const whatsappTemplate = defineString('WHATSAPP_TEMPLATE', { default: 'kerek_login_code' });
+const graphVersion = defineString('WHATSAPP_GRAPH_VERSION', { default: 'v23.0' });
 
 const REGION = 'asia-south1';
-// 10 minutes: Mobizon may hold a message for moderation for a few minutes before delivering it
 const CODE_TTL_MS = 10 * 60 * 1000;
 const MAX_TRIES = 5;
-/** All SMS sent by the app in one day; protects the Mobizon balance from abuse */
-const GLOBAL_DAILY_SMS = 1000;
-const MOBIZON_URL = 'https://api.mobizon.kz/service/message/sendsmsmessage?output=json&api=v1';
+/** All codes sent by the app in one day; protects the WhatsApp balance from abuse */
+const GLOBAL_DAILY_CODES = 1000;
+/** Template language per app language; Russian is the fallback when a Kazakh version is missing */
+const TEMPLATE_LANG: Record<string, string> = { kz: 'kk', ru: 'ru' };
+/** Graph API error codes: template missing in this language, and sending too fast */
+const TEMPLATE_MISSING = 132001;
+const RATE_LIMITED = new Set([4, 80007, 130429, 131048, 131056]);
 
 /** Kazakhstan mobile numbers only (+7 7xx / +7 6xx), the same check as the app. */
 export function normalizeKzPhone(raw: unknown): string | null {
@@ -46,24 +55,54 @@ function codeHash(phone: string, code: string, salt: string): string {
   return sha256(`${salt}:${phone}:${code}`);
 }
 
-async function sendSms(apiKey: string, phone: string, text: string): Promise<void> {
-  const body = new URLSearchParams({ apiKey, recipient: phone.replace(/^\+/, ''), text });
-  const res = await fetch(MOBIZON_URL, {
+type GraphError = { code?: number; message?: string; error_subcode?: number };
+
+async function postTemplate(phone: string, code: string, language: string): Promise<GraphError | null> {
+  const url = `https://graph.facebook.com/${graphVersion.value()}/${whatsappPhoneNumberId.value()}/messages`;
+  const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
+    headers: { Authorization: `Bearer ${whatsappToken.value()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: phone.replace(/^\+/, ''),
+      type: 'template',
+      template: {
+        name: whatsappTemplate.value(),
+        language: { code: language },
+        components: [
+          { type: 'body', parameters: [{ type: 'text', text: code }] },
+          // The copy-code button carries the same code
+          { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: code }] },
+        ],
+      },
+    }),
     signal: AbortSignal.timeout(10000),
   });
-  const data = (await res.json().catch(() => null)) as { code?: number; message?: string } | null;
-  if (!res.ok || !data || data.code !== 0) {
-    // The gateway's reason stays in the server log (balance, blocked number, …)
-    console.error('[requestLoginCode] Mobizon refused the SMS:', res.status, data?.code, data?.message);
-    throw new HttpsError('unavailable', 'The SMS could not be sent. Please try again later.');
+  const data = (await res.json().catch(() => null)) as { messages?: unknown[]; error?: GraphError } | null;
+  if (res.ok && data?.messages?.length) return null;
+  return data?.error || { code: res.status, message: 'No message id in the reply' };
+}
+
+async function sendWhatsAppCode(phone: string, code: string, appLang: unknown): Promise<void> {
+  if (!whatsappPhoneNumberId.value()) {
+    console.error('[requestLoginCode] WHATSAPP_PHONE_NUMBER_ID is not set');
+    throw new HttpsError('failed-precondition', 'WhatsApp login is not set up yet.');
   }
+  const first = TEMPLATE_LANG[String(appLang)] || 'ru';
+  let err = await postTemplate(phone, code, first);
+  if (err?.code === TEMPLATE_MISSING && first !== 'ru') err = await postTemplate(phone, code, 'ru');
+  if (!err) return;
+  // Meta's reason stays in the server log (token, template, payment, blocked number, …)
+  console.error('[requestLoginCode] WhatsApp refused the code:', err.code, err.error_subcode, err.message);
+  if (err.code !== undefined && RATE_LIMITED.has(err.code)) {
+    throw new HttpsError('resource-exhausted', 'Too many codes requested. Please wait and try again.');
+  }
+  throw new HttpsError('unavailable', 'The code could not be sent. Please try again later.');
 }
 
 export const requestLoginCode = onCall<{ phone?: string; lang?: string }, Promise<{ ok: true; retryAfter: number }>>(
-  { region: REGION, secrets: [mobizonApiKey], maxInstances: 5, timeoutSeconds: 20 },
+  { region: REGION, secrets: [whatsappToken], maxInstances: 5, timeoutSeconds: 20 },
   async (request) => {
     if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign-in is required.');
     const phone = normalizeKzPhone(request.data?.phone);
@@ -74,12 +113,12 @@ export const requestLoginCode = onCall<{ phone?: string; lang?: string }, Promis
     const phoneKey = codeDocId(phone);
     // One code a minute and a few an hour per number, per account and per network address,
     // plus one ceiling for the whole app
-    if (!(await allowCall(`sms_phone_min_${phoneKey}`, 1, now, 60 * 1000))) throw tooMany();
-    if (!(await allowCall(`sms_phone_day_${phoneKey}`, 8, now, DAY_MS))) throw tooMany();
-    if (!(await allowCall(`sms_uid_${request.auth.uid}`, 5, now, 3600 * 1000))) throw tooMany();
+    if (!(await allowCall(`otp_phone_min_${phoneKey}`, 1, now, 60 * 1000))) throw tooMany();
+    if (!(await allowCall(`otp_phone_day_${phoneKey}`, 8, now, DAY_MS))) throw tooMany();
+    if (!(await allowCall(`otp_uid_${request.auth.uid}`, 5, now, 3600 * 1000))) throw tooMany();
     const ip = clientIp(request.rawRequest);
-    if (ip && !(await allowCall(`sms_ip_${sha256(ip).slice(0, 32)}`, 10, now, 3600 * 1000))) throw tooMany();
-    if (!(await allowCall('sms_global_day', GLOBAL_DAILY_SMS, now, DAY_MS))) throw tooMany();
+    if (ip && !(await allowCall(`otp_ip_${sha256(ip).slice(0, 32)}`, 10, now, 3600 * 1000))) throw tooMany();
+    if (!(await allowCall('otp_global_day', GLOBAL_DAILY_CODES, now, DAY_MS))) throw tooMany();
 
     const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
     const salt = crypto.randomBytes(16).toString('hex');
@@ -96,11 +135,7 @@ export const requestLoginCode = onCall<{ phone?: string; lang?: string }, Promis
         expireAt: Timestamp.fromMillis(now + DAY_MS),
       });
 
-    const text =
-      request.data?.lang === 'kz'
-        ? `KEREK кіру коды: ${code}. Ешкімге айтпаңыз.`
-        : `Код входа KEREK: ${code}. Никому не сообщайте.`;
-    await sendSms(mobizonApiKey.value(), phone, text);
+    await sendWhatsAppCode(phone, code, request.data?.lang);
     return { ok: true, retryAfter: 60 };
   }
 );

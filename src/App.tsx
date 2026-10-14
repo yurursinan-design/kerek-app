@@ -101,7 +101,7 @@ export default function App() {
   const [customerRequestsLoaded, setCustomerRequestsLoaded] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
 
-  // SMS login: who is signed in, and the dialog that asks for a verified phone before publishing
+  // Phone login: who is signed in, and the dialog that asks for a verified phone before publishing
   const [authUid, setAuthUid] = useState<string | null>(auth?.currentUser?.uid || null);
   const [phoneNumber, setPhoneNumber] = useState<string | null>(auth?.currentUser?.phoneNumber || null);
   const [phoneLogin, setPhoneLogin] = useState<PhoneLoginReason | null>(null);
@@ -115,7 +115,7 @@ export default function App() {
     });
   }, []);
 
-  /** Runs `action` now if the account may publish, otherwise after a successful SMS login. */
+  /** Runs `action` now if the account may publish, otherwise after a successful phone login. */
   const withPhoneLogin = (reason: PhoneLoginReason, action: () => void) => {
     if (!requiresPhoneLogin()) {
       action();
@@ -125,7 +125,7 @@ export default function App() {
     setPhoneLogin(reason);
   };
 
-  /** "Delete my account": a stale session confirms the number by SMS first, then deletion continues. */
+  /** "Delete my account": a stale session confirms the number with a new code first, then deletion continues. */
   const handleDeleteAccount = async (): Promise<void> => {
     try {
       await deleteMyAccount();

@@ -204,7 +204,7 @@ export function createSecondaryFirebaseApp(appName: string) {
 
 /**
  * Test support, Auth emulator only: gives the signed-in test user a verified phone number, the way
- * SMS login does in production (publishing requires a phone-verified account). The browser build
+ * phone login does in production (publishing requires a phone-verified account). The browser build
  * never runs this: there `process.env` is empty, so no emulator host is set.
  */
 export async function attachEmulatorTestPhone(targetAuth: Auth | null = auth): Promise<void> {

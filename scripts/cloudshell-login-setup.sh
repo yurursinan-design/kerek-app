@@ -1,7 +1,7 @@
-# One-time setup for SMS login (Mobizon), pasted into Google Cloud Shell by the project owner:
+# One-time setup for phone login (codes sent to WhatsApp), pasted into Google Cloud Shell by the project owner:
 # - roles that let GitHub (github-deploy) upload Cloud Functions, storage rules and Firestore indexes
 # - lets the functions' service account sign login tokens (custom tokens)
-# - stores the Mobizon API key in Secret Manager (typed in, not shown)
+# - stores the WhatsApp Business access token in Secret Manager (typed in, not shown)
 # - lets the functions send push messages to phones (Firebase Cloud Messaging)
 # - automatic clean-up of old login codes, rate-limit counters and notices (Firestore TTL)
 P=kerek-9d153; SA=github-deploy@$P.iam.gserviceaccount.com
@@ -16,8 +16,8 @@ for r in run.invoker eventarc.eventReceiver; do gcloud projects add-iam-policy-b
 # The functions send push messages to phones (Firebase Cloud Messaging)
 gcloud projects add-iam-policy-binding $P --member=serviceAccount:$RT --role=roles/firebasecloudmessaging.admin --condition=None -q >/dev/null && echo "Telefon bildirimleri: tamam"
 # Pasted from a phone, "read" takes the next pasted line instead of the key: paste the lines above
-# first, then this line on its own, and only then the key
-read -rsp "Mobizon API anahtari (yazarken gorunmez): " K; echo; echo "Uzunluk: ${#K}"
-if gcloud secrets describe MOBIZON_API_KEY >/dev/null 2>&1; then printf '%s' "$K" | gcloud secrets versions add MOBIZON_API_KEY --data-file=- -q >/dev/null; else printf '%s' "$K" | gcloud secrets create MOBIZON_API_KEY --data-file=- -q >/dev/null; fi && echo "Mobizon anahtari: kaydedildi"
+# first, then this line on its own, and only then the token
+read -rsp "WhatsApp erisim anahtari (yazarken gorunmez): " K; echo; echo "Uzunluk: ${#K}"
+if gcloud secrets describe WHATSAPP_TOKEN >/dev/null 2>&1; then printf '%s' "$K" | gcloud secrets versions add WHATSAPP_TOKEN --data-file=- -q >/dev/null; else printf '%s' "$K" | gcloud secrets create WHATSAPP_TOKEN --data-file=- -q >/dev/null; fi && echo "WhatsApp anahtari: kaydedildi"
 gcloud firestore fields ttls update expireAt --collection-group=loginCodes --enable-ttl --async -q >/dev/null 2>&1; gcloud firestore fields ttls update expireAt --collection-group=rateLimits --enable-ttl --async -q >/dev/null 2>&1; gcloud firestore fields ttls update expireAt --collection-group=notifications --enable-ttl --async -q >/dev/null 2>&1; echo "Otomatik temizlik: tamam"
-echo "KEREK_SMS_TAMAM"
+echo "KEREK_GIRIS_TAMAM"

@@ -494,7 +494,7 @@ export class FirebaseRepository implements Repository {
 
       // Privacy: phone number and exact location live in the restricted requestContacts document
       let customerPhone: string | undefined = undefined;
-      // The SMS-verified number of the signed-in customer, so the chosen provider can call them
+      // The phone-verified number of the signed-in customer, so the chosen provider can call them
       const verifiedPhone = auth?.currentUser?.phoneNumber || '';
       if (verifiedPhone) {
         customerPhone = verifiedPhone;
