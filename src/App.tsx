@@ -205,7 +205,7 @@ export default function App() {
               const latest = newUnreads[0];
               seenNotifIdsRef.current.add(latest.id);
               setActiveToastNotification(latest);
-              playNotificationSound();
+              playNotificationSound(latest.type);
               showBrowserNotificationIfGranted(
                 localizedText(latest.title, languageRef.current),
                 localizedText(latest.body, languageRef.current),

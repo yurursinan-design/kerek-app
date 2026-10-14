@@ -94,6 +94,15 @@ async function main() {
   assert(!sent.some((s) => s.tokens.includes(`tok_other_${tail}`)), 'Other people’s phones get nothing');
   assert(kz?.data.requestId === 'r1' && kz?.data.recipientRole === 'customer', 'Tapping the push can open the right request');
   assert(!(await db.collection('pushTokens').doc(`tok_dead_${tail}`).get()).exists, 'A phone that no longer accepts messages is forgotten');
+  assert(kz?.android.notification.sound === 'default' && !kz?.android.notification.channelId, 'Other notices keep the normal sound');
+
+  // 8. A new job rings with the dombra strum on the new-jobs channel
+  const jobSent: any[] = [];
+  await n.pushNotification({ id: `notif_new_request_r9_${tail}`, type: 'NEW_REQUEST', recipientUserId: uid, recipientRole: 'provider', requestId: 'r9', title: { kz: 'Жаңа сұраныс табылды', ru: 'Найден новый запрос' }, body: { kz: 'b', ru: 'b' } }, async (msg: any) => {
+    jobSent.push(msg);
+    return { responses: msg.tokens.map(() => ({ success: true })) };
+  });
+  assert(jobSent.length > 0 && jobSent.every((s) => s.android.notification.sound === 'dombra' && s.android.notification.channelId === 'new_jobs'), 'A new job plays the dombra sound', jobSent.map((s) => s.android));
 
   console.log(failed ? `\nSERVER NOTIFICATIONS: ${failed} FAILED` : '\nSERVER NOTIFICATIONS: ALL CHECKS PASSED');
   process.exit(failed ? 1 : 0);

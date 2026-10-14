@@ -39,6 +39,30 @@ async function saveToken(): Promise<void> {
   }
 }
 
+/**
+ * Android plays a notice's sound from its channel, so new-job notices get their own channel with
+ * KEREK's dombra strum (res/raw/dombra.wav). The server sends those notices on this channel id.
+ * Creating it again only refreshes the name in the current language.
+ */
+const NEW_JOB_CHANNEL = 'new_jobs';
+
+async function createNewJobChannel(): Promise<void> {
+  if (Capacitor.getPlatform() !== 'android') return;
+  try {
+    await PushNotifications.createChannel({
+      id: NEW_JOB_CHANNEL,
+      name: lang === 'kz' ? 'Жаңа тапсырыстар' : 'Новые заказы',
+      description: lang === 'kz' ? 'Жаңа тапсырыс келгенде домбыра дыбысы' : 'Звук домбры при новом заказе',
+      sound: 'dombra.wav',
+      importance: 4,
+      visibility: 1,
+      vibration: true,
+    });
+  } catch (err) {
+    console.warn('[Push] new-job channel not created:', err);
+  }
+}
+
 /** Registers this phone for the signed-in account; call again when the account or language changes. */
 export async function startPushNotifications(language: Lang, handler: OpenHandler): Promise<void> {
   if (!isPhoneApp()) return;
@@ -61,6 +85,7 @@ export async function startPushNotifications(language: Lang, handler: OpenHandle
       perm = await PushNotifications.requestPermissions();
     }
     if (perm.receive !== 'granted') return;
+    await createNewJobChannel();
     if (token) await saveToken();
     else await PushNotifications.register();
   } catch (err) {

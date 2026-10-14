@@ -440,8 +440,13 @@ type Sender = (msg: {
   tokens: string[];
   notification: { title: string; body: string };
   data: Record<string, string>;
-  android: { priority: 'high'; notification: { sound: string; tag: string } };
+  android: { priority: 'high'; notification: { sound: string; tag: string; channelId?: string } };
 }) => Promise<{ responses: { success: boolean; error?: { code: string } }[] }>;
+
+/** New-job notices ring with KEREK's dombra strum: the phone app's 'new_jobs' channel and res/raw/dombra.wav */
+function androidSound(type: unknown): { sound: string; channelId?: string } {
+  return type === 'NEW_REQUEST' ? { sound: 'dombra', channelId: 'new_jobs' } : { sound: 'default' };
+}
 
 /**
  * Sends one notice to the recipient's phones, in each phone's language, and forgets phones
@@ -469,7 +474,7 @@ export async function pushNotification(n: any, send: Sender = (m) => getMessagin
         recipientRole: n?.recipientRole === 'provider' ? 'provider' : 'customer',
         ...(n?.conversationId ? { conversationId: str(n.conversationId, 128) } : {}),
       },
-      android: { priority: 'high', notification: { sound: 'default', tag: str(n?.requestId, 128) || 'kerek' } },
+      android: { priority: 'high', notification: { ...androidSound(n?.type), tag: str(n?.requestId, 128) || 'kerek' } },
     });
     await Promise.all(
       res.responses.map((r, i) => {

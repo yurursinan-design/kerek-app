@@ -17,8 +17,23 @@ import { getCurrentUserId } from './localRepository';
  * Gracefully silent if user has not interacted with DOM yet or audio context is unavailable.
  */
 let chimeContext: AudioContext | null = null;
+let dombra: HTMLAudioElement | null = null;
 
-export function playNotificationSound(): void {
+/** KEREK's sound for a new job: a short dombra strum (same file as the phone notification). */
+function playDombra(): boolean {
+  try {
+    if (typeof Audio === 'undefined') return false;
+    dombra = dombra || new Audio(`${import.meta.env.BASE_URL}sounds/dombra.wav`);
+    dombra.currentTime = 0;
+    dombra.play().catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function playNotificationSound(type?: NotificationEventType): void {
+  if (type === 'NEW_REQUEST' && playDombra()) return;
   try {
     if (typeof window === 'undefined') return;
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
