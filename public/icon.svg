@@ -1,5 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#0284c7"/>
-  <path d="M168 128h56v104l92-104h70L282 244l110 140h-72l-80-104-16 18v86h-56z" fill="#ffffff"/>
-  <circle cx="392" cy="128" r="28" fill="#fbbf24"/>
+  <defs>
+    <linearGradient id="bg" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="512" y2="512">
+      <stop offset="0" stop-color="#18b4f2"/>
+      <stop offset=".55" stop-color="#0284c7"/>
+      <stop offset="1" stop-color="#1e3fae"/>
+    </linearGradient>
+    <radialGradient id="hi" gradientUnits="userSpaceOnUse" cx="113" cy="61" r="435">
+      <stop offset="0" stop-color="#fff" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="112" fill="url(#hi)"/>
+  <!-- K, and the yellow dot ringing like a new job -->
+  <g transform="translate(-18.65 75.47) scale(0.8529)">
+    <path d="M168 128h56v104l92-104h70L282 244l110 140h-72l-80-104-16 18v86h-56z" fill="#fff"/>
+    <circle cx="398" cy="122" r="28" fill="#fcc419"/>
+    <g fill="none" stroke="#fcc419" stroke-linecap="round">
+      <path d="M398 72A50 50 0 0 1 448 122" stroke-width="13"/>
+      <path d="M398 44A78 78 0 0 1 476 122" stroke-width="11"/>
+    </g>
+  </g>
 </svg>

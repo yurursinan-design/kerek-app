@@ -66,11 +66,8 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={onHomeClick}
               className="flex items-center gap-2 text-left group transition-opacity hover:opacity-90"
             >
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-sky-600 to-sky-400 flex items-center justify-center shadow-xs">
-                <span className="text-white font-extrabold text-base font-display tracking-tight">
-                  К
-                </span>
-              </div>
+              {/* The app icon, so the header and the phone's home screen show the same mark */}
+              <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" className="w-8 h-8 rounded-lg shadow-xs" />
               <div>
                 <span className="text-lg font-bold tracking-tight text-slate-900 group-hover:text-sky-600 transition-colors">
                   КЕРЕК
