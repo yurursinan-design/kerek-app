@@ -34,6 +34,7 @@ import {
   Conversation,
   getAppointmentId,
   getConversationId,
+  offerExtras,
   Provider,
   ProviderOffer,
   RequestAttachment,
@@ -1333,6 +1334,7 @@ export class FirebaseRepository implements Repository {
       priceType,
       availability: offerData.availability || 'В течение часа',
       message: offerData.message || '',
+      ...offerExtras(offerData),
       status: 'PENDING',
       createdAt: offerData.createdAt || new Date().toISOString(),
       // Trust badges are not self-assignable; they stay off until real verification exists

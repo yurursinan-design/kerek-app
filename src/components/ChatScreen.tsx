@@ -24,8 +24,25 @@ import {
   FileText,
   Download,
   X,
+  ShieldAlert,
 } from 'lucide-react';
 import { useMediaUrls } from '../services/storageUrls';
+
+// One tap fills the message box with a common phrase; the sender can still edit it before sending
+const QUICK_REPLIES: Record<'customer' | 'provider', { kz: string; ru: string }[]> = {
+  customer: [
+    { kz: 'Сәлеметсіз бе! Қашан келе аласыз?', ru: 'Здравствуйте! Когда сможете приехать?' },
+    { kz: 'Бұл соңғы баға ма?', ru: 'Это окончательная цена?' },
+    { kz: 'Келер алдында қоңырау шалыңызшы', ru: 'Позвоните, пожалуйста, перед приездом' },
+    { kz: 'Рақмет!', ru: 'Спасибо!' },
+  ],
+  provider: [
+    { kz: 'Сәлеметсіз бе! Ақаудың фотосын жібере аласыз ба?', ru: 'Здравствуйте! Можете прислать фото поломки?' },
+    { kz: 'Мекенжайыңызды жіберіңізші', ru: 'Пришлите, пожалуйста, адрес' },
+    { kz: 'Жолдамын, 15 минутта жетемін', ru: 'Я в пути, буду через 15 минут' },
+    { kz: 'Жұмыс дайын, тексеріп көріңізші', ru: 'Работа готова, проверьте, пожалуйста' },
+  ],
+};
 
 interface ChatScreenProps {
   requestId: string;
@@ -231,6 +248,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
+  const viewerIsCustomer = userRole
+    ? userRole === 'customer'
+    : conversation
+    ? currentUid === conversation.customerId || (Boolean(auth?.currentUser?.uid) && auth?.currentUser?.uid === conversation.customerId)
+    : true;
+
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const clean = inputText.trim();
@@ -245,11 +268,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     setUploadProgress(pendingAttachment ? t.chatUploading : null);
     setErrorMessage(null);
 
-    const isCustomerParticipant = userRole
-      ? userRole === 'customer'
-      : conversation
-      ? currentUid === conversation.customerId || (Boolean(auth?.currentUser?.uid) && auth?.currentUser?.uid === conversation.customerId)
-      : true;
+    const isCustomerParticipant = viewerIsCustomer;
 
     const senderRole: 'customer' | 'provider' = isCustomerParticipant ? 'customer' : 'provider';
     const authUid = auth?.currentUser?.uid;
@@ -467,6 +486,14 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
 
       {/* Messages Scroll Area */}
       <main className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] leading-relaxed text-amber-900">
+          <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600 mt-px" />
+          <span>
+            {language === 'kz'
+              ? 'Қауіпсіздік: жұмыс басталмай тұрып алдын ала ақша аудармаңыз, SMS-кодтарды ешкімге айтпаңыз. Күдікті хабарлама болса, шағым жіберіңіз.'
+              : 'Безопасность: не переводите предоплату до начала работы и никому не сообщайте коды из SMS. Если сообщение подозрительное, отправьте жалобу.'}
+          </span>
+        </div>
         {isLoading ? (
           <div className="h-full flex items-center justify-center text-slate-400 text-xs gap-2">
             <span className="w-5 h-5 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
@@ -677,6 +704,21 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             {t.chatCannotSendCancelled}
           </div>
         ) : (
+          <>
+          {!inputText && !pendingAttachment && !isLoading && conversation && (
+            <div className="flex gap-1.5 overflow-x-auto pb-2 -mx-1 px-1" aria-label={language === 'kz' ? 'Дайын жауаптар' : 'Быстрые ответы'}>
+              {QUICK_REPLIES[viewerIsCustomer ? 'customer' : 'provider'].map((q) => (
+                <button
+                  key={q.ru}
+                  type="button"
+                  onClick={() => setInputText(language === 'kz' ? q.kz : q.ru)}
+                  className="shrink-0 px-3 py-1.5 rounded-full bg-sky-50 border border-sky-200 text-sky-800 text-xs font-semibold hover:bg-sky-100 active:scale-95 transition-all"
+                >
+                  {language === 'kz' ? q.kz : q.ru}
+                </button>
+              ))}
+            </div>
+          )}
           <form onSubmit={handleSendMessage} className="flex items-center gap-2">
             {/* Attachment Button */}
             <button
@@ -718,6 +760,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               )}
             </button>
           </form>
+          </>
         )}
       </footer>
     </div>

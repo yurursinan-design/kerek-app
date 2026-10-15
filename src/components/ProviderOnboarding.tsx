@@ -6,7 +6,7 @@ import { translations } from '../i18n/translations';
 import { ALL_CITIES_LIST } from '../services/analyzer';
 import { getService, groupName, serviceName } from '../data/serviceCatalog';
 import { ServicePicker } from './ServicePicker';
-import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
+import { isCityOpen, normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import {
   User,
@@ -57,8 +57,11 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
   const [phone, setPhone] = useState(initialProvider?.phone || auth?.currentUser?.phoneNumber || '');
   const [whatsapp, setWhatsapp] = useState(initialProvider?.whatsapp || '');
 
+  // Pilot: masters register in an open city only (Kyzylorda); the others are listed as "soon"
   const [city, setCity] = useState(
-    initialProvider?.city || (language === 'kz' ? 'Қызылорда' : 'Кызылорда')
+    initialProvider?.city && isCityOpen(initialProvider.city)
+      ? initialProvider.city
+      : language === 'kz' ? 'Қызылорда' : 'Кызылорда'
   );
   // Profile fields start empty (placeholders show examples): pre-filled text would publish claims the provider never made
   const [district, setDistrict] = useState(initialProvider?.district || '');
@@ -425,9 +428,10 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
               >
                 {ALL_CITIES_LIST.map((c) => {
                   const cName = language === 'kz' ? c.kz : c.ru;
+                  const open = isCityOpen(c.ru);
                   return (
-                    <option key={c.ru} value={cName}>
-                      {cName}
+                    <option key={c.ru} value={cName} disabled={!open}>
+                      {open ? cName : `${cName} — ${language === 'kz' ? 'жақында' : 'скоро'}`}
                     </option>
                   );
                 })}

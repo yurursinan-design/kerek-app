@@ -6,7 +6,10 @@ import {
   formatOfferDisplayPrice,
   Language,
   normalizeRequestStatus,
+  OFFER_PAYMENT_METHODS,
+  OfferPaymentMethod,
   OfferPriceType,
+  paymentMethodLabel,
   Provider,
   ProviderOffer,
   ServiceRequest,
@@ -83,6 +86,27 @@ function isSelfRequest(
   return false;
 }
 
+// The master's usual offer extras, kept on this phone so the next offer starts with them
+const OFFER_PREFS_KEY = 'kerek_offer_prefs';
+function loadOfferPrefs(): { paymentMethods: OfferPaymentMethod[]; fixPledge: boolean } {
+  try {
+    const raw = JSON.parse(localStorage.getItem(OFFER_PREFS_KEY) || 'null');
+    const methods = Array.isArray(raw?.paymentMethods)
+      ? (raw.paymentMethods as unknown[]).filter((m): m is OfferPaymentMethod => OFFER_PAYMENT_METHODS.includes(m as OfferPaymentMethod))
+      : [];
+    return { paymentMethods: methods.length ? methods : [...OFFER_PAYMENT_METHODS], fixPledge: raw?.fixPledge === true };
+  } catch {
+    return { paymentMethods: [...OFFER_PAYMENT_METHODS], fixPledge: false };
+  }
+}
+function saveOfferPrefs(prefs: { paymentMethods: OfferPaymentMethod[]; fixPledge: boolean }) {
+  try {
+    localStorage.setItem(OFFER_PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    // private mode or full storage: the choice just isn't remembered
+  }
+}
+
 export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   language,
   onOfferSent,
@@ -138,6 +162,10 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   useEffect(() => {
     offersMapRef.current = sentOffersMap;
   }, [sentOffersMap]);
+
+  // How the master takes payment and whether they give the 14-day free-fix pledge: remembered for the next offer
+  const [offerPayments, setOfferPayments] = useState<OfferPaymentMethod[]>(() => loadOfferPrefs().paymentMethods);
+  const [offerFixPledge, setOfferFixPledge] = useState<boolean>(() => loadOfferPrefs().fixPledge);
 
   // Offer modal state
   const [selectedRequestForOffer, setSelectedRequestForOffer] =
@@ -378,6 +406,9 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     setOfferPriceAmount('');
     setOfferTime('');
     setOfferMessage('');
+    const prefs = loadOfferPrefs();
+    setOfferPayments(prefs.paymentMethods);
+    setOfferFixPledge(prefs.fixPledge);
   };
 
   // Provider clicks "Не могу"
@@ -448,6 +479,12 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         }
       }
 
+      if (offerPayments.length === 0) {
+        setErrorMessage(language === 'kz' ? 'Төлем тәсілін таңдаңыз' : 'Выберите способ оплаты');
+        return;
+      }
+      saveOfferPrefs({ paymentMethods: offerPayments, fixPledge: offerFixPledge });
+
       const newOffer = await repository.createOffer({
         requestId: selectedRequestForOffer.id,
         providerId: provider.id,
@@ -459,6 +496,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         priceType: offerPriceType,
         availability: offerTime.trim(),
         message: offerMessage.trim(),
+        paymentMethods: offerPayments,
+        fixPledge: offerFixPledge,
         status: 'PENDING',
       });
 
@@ -612,6 +651,19 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     // Only jobs this provider was chosen for; another provider's job is not "active" here
     return offer.status === 'ACCEPTED' || r.selectedOfferId === offer.id;
   });
+
+  // Jobs done through Tapsyr and roughly what they paid (paid to the master directly;
+  // "after inspection" prices have no number, so they are not counted)
+  const completedJobs = requests.filter((r) => {
+    const offer = sentOffersMap[r.id];
+    return !!offer && normalizeRequestStatus(r.status) === 'COMPLETED' && (offer.status === 'ACCEPTED' || r.selectedOfferId === offer.id);
+  });
+  const earnedTotal = completedJobs.reduce((sum, r) => {
+    const offer = sentOffersMap[r.id];
+    if (!offer || offer.priceType === 'inspection') return sum;
+    const amount = Number((offer.price || '').replace(/[^\d]/g, ''));
+    return sum + (Number.isFinite(amount) ? amount : 0);
+  }, 0);
 
   const newCount = newRequests.length;
   const offersCount = myOffersRequests.length;
@@ -1072,6 +1124,22 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
             {/* TAB 3: Active jobs */}
             {activeTab === 'active' && (
               <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="p-3 rounded-2xl bg-white border border-slate-200 shadow-2xs">
+                    <span className="block text-[11px] font-semibold text-slate-500">
+                      {language === 'kz' ? 'Орындалған жұмыстар' : 'Выполнено заказов'}
+                    </span>
+                    <span className="block text-xl font-extrabold text-slate-900 mt-0.5">{completedJobs.length}</span>
+                  </div>
+                  <div className="p-3 rounded-2xl bg-white border border-slate-200 shadow-2xs">
+                    <span className="block text-[11px] font-semibold text-slate-500">
+                      {language === 'kz' ? 'Tapsyr арқылы табыс' : 'Заработано через Tapsyr'}
+                    </span>
+                    <span className="block text-xl font-extrabold text-emerald-700 mt-0.5">
+                      ≈ {String(earnedTotal).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} ₸
+                    </span>
+                  </div>
+                </div>
                 {activeJobRequests.length === 0 ? (
                   <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
                     <Emoji3D code="1f4bc" size={84} className="mx-auto animate-float" />
@@ -1392,6 +1460,54 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white resize-none"
                 />
               </div>
+
+              {/* How the master takes payment (always paid to the master directly) */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-slate-700">
+                  {language === 'kz' ? 'Төлем тәсілі' : 'Способ оплаты'}
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {OFFER_PAYMENT_METHODS.map((m) => {
+                    const on = offerPayments.includes(m);
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() =>
+                          setOfferPayments((prev) => (on ? prev.filter((x) => x !== m) : [...prev, m]))
+                        }
+                        className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
+                          on ? 'bg-sky-50 border-sky-400 text-sky-800' : 'bg-white border-slate-200 text-slate-500'
+                        }`}
+                      >
+                        {on ? '✓ ' : ''}
+                        {paymentMethodLabel(m, language)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 14-day free-fix pledge */}
+              <label className="flex items-start gap-2.5 p-2.5 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={offerFixPledge}
+                  onChange={(e) => setOfferFixPledge(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 accent-emerald-600 shrink-0"
+                />
+                <span className="text-xs text-slate-800">
+                  <span className="font-bold block">
+                    {language === 'kz' ? '14 күн ішінде тегін түзетемін' : 'Бесплатно исправлю в течение 14 дней'}
+                  </span>
+                  <span className="text-[11px] text-slate-500 leading-snug block mt-0.5">
+                    {language === 'kz'
+                      ? 'Менің жұмысымда ақау шықса, 14 күн ішінде тегін түзетемін. Клиент бұл белгіні көреді.'
+                      : 'Если в моей работе найдётся недочёт, исправлю бесплатно в течение 14 дней. Клиент увидит этот значок.'}
+                  </span>
+                </span>
+              </label>
 
               {/* Submit */}
               <button

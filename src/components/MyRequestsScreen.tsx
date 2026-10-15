@@ -4,13 +4,15 @@ import {
   ServiceRequest,
   formatDynamicBudget,
   formatDynamicDate,
+  normalizeRequestStatus,
 } from '../types';
 import { translations } from '../i18n/translations';
 import { getRequestDescription, getRequestTitle } from '../services/requestTitle';
 import { formatShortDate } from '../services/dateFormat';
 import { repository } from '../services';
 import { getCityDisplayName } from '../services/taxonomy';
-import { MapPin, Calendar, Wallet, ChevronRight, Plus } from 'lucide-react';
+import { MapPin, Calendar, Wallet, ChevronRight, Plus, Phone, MessageCircle } from 'lucide-react';
+import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
 import { Emoji3D } from './CategoryIcon';
 import { RequestIcon } from './RequestIcon';
 
@@ -21,6 +23,16 @@ function ruPlural(n: number, one: string, few: string, many: string): string {
   if (d10 === 1 && d100 !== 11) return one;
   if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return few;
   return many;
+}
+
+/** A master the customer already hired: shown so they can call the same person again */
+interface PastMaster {
+  key: string;
+  name: string;
+  phone?: string;
+  whatsapp?: string;
+  lastJob: string;
+  jobs: number;
 }
 
 interface MyRequestsScreenProps {
@@ -67,6 +79,60 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestIdsKey]);
+
+  // Masters from finished jobs (newest first, at most 10 jobs read), so a good master is one tap away next time
+  const [pastMasters, setPastMasters] = useState<PastMaster[]>([]);
+  const completedIdsKey = requests
+    .filter((r) => normalizeRequestStatus(r.status) === 'COMPLETED')
+    .map((r) => r.id)
+    .join(',');
+  useEffect(() => {
+    let isMounted = true;
+    const done = requests
+      .filter((r) => normalizeRequestStatus(r.status) === 'COMPLETED')
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      .slice(0, 10);
+    if (done.length === 0) {
+      setPastMasters([]);
+      return;
+    }
+    Promise.all(
+      done.map(async (req) => {
+        try {
+          const offers = await repository.getOffers({ requestId: req.id });
+          const hired = offers.find((o) => o.id === req.selectedOfferId) || offers.find((o) => o.status === 'ACCEPTED');
+          return hired && !hired.isDemo ? { req, hired } : null;
+        } catch {
+          return null;
+        }
+      })
+    ).then((rows) => {
+      if (!isMounted) return;
+      const byMaster = new Map<string, PastMaster>();
+      for (const row of rows) {
+        if (!row) continue;
+        const key = row.hired.providerUserId || row.hired.providerId;
+        const seen = byMaster.get(key);
+        if (seen) {
+          seen.jobs += 1;
+        } else {
+          byMaster.set(key, {
+            key,
+            name: row.hired.providerName,
+            phone: row.hired.providerPhone,
+            whatsapp: row.hired.providerWhatsapp,
+            lastJob: getRequestTitle(row.req, language),
+            jobs: 1,
+          });
+        }
+      }
+      setPastMasters(Array.from(byMaster.values()));
+    });
+    return () => {
+      isMounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completedIdsKey, language]);
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col justify-between space-y-5">
@@ -205,6 +271,54 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
               );
             })}
           </div>
+        )}
+
+        {pastMasters.length > 0 && (
+          <section className="space-y-2 pt-2">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">
+                {language === 'kz' ? 'Сіз жұмыс істеген шеберлер' : 'Мастера, с которыми вы работали'}
+              </h3>
+              <p className="text-xs text-slate-500">
+                {language === 'kz' ? 'Тағы керек болса, тікелей хабарласыңыз.' : 'Нужен снова — свяжитесь напрямую.'}
+              </p>
+            </div>
+            {pastMasters.map((m) => {
+              const tel = toTelHref(m.phone);
+              const wa = toWhatsAppHref(m.whatsapp || m.phone);
+              return (
+                <div key={m.key} className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs">
+                  <div className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold text-slate-900 truncate">{m.name}</span>
+                    <span className="block text-xs text-slate-500 truncate">
+                      {m.lastJob}
+                      {m.jobs > 1 ? ` · ${m.jobs} ${language === 'kz' ? 'жұмыс' : ruPlural(m.jobs, 'заказ', 'заказа', 'заказов')}` : ''}
+                    </span>
+                  </div>
+                  {tel && (
+                    <a
+                      href={tel}
+                      aria-label={language === 'kz' ? 'Қоңырау шалу' : 'Позвонить'}
+                      className="press w-10 h-10 rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center shrink-0"
+                    >
+                      <Phone className="w-4.5 h-4.5" />
+                    </a>
+                  )}
+                  {wa && (
+                    <a
+                      href={wa}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="WhatsApp"
+                      className="press w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0"
+                    >
+                      <MessageCircle className="w-4.5 h-4.5" />
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </section>
         )}
       </div>
     </div>

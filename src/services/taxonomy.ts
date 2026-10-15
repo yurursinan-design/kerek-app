@@ -489,6 +489,16 @@ export function getCategoryDisplayName(categoryId: string | undefined, lang: Lan
   return lang === 'kz' ? found.nameKz : found.nameRu;
 }
 
+// Pilot: Tapsyr is open only in Kyzylorda. The other cities stay listed as "coming soon" and open
+// one by one later, by adding their id here.
+export const PILOT_CITY_ID = 'kyzylorda';
+export const OPEN_CITY_IDS: readonly string[] = [PILOT_CITY_ID];
+
+export function isCityOpen(cityOrId?: string): boolean {
+  const id = normalizeCityId(cityOrId);
+  return !!id && OPEN_CITY_IDS.includes(id);
+}
+
 /**
  * Returns localized display name for a canonical cityId.
  */

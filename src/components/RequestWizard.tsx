@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { ArrowLeft, Camera, Check, ChevronRight, Loader2, X } from 'lucide-react';
 import { ExtractedNeed, Language, PendingAttachment, RequestLocation, Urgency, sanitizeFileName, validateRequestAttachment } from '../types';
 import { CatalogGroup, CatalogService, groupName, serviceName } from '../data/serviceCatalog';
-import { CANONICAL_CITIES } from '../services/taxonomy';
+import { CANONICAL_CITIES, PILOT_CITY_ID, isCityOpen } from '../services/taxonomy';
 import { CategoryIcon, Emoji3D, tone } from './CategoryIcon';
 
 interface RequestWizardProps {
@@ -40,6 +40,11 @@ const T = {
   addPhoto: { kz: 'Фото қосу', ru: 'Добавить фото' },
   whenTitle: { kz: 'Қашан керек?', ru: 'Когда нужно?' },
   whereTitle: { kz: 'Қай қалада?', ru: 'В каком городе?' },
+  soon: { kz: 'Жақында', ru: 'Скоро' },
+  pilotNote: {
+    kz: 'Tapsyr әзірге тек Қызылордада жұмыс істейді. Басқа қалалар жақында ашылады.',
+    ru: 'Tapsyr пока работает только в Кызылорде. Другие города откроются позже.',
+  },
   location: { kz: 'Нақты орынды қосу (міндетті емес)', ru: 'Добавить точное место (необязательно)' },
   locationAdded: { kz: 'Орын қосылды', ru: 'Место добавлено' },
   locationNote: {
@@ -96,7 +101,8 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
   const [photos, setPhotos] = useState<PendingAttachment[]>([]);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [when, setWhen] = useState<string | null>(null);
-  const [cityId, setCityId] = useState<string>(defaultCityId || '');
+  // Pilot: only open cities can be chosen; Kyzylorda is preselected
+  const [cityId, setCityId] = useState<string>(defaultCityId && isCityOpen(defaultCityId) ? defaultCityId : PILOT_CITY_ID);
   const [location, setLocation] = useState<RequestLocation | null>(null);
   const [locating, setLocating] = useState(false);
   const [budget, setBudget] = useState<string | null>(null);
@@ -332,21 +338,27 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
           <>
             {heading(tx(T.whereTitle))}
             <div className="grid grid-cols-2 gap-2 stagger">
-              {CANONICAL_CITIES.map((c, i) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setCityId(c.id)}
-                  className={chip(cityId === c.id)}
-                  style={{ ['--i' as string]: i }}
-                >
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="truncate">{lang === 'kz' ? c.nameKz : c.nameRu}</span>
-                    {cityId === c.id && <Check className="w-4.5 h-4.5 text-sky-600 shrink-0 animate-popIn" strokeWidth={3} />}
-                  </span>
-                </button>
-              ))}
+              {CANONICAL_CITIES.map((c, i) => {
+                const open = isCityOpen(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => open && setCityId(c.id)}
+                    disabled={!open}
+                    className={`${chip(cityId === c.id)} ${open ? '' : 'opacity-50 cursor-not-allowed'}`}
+                    style={{ ['--i' as string]: i }}
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span className="truncate">{lang === 'kz' ? c.nameKz : c.nameRu}</span>
+                      {cityId === c.id && <Check className="w-4.5 h-4.5 text-sky-600 shrink-0 animate-popIn" strokeWidth={3} />}
+                      {!open && <span className="text-[10px] font-bold text-slate-500 bg-slate-100 rounded-full px-1.5 py-0.5 shrink-0">{tx(T.soon)}</span>}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
+            <p className="text-xs text-slate-500 leading-relaxed">{tx(T.pilotNote)}</p>
             <button
               type="button"
               onClick={detectLocation}

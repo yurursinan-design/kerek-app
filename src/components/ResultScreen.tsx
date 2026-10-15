@@ -5,8 +5,10 @@ import {
   formatDynamicBudget,
   formatDynamicDate,
   formatOfferDisplayPrice,
+  isTopMaster,
   Language,
   normalizeRequestStatus,
+  paymentMethodLabel,
   Provider,
   ProviderOffer,
   RequestStatus,
@@ -20,6 +22,7 @@ import { repository, checkClientRateLimit, getFriendlyErrorMessage, getCurrentUs
 import { auth } from '../services/firebase';
 import { getCityDisplayName } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
+import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
 import { ReviewModal } from './ReviewModal';
 import { Emoji3D } from './CategoryIcon';
 import { RequestIcon, requestVisual } from './RequestIcon';
@@ -50,23 +53,6 @@ interface ResultScreenProps {
   onEditSearch: () => void;
 }
 
-// Kazakhstan numbers are stored as typed (e.g. "+7 701 111 22 33" or "8 701 111 22 33").
-// Normalize to international digits: a leading 8 on an 11-digit number is the domestic prefix for +7.
-function toIntlDigits(raw?: string): string | null {
-  let digits = (raw || '').replace(/\D/g, '');
-  if (digits.length === 11 && digits.startsWith('8')) digits = '7' + digits.slice(1);
-  return digits.length >= 10 && digits.length <= 15 ? digits : null;
-}
-
-function toTelHref(raw?: string): string | null {
-  const digits = toIntlDigits(raw);
-  return digits ? `tel:+${digits}` : null;
-}
-
-function toWhatsAppHref(raw?: string): string | null {
-  const digits = toIntlDigits(raw);
-  return digits ? `https://wa.me/${digits}` : null;
-}
 
 export const ResultScreen: React.FC<ResultScreenProps> = ({
   request: initialRequest,
@@ -846,12 +832,17 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                         {(() => {
                           const r = providerRatings[offer.providerUserId || offer.providerId];
                           return r && r.count > 0 ? (
-                            <div className="flex items-center gap-1 text-xs text-slate-700 mt-0.5">
+                            <div className="flex items-center gap-1 text-xs text-slate-700 mt-0.5 flex-wrap">
                               <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
                               <span className="font-bold">{r.avg.toFixed(1)}</span>
                               <span className="text-slate-500">
                                 ({r.count} {language === 'kz' ? 'пікір' : 'отзыв.'})
                               </span>
+                              {isTopMaster(r) && (
+                                <span className="ml-1 text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded-full">
+                                  🏆 {language === 'kz' ? 'Үздік шебер' : 'Лучший мастер'}
+                                </span>
+                              )}
                             </div>
                           ) : (
                             <div className="text-[11px] text-slate-500 mt-0.5">
@@ -863,6 +854,20 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                           <Clock className="w-3 h-3 text-slate-400" />
                           <span>{formatDynamicDate(offer.availability, language)}</span>
                         </div>
+                        {(offer.paymentMethods?.length || offer.fixPledge) && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {(offer.paymentMethods || []).map((m) => (
+                              <span key={m} className="text-[10px] font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                                {m === 'cash' ? '💵' : '💳'} {paymentMethodLabel(m, language)}
+                              </span>
+                            ))}
+                            {offer.fixPledge && (
+                              <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full">
+                                🛠 {language === 'kz' ? '14 күн тегін түзету' : '14 дней бесплатных исправлений'}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       </div>
 

@@ -3,7 +3,7 @@ import { ExtractedNeed, Language, Urgency, PendingAttachment, RequestLocation } 
 import { translations } from '../i18n/translations';
 import { ALL_CITIES_LIST } from '../services/analyzer';
 import { SERVICE_CATALOG, getGroup, getService, groupName, searchServices } from '../data/serviceCatalog';
-import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
+import { isCityOpen, normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { RequestMediaView } from './RequestMediaView';
 import {
   ArrowRight,
@@ -38,6 +38,11 @@ interface InterpretationScreenProps {
   isSubmitting?: boolean;
 }
 
+// Pilot: a city that isn't open yet (e.g. the text mentions Almaty) falls back to Kyzylorda
+function openCityOr(c: string, language: Language): string {
+  return c.trim() && !isCityOpen(c) ? (language === 'kz' ? 'Қызылорда' : 'Кызылорда') : c;
+}
+
 export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
   initialNeed,
   language,
@@ -62,7 +67,9 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
 
   // Editable form state
-  const [city, setCity] = useState(initialNeed.city || '');
+  // A closed city falls back to Kyzylorda, with a note
+  const [city, setCity] = useState(openCityOr(initialNeed.city || '', language));
+  const [closedCityNotice, setClosedCityNotice] = useState(Boolean((initialNeed.city || '').trim() && !isCityOpen(initialNeed.city)));
   // Shown with the catalogue's name for the group, so the list below has it selected
   const [category, setCategory] = useState(() => {
     const g = getGroup(normalizeCategoryId(initialNeed.categoryId || initialNeed.category || ''));
@@ -87,7 +94,8 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
   // Synchronize state when initialNeed prop changes
   useEffect(() => {
-    setCity(initialNeed.city || '');
+    setCity(openCityOr(initialNeed.city || '', language));
+    setClosedCityNotice(Boolean((initialNeed.city || '').trim() && !isCityOpen(initialNeed.city)));
     setCategory(initialNeed.category || '');
     setService(initialNeed.service);
     setDate(initialNeed.date);
@@ -103,6 +111,8 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
     );
     setIsEditingManual(!((initialNeed.confidence ?? 0.95) >= 0.7 && hasCity && hasCat));
     setFormError(null);
+    // Only a new request resets the form; switching the language must not
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialNeed]);
 
   const handleAddClarification = (e?: React.FormEvent) => {
@@ -117,7 +127,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
   // Invokes existing createRequest flow only upon explicit customer confirmation
   const handleProceed = () => {
-    const finalCity = (city || '').trim() || (initialNeed.city || '').trim();
+    const finalCity = (city || '').trim() || openCityOr(initialNeed.city || '', language).trim();
     const resolvedCityId = normalizeCityId(finalCity);
     if (!finalCity || !resolvedCityId) {
       setFormError(
@@ -238,6 +248,13 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                     <span className="text-base font-bold text-slate-900 font-display">
                       {city}
                     </span>
+                    {closedCityNotice && (
+                      <span className="block text-xs text-amber-700 mt-0.5 leading-snug">
+                        {language === 'kz'
+                          ? 'Tapsyr әзірге тек Қызылордада жұмыс істейді. Басқа қалалар жақында ашылады.'
+                          : 'Tapsyr пока работает только в Кызылорде. Другие города откроются позже.'}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -622,9 +639,10 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                     </option>
                     {ALL_CITIES_LIST.map((c) => {
                       const cityName = language === 'kz' ? c.kz : c.ru;
+                      const open = isCityOpen(c.ru);
                       return (
-                        <option key={c.ru} value={cityName}>
-                          {cityName}
+                        <option key={c.ru} value={cityName} disabled={!open}>
+                          {open ? cityName : `${cityName} — ${language === 'kz' ? 'жақында' : 'скоро'}`}
                         </option>
                       );
                     })}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ReportButton } from './ReportButton';
-import { Language, Provider, Review } from '../types';
+import { isTopMaster, Language, Provider, Review } from '../types';
 import { translations } from '../i18n/translations';
 import { formatShortDate } from '../services/dateFormat';
 import { repository } from '../services';
@@ -171,6 +171,11 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                   <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
                     <Star className="w-3 h-3 text-slate-400" />
                     <span>{language === 'kz' ? 'Баға жоқ' : 'Нет оценок'}</span>
+                  </span>
+                )}
+                {isTopMaster({ avg: ratingAvg, count: reviewsCount }) && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                    🏆 {language === 'kz' ? 'Үздік шебер' : 'Лучший мастер'}
                   </span>
                 )}
                 {provider.isDemo && (

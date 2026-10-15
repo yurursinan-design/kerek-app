@@ -184,6 +184,22 @@ export interface ServiceRequest {
 
 export type OfferPriceType = 'fixed' | 'from' | 'inspection';
 
+/** How the master accepts payment (always directly, outside the app) */
+export type OfferPaymentMethod = 'cash' | 'kaspi';
+export const OFFER_PAYMENT_METHODS: OfferPaymentMethod[] = ['cash', 'kaspi'];
+
+export function paymentMethodLabel(m: OfferPaymentMethod, lang: Language): string {
+  if (m === 'cash') return lang === 'kz' ? 'Қолма-қол' : 'Наличные';
+  return lang === 'kz' ? 'Kaspi (аударым / QR)' : 'Kaspi (перевод / QR)';
+}
+
+/** "Top master": a strong average over enough real reviews */
+export const TOP_MASTER_MIN_RATING = 4.8;
+export const TOP_MASTER_MIN_REVIEWS = 5;
+export function isTopMaster(summary?: { avg: number; count: number } | null): boolean {
+  return !!summary && summary.count >= TOP_MASTER_MIN_REVIEWS && summary.avg >= TOP_MASTER_MIN_RATING;
+}
+
 export interface ProviderOffer {
   id: string;
   requestId: string;
@@ -197,11 +213,24 @@ export interface ProviderOffer {
   priceType?: OfferPriceType;
   availability: string;
   message: string;
+  /** Payment the master accepts (cash, Kaspi); paid to the master directly */
+  paymentMethods?: OfferPaymentMethod[];
+  /** The master promises to fix a problem with this job for free within 14 days */
+  fixPledge?: boolean;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   createdAt: string;
   iinVerified?: boolean;
   hasCertificate?: boolean;
   paymentStatus?: 'pending' | 'held_in_escrow' | 'released' | 'refunded';
+}
+
+/** The optional extras of a new offer: known payment methods only (no repeats), the pledge only when given */
+export function offerExtras(o: Partial<ProviderOffer>): Pick<ProviderOffer, 'paymentMethods' | 'fixPledge'> {
+  const methods = (o.paymentMethods || []).filter((m, i, all) => OFFER_PAYMENT_METHODS.includes(m) && all.indexOf(m) === i);
+  return {
+    ...(methods.length ? { paymentMethods: methods } : {}),
+    ...(o.fixPledge === true ? { fixPledge: true } : {}),
+  };
 }
 
 export interface Review {

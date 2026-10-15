@@ -355,6 +355,49 @@ async function runTestSuite() {
       );
     });
 
+    await test('An offer can carry payment methods and the 14-day free-fix pledge', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const adminDb = ctx.firestore();
+        await setDoc(doc(adminDb, 'requests', 'req_extras'), {
+          id: 'req_extras', customerId: 'user_alice', city: 'almaty', cityId: 'almaty',
+          category: 'appliances', service: 'Fridge repair', status: 'OPEN',
+        });
+        for (const uid of ['prov_extras', 'prov_extras2']) {
+          await setDoc(doc(adminDb, 'providers', uid), {
+            id: uid, userId: uid, name: 'Master ' + uid, city: 'almaty', cityId: 'almaty', category: 'appliance_repair',
+          });
+        }
+      });
+      const offer = (uid: string, extra: Record<string, unknown>) => ({
+        ...validOffer('OFFER-req_extras-' + uid, uid, 'Master ' + uid, extra),
+        requestId: 'req_extras',
+      });
+      const db = phoneUser('prov_extras').firestore();
+      await assertSucceeds(
+        setDoc(doc(db, 'offers', 'OFFER-req_extras-prov_extras'), offer('prov_extras', { paymentMethods: ['cash', 'kaspi'], fixPledge: true }))
+      );
+    });
+
+    await test('Offer extras are checked: only cash/kaspi, at least one, and the pledge is a plain yes/no', async () => {
+      const db = phoneUser('prov_extras2').firestore();
+      const ref = doc(db, 'offers', 'OFFER-req_extras-prov_extras2');
+      const offer = (extra: Record<string, unknown>) => ({
+        ...validOffer('OFFER-req_extras-prov_extras2', 'prov_extras2', 'Master prov_extras2', extra),
+        requestId: 'req_extras',
+      });
+      await assertFails(setDoc(ref, offer({ paymentMethods: ['crypto'] })));
+      await assertFails(setDoc(ref, offer({ paymentMethods: [] })));
+      await assertFails(setDoc(ref, offer({ paymentMethods: ['cash', 'kaspi', 'cash'] })));
+      await assertFails(setDoc(ref, offer({ fixPledge: 'yes' })));
+    });
+
+    await test('A provider can change payment methods on their own PENDING offer, only to known ones', async () => {
+      const db = phoneUser('prov_extras').firestore();
+      const ref = doc(db, 'offers', 'OFFER-req_extras-prov_extras');
+      await assertSucceeds(updateDoc(ref, { paymentMethods: ['cash'], fixPledge: false, updatedAt: new Date().toISOString() }));
+      await assertFails(updateDoc(ref, { paymentMethods: ['card'], updatedAt: new Date().toISOString() }));
+    });
+
     await test('A provider has one offer per request: any other offer id is rejected', async () => {
       const masterDb = phoneUser('prov_master1').firestore();
       await assertFails(setDoc(doc(masterDb, 'offers', 'offer_m1_second'), validOffer('offer_m1_second', 'prov_master1', 'Master Ruslan')));

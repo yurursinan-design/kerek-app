@@ -55,7 +55,11 @@ service cloud.firestore {
     function offerFieldLimits(m) {
       return strMax(m, 'message', 2000) && strMax(m, 'availability', 300)
         && strMax(m, 'providerName', 100) && strMax(m, 'providerPhone', 30)
-        && strMax(m, 'providerWhatsapp', 30) && strMax(m, 'priceType', 20);
+        && strMax(m, 'providerWhatsapp', 30) && strMax(m, 'priceType', 20)
+        // Payment the master accepts (from a fixed list) and the 14-day free-fix pledge (a plain yes)
+        && (!('paymentMethods' in m) || (m.paymentMethods is list && m.paymentMethods.size() >= 1
+             && m.paymentMethods.size() <= 2 && m.paymentMethods.hasOnly(['cash', 'kaspi'])))
+        && (!('fixPledge' in m) || m.fixPledge is bool);
     }
 
     // Request statuses in which providers of the city may still see and answer a request
@@ -389,7 +393,7 @@ service cloud.firestore {
                     && incoming().keys().hasOnly([
                       'id', 'requestId', 'providerId', 'providerUserId', 'providerName', 'providerPhone',
                       'providerWhatsapp', 'isDemo', 'price', 'priceType', 'availability', 'message', 'status',
-                      'createdAt', 'updatedAt', 'iinVerified', 'hasCertificate'
+                      'createdAt', 'updatedAt', 'iinVerified', 'hasCertificate', 'paymentMethods', 'fixPledge'
                     ])
                     && falseOrAbsent(incoming(), 'isDemo')
                     && strMax(incoming(), 'createdAt', 40)
@@ -412,7 +416,7 @@ service cloud.firestore {
           existing().status == 'PENDING' &&
           incoming().status == 'PENDING' &&
           incoming().diff(existing()).affectedKeys().hasOnly([
-            'price', 'priceType', 'availability', 'message',
+            'price', 'priceType', 'availability', 'message', 'paymentMethods', 'fixPledge',
             'providerPhone', 'providerWhatsapp', 'providerName', 'updatedAt'
           ]) &&
           incoming().price is string && incoming().price.size() <= 50 &&

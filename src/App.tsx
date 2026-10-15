@@ -43,6 +43,7 @@ import {
   offlineQueueService,
 } from './services';
 import {
+  isCityOpen,
   normalizeCategoryId,
   normalizeCityId,
   getCategoryDisplayName,
@@ -362,8 +363,11 @@ export default function App() {
 
     try {
       const rawText = (updatedNeed.originalQuery || updatedNeed.service || '').trim();
-      const city = updatedNeed.city?.trim() || (language === 'kz' ? 'Қызылорда' : 'Кызылорда');
-      const cityId = updatedNeed.cityId || normalizeCityId(city);
+      // Pilot: requests are only created for an open city (Kyzylorda); anything else falls back to it
+      const pilotCity = language === 'kz' ? 'Қызылорда' : 'Кызылорда';
+      const askedCity = updatedNeed.city?.trim() || pilotCity;
+      const city = isCityOpen(updatedNeed.cityId || askedCity) ? askedCity : pilotCity;
+      const cityId = isCityOpen(updatedNeed.cityId) ? updatedNeed.cityId! : normalizeCityId(city);
       const category = updatedNeed.category?.trim() || (language === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники');
       const categoryId = updatedNeed.categoryId || normalizeCategoryId(category);
       const service = (updatedNeed.service || rawText || category).trim();
