@@ -25,7 +25,7 @@ jobs:
   deploy:
     if: startsWith(github.event.head_commit.message, '[deploy-functions]')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
