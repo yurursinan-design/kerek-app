@@ -77,13 +77,13 @@ jobs:
 
       - name: Dosyayı adlandır
         if: steps.cfg.outputs.ok == 'true'
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk KEREK-test.apk
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk Tapsyr-test.apk
 
       - uses: actions/upload-artifact@v4
         if: steps.cfg.outputs.ok == 'true'
         with:
-          name: KEREK-android-test
-          path: KEREK-test.apk
+          name: Tapsyr-android-test
+          path: Tapsyr-test.apk
           retention-days: 7
 
       - name: Telefona indirme bağlantısını güncelle
@@ -92,8 +92,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete android-test --yes --cleanup-tag || true
-          gh release create android-test KEREK-test.apk \
+          gh release create android-test Tapsyr-test.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "KEREK Android test sürümü" \
-            --notes "Telefona kurmak için KEREK-test.apk dosyasını indirip açın. Kaynak: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
+            --title "Tapsyr Android test sürümü" \
+            --notes "Telefona kurmak için Tapsyr-test.apk dosyasını indirip açın. Kaynak: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"

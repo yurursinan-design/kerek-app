@@ -70,7 +70,7 @@ export const Header: React.FC<HeaderProps> = ({
               <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" className="w-8 h-8 rounded-lg shadow-xs" />
               <div>
                 <span className="text-lg font-bold tracking-tight text-slate-900 group-hover:text-sky-600 transition-colors">
-                  КЕРЕК
+                  Tapsyr
                 </span>
                 <span className="ml-1.5 text-[10px] uppercase font-semibold tracking-wider text-sky-600">
                   KZ

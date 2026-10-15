@@ -90,8 +90,8 @@ export const ReportButton: React.FC<ReportButtonProps> = ({ language, targetType
               <>
                 <p className="text-sm text-slate-700 leading-relaxed">
                   {kz
-                    ? 'Рақмет! Шағымыңыз KEREK командасына жіберілді. Біз оны қарап, қажет болса профильді бұғаттаймыз.'
-                    : 'Спасибо! Жалоба отправлена команде KEREK. Мы её рассмотрим и при необходимости заблокируем профиль.'}
+                    ? 'Рақмет! Шағымыңыз Tapsyr командасына жіберілді. Біз оны қарап, қажет болса профильді бұғаттаймыз.'
+                    : 'Спасибо! Жалоба отправлена команде Tapsyr. Мы её рассмотрим и при необходимости заблокируем профиль.'}
                 </p>
                 <button type="button" onClick={close} className="press w-full min-h-[48px] rounded-2xl bg-slate-900 text-white text-sm font-bold">
                   {kz ? 'Жақсы' : 'Хорошо'}

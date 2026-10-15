@@ -37,7 +37,7 @@ export function renderLegalPage(id: LegalDocId): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KEREK — ${esc(page.kz)} / ${esc(page.ru)}</title>
+<title>Tapsyr — ${esc(page.kz)} / ${esc(page.ru)}</title>
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <style>
 :root{--bg:#f8fafc;--card:#fff;--text:#0f172a;--muted:#64748b;--line:#e2e8f0;--accent:#0284c7}
@@ -63,7 +63,7 @@ footer a{color:var(--accent)}
 </head>
 <body>
 <header>
-<a class="brand" href="/"><img src="/icon.svg" alt="">KEREK</a>
+<a class="brand" href="/"><img src="/icon.svg" alt="">Tapsyr</a>
 <span class="lang"><a href="#kz">Қазақша</a><a href="#ru">Русский</a></span>
 </header>
 <main>
@@ -73,7 +73,7 @@ ${nav}
 ${section(kz, 'kz')}
 ${section(ru, 'ru')}
 </main>
-<footer><a href="/">KEREK</a> · <a href="mailto:${LEGAL_OPERATOR.email}">${esc(LEGAL_OPERATOR.email)}</a></footer>
+<footer><a href="/">Tapsyr</a> · <a href="mailto:${LEGAL_OPERATOR.email}">${esc(LEGAL_OPERATOR.email)}</a></footer>
 </body>
 </html>
 `;

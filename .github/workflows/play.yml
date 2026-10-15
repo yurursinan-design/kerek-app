@@ -126,12 +126,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp android/app/build/outputs/bundle/release/app-release.aab "KEREK-$KEREK_VERSION_CODE.aab"
+          cp android/app/build/outputs/bundle/release/app-release.aab "Tapsyr-$KEREK_VERSION_CODE.aab"
           gh release delete play-bundle --yes --cleanup-tag || true
-          gh release create play-bundle "KEREK-$KEREK_VERSION_CODE.aab" \
+          gh release create play-bundle "Tapsyr-$KEREK_VERSION_CODE.aab" \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "KEREK Google Play paketi ($KEREK_VERSION_CODE)" \
+            --title "Tapsyr Google Play paketi ($KEREK_VERSION_CODE)" \
             --notes "Play Console'a yüklenecek imzalı paket (AAB). Kaynak: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
 
       # ----

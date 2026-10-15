@@ -31,7 +31,7 @@ const whatsappToken = defineSecret('WHATSAPP_TOKEN');
 const playReviewLogin = defineSecret('PLAY_REVIEW_LOGIN');
 /** Settings from functions/.env (not secret) */
 const whatsappPhoneNumberId = defineString('WHATSAPP_PHONE_NUMBER_ID', { default: '' });
-const whatsappTemplate = defineString('WHATSAPP_TEMPLATE', { default: 'kerek_login_code' });
+const whatsappTemplate = defineString('WHATSAPP_TEMPLATE', { default: 'tapsyr_login_code' });
 const graphVersion = defineString('WHATSAPP_GRAPH_VERSION', { default: 'v23.0' });
 
 const REGION = 'asia-south1';

@@ -27,7 +27,7 @@ function buildPrompt(userInput: string): string {
     (c) => `- "${c.id}": ${c.nameRu} / ${c.nameKz}`
   ).join('\n');
 
-  return `You are an expert NLP parser for "КЕРЕК", a local service and goods marketplace in Kazakhstan.
+  return `You are an expert NLP parser for "Tapsyr", a local service and goods marketplace in Kazakhstan.
 Your task is to analyze a customer's informal request written in Russian, Kazakh, or mixed colloquial language, and extract structured metadata into JSON.
 
 ALLOWED CATEGORY IDs:

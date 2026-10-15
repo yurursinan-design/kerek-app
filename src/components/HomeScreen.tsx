@@ -660,7 +660,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       {/* Footer Info */}
       <footer className="text-center text-xs text-slate-400 py-3 border-t border-slate-100 space-y-1.5">
         <LegalLinks language={language} className="block text-slate-500" />
-        <span className="block">КЕРЕК 2026 · Қазақстан</span>
+        <span className="block">Tapsyr 2026 · Қазақстан</span>
       </footer>
     </div>
   );

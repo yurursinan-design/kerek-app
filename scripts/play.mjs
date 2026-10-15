@@ -116,8 +116,8 @@ async function release(edit, aab) {
         // A draft: Play Console rolls it out to testers once the app's setup is complete
         status: 'draft',
         releaseNotes: [
-          { language: 'ru-RU', text: 'Тестовая версия KEREK. Спасибо, что помогаете!' },
-          { language: 'kk', text: 'KEREK сынақ нұсқасы. Көмектескеніңіз үшін рақмет!' },
+          { language: 'ru-RU', text: 'Тестовая версия Tapsyr. Спасибо, что помогаете!' },
+          { language: 'kk', text: 'Tapsyr сынақ нұсқасы. Көмектескеніңіз үшін рақмет!' },
         ],
       }],
     },

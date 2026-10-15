@@ -1,6 +1,6 @@
 export const translations = {
   kz: {
-    appName: 'КЕРЕК',
+    appName: 'Tapsyr',
     inputPlaceholder: 'Сізге не керек екенін жазыңыз...',
     micTooltip: 'Дауыспен енгізу (демо)',
     micListening: 'Тыңдап тұрмыз... Сөйлеңіз',
@@ -71,7 +71,7 @@ export const translations = {
     btnCancelCompleteWorkModal: 'Бас тарту',
     completeWorkError: 'Жұмысты аяқтау кезінде қате орын алды. Өтініш күйі өзгертілмеді.',
     workInProgressNotice: 'Жұмыс орындалу үстінде. Орындаушымен байланысып, барысын қадағалай аласыз.',
-    workCompletedNotice: 'Тапсырыс сәтті аяқталды! КЕРЕК қызметін таңдағаныңызға рақмет.',
+    workCompletedNotice: 'Тапсырыс сәтті аяқталды! Tapsyr қызметін таңдағаныңызға рақмет.',
     requestCancelledNotice: 'Бұл өтініш клиент тарапынан болдырмалды.',
 
     // Appointments / Randevu
@@ -246,7 +246,7 @@ export const translations = {
     closeButton: 'Жабу',
   },
   ru: {
-    appName: 'КЕРЕК',
+    appName: 'Tapsyr',
     inputPlaceholder: 'Опишите, что вам нужно...',
     micTooltip: 'Голосовой ввод (демо)',
     micListening: 'Слушаем... Говорите',
@@ -317,7 +317,7 @@ export const translations = {
     btnCancelCompleteWorkModal: 'Отмена',
     completeWorkError: 'Ошибка при завершении работы. Статус заявки не был изменен.',
     workInProgressNotice: 'Работа выполняется. Вы можете связаться с исполнителем для согласования деталей.',
-    workCompletedNotice: 'Заказ успешно выполнен! Спасибо, что пользуетесь сервисом КЕРЕК.',
+    workCompletedNotice: 'Заказ успешно выполнен! Спасибо, что пользуетесь сервисом Tapsyr.',
     requestCancelledNotice: 'Данная заявка была отменена клиентом.',
 
     // Appointments / Randevu

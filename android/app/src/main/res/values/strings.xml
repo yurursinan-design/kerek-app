@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">KEREK</string>
-    <string name="title_activity_main">KEREK</string>
+    <string name="app_name">Tapsyr</string>
+    <string name="title_activity_main">Tapsyr</string>
     <string name="package_name">kerek.kz.app</string>
     <string name="custom_url_scheme">kerek.kz.app</string>
 </resources>
