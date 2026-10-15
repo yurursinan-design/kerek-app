@@ -19,7 +19,7 @@ export const LEGAL_OPERATOR = {
   // IIN of the entrepreneur, used as the BIN
   iin: '920104401844',
   city: 'Қызылорда қ. / г. Кызылорда',
-  email: 'support.kerek@gmail.com',
+  email: 'support.tapsyrapp@gmail.com',
 };
 
 export type LegalDocId = 'privacy' | 'terms' | 'deletion';

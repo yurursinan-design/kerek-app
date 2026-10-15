@@ -20,7 +20,7 @@ const API = `https://androidpublisher.googleapis.com/androidpublisher/v3/applica
 const UPLOAD = `https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/${PACKAGE}`;
 const STORE = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'store');
 const LANGUAGES = ['ru-RU', 'kk'];
-const DETAILS = { defaultLanguage: 'ru-RU', contactEmail: 'support.kerek@gmail.com', contactWebsite: 'https://kerek-9d153.web.app' };
+const DETAILS = { defaultLanguage: 'ru-RU', contactEmail: 'support.tapsyrapp@gmail.com', contactWebsite: 'https://kerek-9d153.web.app' };
 /** Closed testing ("alpha" is the closed track Play Console makes for every app) */
 const TEST_TRACK = 'alpha';
 
