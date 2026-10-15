@@ -180,6 +180,26 @@ export interface ServiceRequest {
   understanding?: RequestUnderstanding;
   paymentStatus?: 'pending' | 'held_in_escrow' | 'released' | 'refunded';
   escrowAmount?: number;
+  /** Offers received so far (counted by the server rules, at most MAX_OFFERS_PER_REQUEST) */
+  offerCount?: number;
+  /** Until when masters can send offers (milliseconds since 1970); the customer can extend it */
+  expiresAtMs?: number;
+  /** The price the master says was agreed in the end, reported with "job finished" */
+  finalPrice?: string;
+}
+
+/** Like Armut: a request takes a few offers, so the customer isn't flooded and masters don't write in vain */
+export const MAX_OFFERS_PER_REQUEST = 5;
+/** Days a request stays open for offers; one tap extends it by the same time */
+export const REQUEST_OPEN_DAYS = 3;
+export const REQUEST_OPEN_MS = REQUEST_OPEN_DAYS * 24 * 60 * 60 * 1000;
+
+export function isRequestExpired(r: Pick<ServiceRequest, 'expiresAtMs'>, now = Date.now()): boolean {
+  return typeof r.expiresAtMs === 'number' && now >= r.expiresAtMs;
+}
+
+export function isRequestFull(r: Pick<ServiceRequest, 'offerCount'>): boolean {
+  return (r.offerCount || 0) >= MAX_OFFERS_PER_REQUEST;
 }
 
 export type OfferPriceType = 'fixed' | 'from' | 'inspection';
@@ -217,6 +237,8 @@ export interface ProviderOffer {
   paymentMethods?: OfferPaymentMethod[];
   /** The master promises to fix a problem with this job for free within 14 days */
   fixPledge?: boolean;
+  /** With "price after inspection": what the visit costs if there's no deal (e.g. "2 000 ₸", "Бесплатно") */
+  inspectionFee?: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   createdAt: string;
   iinVerified?: boolean;
@@ -225,11 +247,13 @@ export interface ProviderOffer {
 }
 
 /** The optional extras of a new offer: known payment methods only (no repeats), the pledge only when given */
-export function offerExtras(o: Partial<ProviderOffer>): Pick<ProviderOffer, 'paymentMethods' | 'fixPledge'> {
+export function offerExtras(o: Partial<ProviderOffer>): Pick<ProviderOffer, 'paymentMethods' | 'fixPledge' | 'inspectionFee'> {
   const methods = (o.paymentMethods || []).filter((m, i, all) => OFFER_PAYMENT_METHODS.includes(m) && all.indexOf(m) === i);
+  const fee = o.priceType === 'inspection' ? (o.inspectionFee || '').trim().slice(0, 50) : '';
   return {
     ...(methods.length ? { paymentMethods: methods } : {}),
     ...(o.fixPledge === true ? { fixPledge: true } : {}),
+    ...(fee ? { inspectionFee: fee } : {}),
   };
 }
 
@@ -459,9 +483,15 @@ export interface Provider {
   tradeLicense?: string;
   isActive?: boolean;
   isDemo?: boolean;
+  /** "Not taking orders now": new-request alerts stop until the master switches it off */
+  paused?: boolean;
+  /** Work photos: filled slots (p0 … p7), the files are in Storage under the master's folder */
+  portfolio?: string[];
   createdAt?: string;
   updatedAt?: string;
 }
+
+export const PORTFOLIO_SLOTS = ['p0', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7'] as const;
 
 
 // =================== In-App Chat Models ===================

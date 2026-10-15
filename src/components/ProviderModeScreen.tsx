@@ -4,7 +4,10 @@ import {
   formatDynamicBudget,
   formatDynamicDate,
   formatOfferDisplayPrice,
+  isRequestExpired,
+  isRequestFull,
   Language,
+  MAX_OFFERS_PER_REQUEST,
   normalizeRequestStatus,
   OFFER_PAYMENT_METHODS,
   OfferPaymentMethod,
@@ -27,6 +30,8 @@ import {
   isCategoryMatch,
 } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
+import { PortfolioEditor } from './PortfolioPhotos';
+import { formatTenge, getPriceRange, PriceRange } from '../services/publicStats';
 import { ProviderOnboarding } from './ProviderOnboarding';
 import { ChatScreen } from './ChatScreen';
 import { AppointmentSection } from './AppointmentSection';
@@ -203,6 +208,10 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     useState<ServiceRequest | null>(null);
   const [offerPriceType, setOfferPriceType] = useState<OfferPriceType>('fixed');
   const [offerPriceAmount, setOfferPriceAmount] = useState('');
+  // With "after inspection": what the visit costs if there's no deal ('' = not said, '0' = free)
+  const [offerInspectionFee, setOfferInspectionFee] = useState('');
+  // Typical price for this service in the city, as a hint while writing the offer
+  const [offerPriceHint, setOfferPriceHint] = useState<PriceRange | null>(null);
   const [offerTime, setOfferTime] = useState(
     language === 'kz'
       ? 'Бүгін, 40 минут ішінде'
@@ -411,6 +420,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         ...(providerData.tradeLicense ? { tradeLicense: String(providerData.tradeLicense).trim() } : {}),
         verified: isAlreadyVerified, // Secure: false for new providers!
         isDemo: false,
+        ...(typeof provider?.paused === 'boolean' ? { paused: provider.paused } : {}),
+        ...(provider?.portfolio ? { portfolio: provider.portfolio } : {}),
       });
 
       setProvider(savedProvider);
@@ -433,6 +444,9 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const handleOpenOfferModal = (req: ServiceRequest) => {
     setSelectedRequestForOffer(req);
     setOfferPriceType('fixed');
+    setOfferInspectionFee('');
+    setOfferPriceHint(null);
+    getPriceRange(req.cityId, req.serviceId || req.categoryId).then(setOfferPriceHint);
     // Start empty (the inputs show examples as placeholders): every offer is written by the provider
     setOfferPriceAmount('');
     setOfferTime('');
@@ -537,6 +551,9 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         message: offerMessage.trim(),
         paymentMethods: offerPayments,
         fixPledge: offerFixPledge,
+        ...(offerPriceType === 'inspection' && offerInspectionFee
+          ? { inspectionFee: offerInspectionFee === '0' ? (language === 'kz' ? 'Тегін' : 'Бесплатно') : `${offerInspectionFee} ₸` }
+          : {}),
         status: 'PENDING',
       });
 
@@ -611,14 +628,49 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   };
 
   // The provider reports the job finished; the customer confirms it and the request becomes COMPLETED
+  // Small profile changes from the master's card (pause, work photos), saved on the same profile
+  const [pauseSaving, setPauseSaving] = useState(false);
+  const saveProviderSettings = async (changes: Partial<Provider>) => {
+    if (!provider) return;
+    const saved = await repository.createProvider({ ...provider, ...changes });
+    setProvider({ ...provider, ...saved, ...changes });
+  };
+  const togglePause = async () => {
+    if (!provider || pauseSaving) return;
+    setPauseSaving(true);
+    try {
+      await saveProviderSettings({ paused: !provider.paused });
+    } catch (err) {
+      setErrorMessage(getFriendlyErrorMessage(err, language));
+      setTimeout(() => setErrorMessage(null), 4000);
+    } finally {
+      setPauseSaving(false);
+    }
+  };
+
+  // "Job finished" first asks for the final agreed price (optional), shown to the customer
+  const [doneFormReqId, setDoneFormReqId] = useState<string | null>(null);
+  const [donePrice, setDonePrice] = useState('');
+  const openDoneForm = (requestId: string) => {
+    const offer = sentOffersMap[requestId];
+    const digits = offer && offer.priceType !== 'inspection' ? (offer.price || '').replace(/\D/g, '') : '';
+    setDonePrice(digits ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ') : '');
+    setDoneFormReqId(requestId);
+  };
+
   const handleCompleteWork = async (requestId: string) => {
     if (!checkClientRateLimit(`complete_work_${requestId}`, 800)) return;
     setActionLoadingReqId(requestId);
     try {
       const doneAt = new Date().toISOString();
-      const updated = await repository.updateRequest(requestId, { providerDoneAt: doneAt });
+      const finalPrice = donePrice.replace(/\D/g, '') ? `${donePrice.trim()} ₸` : '';
+      const updated = await repository.updateRequest(requestId, {
+        providerDoneAt: doneAt,
+        ...(finalPrice ? { finalPrice } : {}),
+      });
       if (updated) {
-        patchRequest(requestId, { providerDoneAt: doneAt });
+        setDoneFormReqId(null);
+        patchRequest(requestId, { providerDoneAt: doneAt, ...(finalPrice ? { finalPrice } : {}) });
         notificationService.notifyProviderReportedDone(updated).catch(() => {});
         setNotification(
           language === 'kz'
@@ -646,6 +698,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
 
     const norm = normalizeRequestStatus(r.status);
     if (norm !== 'OPEN') return false;
+    // A request with 5 offers, or past its end, takes no more offers
+    if (isRequestFull(r) || isRequestExpired(r)) return false;
 
     const rCityId = normalizeCityId(r.cityId || r.city) || r.cityId || 'unknown';
     const rCatId = normalizeCategoryId(r.categoryId || r.category) || 'unknown';
@@ -894,6 +948,40 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                   )}
                 </div>
 
+                {/* Taking orders now, or on a break (no new-request alerts while paused) */}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={!provider.paused}
+                  onClick={togglePause}
+                  disabled={pauseSaving}
+                  className="w-full flex items-center justify-between gap-3 pt-2 border-t border-slate-100 text-left disabled:opacity-60"
+                >
+                  <span className="min-w-0">
+                    <span className="block text-xs font-bold text-slate-800">
+                      {provider.paused
+                        ? language === 'kz' ? 'Үзілістемін' : 'Я на паузе'
+                        : language === 'kz' ? 'Жаңа тапсырыс қабылдаймын' : 'Принимаю новые заказы'}
+                    </span>
+                    <span className="block text-[11px] text-slate-500">
+                      {provider.paused
+                        ? language === 'kz' ? 'Жаңа өтінімдер туралы хабарлама келмейді' : 'Уведомления о новых заявках не приходят'
+                        : language === 'kz' ? 'Бос емес болсаңыз, үзіліс қосыңыз' : 'Заняты? Включите паузу'}
+                    </span>
+                  </span>
+                  <span className={`relative w-11 h-6 rounded-full shrink-0 transition-colors ${provider.paused ? 'bg-slate-300' : 'bg-emerald-500'}`}>
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${provider.paused ? 'left-0.5' : 'left-[22px]'}`} />
+                  </span>
+                </button>
+
+                <div className="pt-2 border-t border-slate-100">
+                  <PortfolioEditor
+                    provider={provider}
+                    language={language}
+                    onSave={(portfolio) => saveProviderSettings({ portfolio })}
+                  />
+                </div>
+
                 {/* More clients: share the profile link, and ask for the ID badge */}
                 <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-1.5">
                   <button
@@ -1013,6 +1101,13 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
             {/* TAB 1: Yeni Talepler */}
             {activeTab === 'new' && (
               <div className="space-y-3">
+                {provider?.paused && (
+                  <div className="p-3 rounded-2xl bg-slate-100 border border-slate-200 text-xs text-slate-700 leading-relaxed">
+                    {language === 'kz'
+                      ? 'Сіз үзілістесіз: жаңа өтінімдер туралы хабарлама келмейді. Дайын болғанда профиль картасында қабылдауды қосыңыз.'
+                      : 'Вы на паузе: уведомления о новых заявках не приходят. Когда будете готовы, включите приём в карточке профиля.'}
+                  </div>
+                )}
                 {newRequests.length === 0 ? (
                   <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
                     <Emoji3D code="1f4e5" size={84} className="mx-auto animate-float" />
@@ -1070,6 +1165,13 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                             {formatDynamicBudget(req.budget, language)}
                           </span>
                         )}
+                        {/* How many masters already answered (a request takes 5) */}
+                        <span className="flex items-center gap-1 text-slate-500">
+                          <Send className="w-3.5 h-3.5 text-slate-400" />
+                          {language === 'kz'
+                            ? `Ұсыныстар: ${req.offerCount || 0} / ${MAX_OFFERS_PER_REQUEST}`
+                            : `Предложений: ${req.offerCount || 0} из ${MAX_OFFERS_PER_REQUEST}`}
+                        </span>
                       </div>
 
                       {Boolean(req.attachments?.length || req.location) && (
@@ -1371,10 +1473,56 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                             </div>
                           )}
 
-                          {normStatus === 'IN_PROGRESS' && !req.providerDoneAt && (
+                          {normStatus === 'IN_PROGRESS' && !req.providerDoneAt && doneFormReqId === req.id && (
+                            <div className="w-full p-3 rounded-xl bg-emerald-50 border border-emerald-200 space-y-2">
+                              <label className="block text-xs font-semibold text-emerald-900">
+                                {language === 'kz' ? 'Соңғы келісілген баға (міндетті емес)' : 'Итоговая цена по договорённости (необязательно)'}
+                              </label>
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={donePrice}
+                                  onChange={(e) => {
+                                    const digits = e.target.value.replace(/\D/g, '').slice(0, 9);
+                                    setDonePrice(digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' '));
+                                  }}
+                                  placeholder="15 000"
+                                  className="w-full h-11 pl-3 pr-8 bg-white border border-emerald-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
+                                />
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 pointer-events-none">₸</span>
+                              </div>
+                              <p className="text-[11px] text-emerald-800">
+                                {language === 'kz'
+                                  ? 'Тапсырыс беруші растамас бұрын осы бағаны көреді. Дайын жұмыстың фотосын чатқа жіберіңіз.'
+                                  : 'Заказчик увидит эту цену перед подтверждением. Отправьте фото готовой работы в чат.'}
+                              </p>
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => setDoneFormReqId(null)}
+                                  className="min-h-[42px] rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-bold"
+                                >
+                                  {language === 'kz' ? 'Болдырмау' : 'Отмена'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCompleteWork(req.id)}
+                                  disabled={actionLoadingReqId === req.id}
+                                  className="min-h-[42px] rounded-xl bg-emerald-600 text-white text-xs font-bold disabled:opacity-50"
+                                >
+                                  {actionLoadingReqId === req.id
+                                    ? (language === 'kz' ? 'Жүктелуде...' : 'Загрузка...')
+                                    : (language === 'kz' ? 'Жұмыс аяқталды' : 'Работа выполнена')}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {normStatus === 'IN_PROGRESS' && !req.providerDoneAt && doneFormReqId !== req.id && (
                             <button
                               type="button"
-                              onClick={() => handleCompleteWork(req.id)}
+                              onClick={() => openDoneForm(req.id)}
                               disabled={actionLoadingReqId === req.id}
                               className="w-full min-h-[46px] rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-50"
                             >
@@ -1483,6 +1631,14 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                 </div>
               </div>
 
+              {offerPriceHint && (
+                <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                  📊 {language === 'kz'
+                    ? `Әдетте: ${formatTenge(offerPriceHint.low)} – ${formatTenge(offerPriceHint.high)} (${offerPriceHint.count} тапсырыс)`
+                    : `Обычно: ${formatTenge(offerPriceHint.low)} – ${formatTenge(offerPriceHint.high)} (по ${offerPriceHint.count} заказам)`}
+                </p>
+              )}
+
               {/* Price Input or Inspection Notice */}
               {offerPriceType !== 'inspection' ? (
                 <div className="space-y-1">
@@ -1505,8 +1661,40 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                   </div>
                 </div>
               ) : (
-                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 font-medium leading-relaxed">
-                  {t.inspectionNotice}
+                <div className="space-y-2">
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 font-medium leading-relaxed">
+                    {t.inspectionNotice}
+                  </div>
+                  <label className="text-xs font-semibold text-slate-700 block">
+                    {language === 'kz'
+                      ? 'Келісім болмаса, шығу/қарау құны'
+                      : 'Стоимость выезда/осмотра, если не договоритесь'}
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setOfferInspectionFee(offerInspectionFee === '0' ? '' : '0')}
+                      className={`shrink-0 h-11 px-3 rounded-xl border text-xs font-bold ${
+                        offerInspectionFee === '0' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'
+                      }`}
+                    >
+                      {language === 'kz' ? 'Тегін' : 'Бесплатно'}
+                    </button>
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={offerInspectionFee === '0' ? '' : offerInspectionFee}
+                        onChange={(e) => {
+                          const digits = e.target.value.replace(/\D/g, '').slice(0, 7);
+                          setOfferInspectionFee(digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' '));
+                        }}
+                        placeholder="2 000"
+                        className="w-full h-11 pl-3 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-slate-400 pointer-events-none">₸</span>
+                    </div>
+                  </div>
                 </div>
               )}
 

@@ -5,6 +5,7 @@ import {
   ServiceRequest,
   formatDynamicBudget,
   formatDynamicDate,
+  isRequestExpired,
   normalizeRequestStatus,
 } from '../types';
 import { translations } from '../i18n/translations';
@@ -249,6 +250,11 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
                           ? t.status_CANCELLED
                           : t.status_OPEN}
                       </span>
+                      {normalizeRequestStatus(req.status) === 'OPEN' && !req.selectedOfferId && isRequestExpired(req) && (
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                          {language === 'kz' ? 'Мерзімі бітті' : 'Срок истёк'}
+                        </span>
+                      )}
                     </div>
 
                     {/* Service & Text */}

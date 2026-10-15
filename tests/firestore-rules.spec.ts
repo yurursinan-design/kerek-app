@@ -78,6 +78,23 @@ async function runTestSuite() {
   const phoneUser = (uid: string) => testEnv.authenticatedContext(uid, { phone_number: '+77000000000' });
   const anonymousUser = (uid: string) => testEnv.authenticatedContext(uid);
 
+  // An offer is written together with the request's offer count, as the app does (the rules require both)
+  const sendOffer = async (db: any, offerId: string, data: Record<string, unknown>) => {
+    const requestId = String(data.requestId || '');
+    if (!requestId) return setDoc(doc(db, 'offers', offerId), data);
+    let count = 0;
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const snap = await getDoc(doc(ctx.firestore(), 'requests', requestId));
+      count = (snap.exists() && (snap.data().offerCount as number)) || 0;
+    });
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'offers', offerId), data);
+    batch.update(doc(db, 'requests', requestId), {
+      status: 'OFFERS_RECEIVED', lastOfferId: offerId, offerCount: count + 1, updatedAt: new Date().toISOString(),
+    });
+    return batch.commit();
+  };
+
   console.log('2. Test environment ready. Running isolated security scenarios...\n');
 
   try {
@@ -282,7 +299,7 @@ async function runTestSuite() {
     await test('Creating offer for non-existent request is rejected', async () => {
       const masterDb = phoneUser('prov_master1').firestore();
       await assertFails(
-        setDoc(doc(masterDb, 'offers', 'offer_m1_ghost'), {
+        sendOffer(masterDb, 'offer_m1_ghost', {
           id: 'offer_m1_ghost',
           requestId: 'req_non_existent',
           providerId: 'prov_master1',
@@ -309,7 +326,7 @@ async function runTestSuite() {
     await test('Creating offer for closed/cancelled request is rejected', async () => {
       const masterDb = phoneUser('prov_master1').firestore();
       await assertFails(
-        setDoc(doc(masterDb, 'offers', 'offer_m1_closed'), {
+        sendOffer(masterDb, 'offer_m1_closed', {
           id: 'offer_m1_closed',
           requestId: 'req_closed_01',
           providerId: 'prov_master1',
@@ -323,7 +340,7 @@ async function runTestSuite() {
     await test('Attacker cannot create offer with someone else providerUserId', async () => {
       const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
-        setDoc(doc(bobDb, 'offers', 'offer_fake_01'), {
+        sendOffer(bobDb, 'offer_fake_01', {
           id: 'offer_fake_01',
           requestId: 'req_alice_01',
           providerId: 'prov_master1',
@@ -351,7 +368,7 @@ async function runTestSuite() {
     await test('Provider can submit valid PENDING offer for open request', async () => {
       const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
-        setDoc(doc(masterDb, 'offers', 'OFFER-req_alice_01-prov_master1'), validOffer('OFFER-req_alice_01-prov_master1', 'prov_master1', 'Master Ruslan'))
+        sendOffer(masterDb, 'OFFER-req_alice_01-prov_master1', validOffer('OFFER-req_alice_01-prov_master1', 'prov_master1', 'Master Ruslan'))
       );
     });
 
@@ -374,21 +391,20 @@ async function runTestSuite() {
       });
       const db = phoneUser('prov_extras').firestore();
       await assertSucceeds(
-        setDoc(doc(db, 'offers', 'OFFER-req_extras-prov_extras'), offer('prov_extras', { paymentMethods: ['cash', 'kaspi'], fixPledge: true }))
+        sendOffer(db, 'OFFER-req_extras-prov_extras', offer('prov_extras', { paymentMethods: ['cash', 'kaspi'], fixPledge: true }))
       );
     });
 
     await test('Offer extras are checked: only cash/kaspi, at least one, and the pledge is a plain yes/no', async () => {
       const db = phoneUser('prov_extras2').firestore();
-      const ref = doc(db, 'offers', 'OFFER-req_extras-prov_extras2');
       const offer = (extra: Record<string, unknown>) => ({
         ...validOffer('OFFER-req_extras-prov_extras2', 'prov_extras2', 'Master prov_extras2', extra),
         requestId: 'req_extras',
       });
-      await assertFails(setDoc(ref, offer({ paymentMethods: ['crypto'] })));
-      await assertFails(setDoc(ref, offer({ paymentMethods: [] })));
-      await assertFails(setDoc(ref, offer({ paymentMethods: ['cash', 'kaspi', 'cash'] })));
-      await assertFails(setDoc(ref, offer({ fixPledge: 'yes' })));
+      await assertFails(sendOffer(db, 'OFFER-req_extras-prov_extras2', offer({ paymentMethods: ['crypto'] })));
+      await assertFails(sendOffer(db, 'OFFER-req_extras-prov_extras2', offer({ paymentMethods: [] })));
+      await assertFails(sendOffer(db, 'OFFER-req_extras-prov_extras2', offer({ paymentMethods: ['cash', 'kaspi', 'cash'] })));
+      await assertFails(sendOffer(db, 'OFFER-req_extras-prov_extras2', offer({ fixPledge: 'yes' })));
     });
 
     await test('A provider can change payment methods on their own PENDING offer, only to known ones', async () => {
@@ -400,12 +416,12 @@ async function runTestSuite() {
 
     await test('A provider has one offer per request: any other offer id is rejected', async () => {
       const masterDb = phoneUser('prov_master1').firestore();
-      await assertFails(setDoc(doc(masterDb, 'offers', 'offer_m1_second'), validOffer('offer_m1_second', 'prov_master1', 'Master Ruslan')));
+      await assertFails(sendOffer(masterDb, 'offer_m1_second', validOffer('offer_m1_second', 'prov_master1', 'Master Ruslan')));
     });
 
     await test('A user without a provider profile cannot send an offer', async () => {
       const bobDb = phoneUser('user_bob').firestore();
-      await assertFails(setDoc(doc(bobDb, 'offers', 'OFFER-req_alice_01-user_bob'), validOffer('OFFER-req_alice_01-user_bob', 'user_bob', 'Bob')));
+      await assertFails(sendOffer(bobDb, 'OFFER-req_alice_01-user_bob', validOffer('OFFER-req_alice_01-user_bob', 'user_bob', 'Bob')));
     });
 
     await test('A provider from another city cannot send an offer', async () => {
@@ -415,7 +431,7 @@ async function runTestSuite() {
         });
       });
       const astanaDb = phoneUser('prov_astana').firestore();
-      await assertFails(setDoc(doc(astanaDb, 'offers', 'OFFER-req_alice_01-prov_astana'), validOffer('OFFER-req_alice_01-prov_astana', 'prov_astana', 'Astana Master')));
+      await assertFails(sendOffer(astanaDb, 'OFFER-req_alice_01-prov_astana', validOffer('OFFER-req_alice_01-prov_astana', 'prov_astana', 'Astana Master')));
     });
 
     await test('Customer cannot send an offer on their own request', async () => {
@@ -425,7 +441,7 @@ async function runTestSuite() {
         });
       });
       const aliceDb = phoneUser('user_alice').firestore();
-      await assertFails(setDoc(doc(aliceDb, 'offers', 'OFFER-req_alice_01-user_alice'), validOffer('OFFER-req_alice_01-user_alice', 'user_alice', 'Alice Pro')));
+      await assertFails(sendOffer(aliceDb, 'OFFER-req_alice_01-user_alice', validOffer('OFFER-req_alice_01-user_alice', 'user_alice', 'Alice Pro')));
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         await deleteDoc(doc(ctx.firestore(), 'providers', 'user_alice'));
       });
@@ -434,9 +450,9 @@ async function runTestSuite() {
     await test('Offer cannot carry demo flags, ratings or a name other than the provider profile', async () => {
       const master2Db = phoneUser('prov_master2').firestore();
       const id = 'OFFER-req_alice_01-prov_master2';
-      await assertFails(setDoc(doc(master2Db, 'offers', id), validOffer(id, 'prov_master2', 'Master Sergey', { isDemo: true })));
-      await assertFails(setDoc(doc(master2Db, 'offers', id), validOffer(id, 'prov_master2', 'Master Sergey', { rating: 5, reviewsCount: 99 })));
-      await assertFails(setDoc(doc(master2Db, 'offers', id), validOffer(id, 'prov_master2', 'KEREK Support')));
+      await assertFails(sendOffer(master2Db, id, validOffer(id, 'prov_master2', 'Master Sergey', { isDemo: true })));
+      await assertFails(sendOffer(master2Db, id, validOffer(id, 'prov_master2', 'Master Sergey', { rating: 5, reviewsCount: 99 })));
+      await assertFails(sendOffer(master2Db, id, validOffer(id, 'prov_master2', 'KEREK Support')));
     });
 
     // Later scenarios use a fixed offer id for the first provider
@@ -493,15 +509,91 @@ async function runTestSuite() {
       );
     });
 
-    await test('Legitimate provider who submitted offer can update request to OFFERS_RECEIVED', async () => {
+    await test('A provider cannot move the request or its offer count without sending a new offer', async () => {
       const masterDb = phoneUser('prov_master1').firestore();
-      await assertSucceeds(
+      await assertFails(
         updateDoc(doc(masterDb, 'requests', 'req_alice_01'), {
           status: 'OFFERS_RECEIVED',
           lastOfferId: 'offer_m1_01',
           updatedAt: new Date().toISOString(),
         })
       );
+      // Their offer already exists, so the count can't be bumped again with it
+      await assertFails(
+        updateDoc(doc(masterDb, 'requests', 'req_alice_01'), {
+          status: 'OFFERS_RECEIVED',
+          lastOfferId: 'OFFER-req_alice_01-prov_master1',
+          offerCount: 2,
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    // ---- Offer limit (5 per request), request expiry, inspection fee
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const adminDb = ctx.firestore();
+      const base = { customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances', service: 'Repair', status: 'OPEN' };
+      await setDoc(doc(adminDb, 'requests', 'req_full'), { id: 'req_full', ...base, status: 'OFFERS_RECEIVED', offerCount: 5 });
+      await setDoc(doc(adminDb, 'requests', 'req_four'), { id: 'req_four', ...base, status: 'OFFERS_RECEIVED', offerCount: 4 });
+      await setDoc(doc(adminDb, 'requests', 'req_expired'), { id: 'req_expired', ...base, expiresAtMs: Date.now() - 60000 });
+      await setDoc(doc(adminDb, 'requests', 'req_fresh'), { id: 'req_fresh', ...base, expiresAtMs: Date.now() + 86400000 });
+      await setDoc(doc(adminDb, 'providers', 'prov_lim'), {
+        id: 'prov_lim', userId: 'prov_lim', name: 'Master Lim', city: 'almaty', cityId: 'almaty', category: 'appliance_repair',
+      });
+    });
+    const limOffer = (requestId: string, extra: Record<string, unknown> = {}) => ({
+      ...validOffer(`OFFER-${requestId}-prov_lim`, 'prov_lim', 'Master Lim', extra),
+      requestId,
+    });
+
+    await test('An offer must be counted on the request: a plain offer write is rejected', async () => {
+      const db = phoneUser('prov_lim').firestore();
+      await assertFails(setDoc(doc(db, 'offers', 'OFFER-req_four-prov_lim'), limOffer('req_four')));
+    });
+
+    await test('The counter goes up by exactly one with the offer', async () => {
+      const db = phoneUser('prov_lim').firestore();
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'offers', 'OFFER-req_four-prov_lim'), limOffer('req_four'));
+      batch.update(doc(db, 'requests', 'req_four'), {
+        status: 'OFFERS_RECEIVED', lastOfferId: 'OFFER-req_four-prov_lim', offerCount: 6, updatedAt: new Date().toISOString(),
+      });
+      await assertFails(batch.commit());
+    });
+
+    await test('The fifth offer is accepted; a request with 5 offers takes no more', async () => {
+      const db = phoneUser('prov_lim').firestore();
+      await assertSucceeds(sendOffer(db, 'OFFER-req_four-prov_lim', limOffer('req_four')));
+      await assertFails(sendOffer(db, 'OFFER-req_full-prov_lim', limOffer('req_full')));
+    });
+
+    await test('An expired request takes no offers; an open one does', async () => {
+      const db = phoneUser('prov_lim').firestore();
+      await assertFails(sendOffer(db, 'OFFER-req_expired-prov_lim', limOffer('req_expired')));
+      await assertSucceeds(sendOffer(db, 'OFFER-req_fresh-prov_lim', limOffer('req_fresh', { priceType: 'inspection', inspectionFee: '2 000 ₸' })));
+    });
+
+    await test('Inspection fee is short text, editable while the offer is pending', async () => {
+      const db = phoneUser('prov_lim').firestore();
+      const ref = doc(db, 'offers', 'OFFER-req_fresh-prov_lim');
+      await assertSucceeds(updateDoc(ref, { inspectionFee: 'Бесплатно', updatedAt: new Date().toISOString() }));
+      await assertFails(updateDoc(ref, { inspectionFee: 'x'.repeat(51), updatedAt: new Date().toISOString() }));
+    });
+
+    await test('Customer sets the request end within 4 days, extends it later, and never sets the offer count', async () => {
+      const aliceDb = phoneUser('user_alice').firestore();
+      const req = (id: string, extra: Record<string, unknown>) => ({
+        id, customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances', service: 'Repair', status: 'OPEN', ...extra,
+      });
+      await assertSucceeds(setDoc(doc(aliceDb, 'requests', 'req_exp_ok'), req('req_exp_ok', { expiresAtMs: Date.now() + 3 * 86400000 })));
+      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_exp_long'), req('req_exp_long', { expiresAtMs: Date.now() + 10 * 86400000 })));
+      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_exp_past'), req('req_exp_past', { expiresAtMs: Date.now() - 1000 })));
+      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_exp_str'), req('req_exp_str', { expiresAtMs: 'tomorrow' })));
+      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_cnt'), req('req_cnt', { offerCount: 0 })));
+      const ref = doc(aliceDb, 'requests', 'req_expired');
+      await assertSucceeds(updateDoc(ref, { expiresAtMs: Date.now() + 3 * 86400000, updatedAt: new Date().toISOString() }));
+      await assertFails(updateDoc(ref, { expiresAtMs: Date.now() + 10 * 86400000, updatedAt: new Date().toISOString() }));
+      await assertFails(updateDoc(ref, { offerCount: 0, updatedAt: new Date().toISOString() }));
     });
 
     // =========================================================================
@@ -1305,28 +1397,28 @@ async function runTestSuite() {
 
     await test('Provider cannot create an offer that impersonates another provider profile', async () => {
       await assertFails(
-        setDoc(doc(malloryDb(), 'offers', 'offer_h_imp'), baseOffer('offer_h_imp', { providerId: 'prov_trusted', providerName: 'Trusted Master' }))
+        sendOffer(malloryDb(), 'offer_h_imp', baseOffer('offer_h_imp', { providerId: 'prov_trusted', providerName: 'Trusted Master' }))
       );
     });
 
     await test('Provider can create an offer under their own provider profile', async () => {
       await assertSucceeds(
-        setDoc(doc(malloryDb(), 'offers', 'OFFER-req_h_open-mallory'), baseOffer('OFFER-req_h_open-mallory', { providerId: 'mallory', iinVerified: false, hasCertificate: false }))
+        sendOffer(malloryDb(), 'OFFER-req_h_open-mallory', baseOffer('OFFER-req_h_open-mallory', { providerId: 'mallory', iinVerified: false, hasCertificate: false }))
       );
     });
 
     await test('Provider cannot create an offer with a pre-set paymentStatus', async () => {
       await assertFails(
-        setDoc(doc(malloryDb(), 'offers', 'offer_h_pay'), baseOffer('offer_h_pay', { providerId: 'mallory', paymentStatus: 'held_in_escrow' }))
+        sendOffer(malloryDb(), 'offer_h_pay', baseOffer('offer_h_pay', { providerId: 'mallory', paymentStatus: 'held_in_escrow' }))
       );
     });
 
     await test('Provider cannot create an offer carrying self-assigned trust badges', async () => {
       await assertFails(
-        setDoc(doc(malloryDb(), 'offers', 'offer_h_badge'), baseOffer('offer_h_badge', { providerId: 'mallory', iinVerified: true }))
+        sendOffer(malloryDb(), 'offer_h_badge', baseOffer('offer_h_badge', { providerId: 'mallory', iinVerified: true }))
       );
       await assertFails(
-        setDoc(doc(malloryDb(), 'offers', 'offer_h_badge2'), baseOffer('offer_h_badge2', { providerId: 'mallory', hasCertificate: true }))
+        sendOffer(malloryDb(), 'offer_h_badge2', baseOffer('offer_h_badge2', { providerId: 'mallory', hasCertificate: true }))
       );
     });
 
@@ -1340,7 +1432,7 @@ async function runTestSuite() {
 
     await test('Offer message longer than 2000 characters is rejected', async () => {
       await assertFails(
-        setDoc(doc(malloryDb(), 'offers', 'offer_h_long'), baseOffer('offer_h_long', { providerId: 'mallory', message: 'x'.repeat(2001) }))
+        sendOffer(malloryDb(), 'offer_h_long', baseOffer('offer_h_long', { providerId: 'mallory', message: 'x'.repeat(2001) }))
       );
     });
 
@@ -1499,6 +1591,28 @@ async function runTestSuite() {
       await assertFails(updateDoc(doc(ctx('prov_v_almaty'), 'providers', 'prov_v_almaty'), { hidden: true }));
     });
 
+    await test('Counted numbers (master stats, typical prices) are read-only for the app', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'providerStats', 'prov_v_almaty'), { completedJobs: 3, offersSent: 5 });
+        await setDoc(doc(c.firestore(), 'priceStats', 'almaty_tap_repair'), { prices: [5000, 7000, 9000], count: 3 });
+      });
+      await assertSucceeds(getDoc(doc(ctx('user_alice'), 'providerStats', 'prov_v_almaty')));
+      await assertFails(getDoc(doc(anonymousUser('anon_s').firestore(), 'providerStats', 'prov_v_almaty')));
+      await assertFails(updateDoc(doc(ctx('prov_v_almaty'), 'providerStats', 'prov_v_almaty'), { completedJobs: 99 }));
+      await assertFails(getDocs(collection(ctx('user_alice'), 'providerStats')));
+      await assertSucceeds(getDoc(doc(anonymousUser('anon_s').firestore(), 'priceStats', 'almaty_tap_repair')));
+      await assertFails(setDoc(doc(ctx('user_alice'), 'priceStats', 'almaty_tap_repair'), { prices: [1], count: 1 }));
+    });
+
+    await test('A provider pauses new orders and lists work photos in the fixed slots only', async () => {
+      const ref = doc(ctx('prov_v_almaty'), 'providers', 'prov_v_almaty');
+      await assertSucceeds(updateDoc(ref, { paused: true }));
+      await assertSucceeds(updateDoc(ref, { paused: false, portfolio: ['p0', 'p3'] }));
+      await assertFails(updateDoc(ref, { paused: 'yes' }));
+      await assertFails(updateDoc(ref, { portfolio: ['https://example.com/x.jpg'] }));
+      await assertFails(updateDoc(ref, { portfolio: ['p0', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p7'] }));
+    });
+
     await test('Provider profile phone numbers are not readable by anonymous visitors', async () => {
       await assertFails(getDoc(doc(anonymousUser('anon_v').firestore(), 'providers', 'prov_v_almaty')));
       await assertSucceeds(getDoc(doc(ctx('cust_v'), 'providers', 'prov_v_almaty')));
@@ -1534,7 +1648,7 @@ async function runTestSuite() {
     });
 
     await test('Anonymous account cannot send an offer', async () => {
-      await assertFails(setDoc(doc(anonymousUser('anon_p').firestore(), 'offers', 'offer_p_anon'), {
+      await assertFails(sendOffer(anonymousUser('anon_p').firestore(), 'offer_p_anon', {
         id: 'offer_p_anon', requestId: 'req_p_open', providerUserId: 'anon_p', providerId: 'anon_p', price: '1 000 ₸', status: 'PENDING',
       }));
     });
@@ -1569,6 +1683,12 @@ async function runTestSuite() {
     });
     await test('Customer cannot set providerDoneAt', async () => {
       await assertFails(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_1'), { providerDoneAt: '2026-10-12T10:00:00Z' }));
+    });
+    await test('Selected provider reports the final price with the finished job; the customer cannot set it', async () => {
+      const provRef = doc(phoneUser('prov_job').firestore(), 'requests', 'req_job_1');
+      await assertSucceeds(updateDoc(provRef, { providerDoneAt: '2026-10-12T11:00:00Z', finalPrice: '12 000 ₸' }));
+      await assertFails(updateDoc(provRef, { finalPrice: 'x'.repeat(51) }));
+      await assertFails(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_1'), { finalPrice: '1 ₸' }));
     });
     await test('Customer confirms completion', async () => {
       await assertSucceeds(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_1'), { status: 'COMPLETED' }));

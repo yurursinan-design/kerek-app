@@ -35,6 +35,9 @@ import {
   getAppointmentId,
   getConversationId,
   offerExtras,
+  isRequestExpired,
+  isRequestFull,
+  REQUEST_OPEN_MS,
   Provider,
   ProviderOffer,
   RequestAttachment,
@@ -78,6 +81,7 @@ import { getCurrentUserId } from './localRepository';
 import { generateRequestId, providerOfferId } from './ids';
 import { CANONICAL_CITIES, CANONICAL_CATEGORIES, normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 import { cleanImageForUpload } from './imageClean';
+import { isPortfolioSlot } from './portfolio';
 
 /**
  * Sanitizes an object before sending to Cloud Firestore.
@@ -311,6 +315,10 @@ export class FirebaseRepository implements Repository {
         : {}),
       availability: providerData.availability || providerData.workingHours || '09:00 - 20:00',
       ...(providerData.tradeLicense ? { tradeLicense: providerData.tradeLicense } : {}),
+      ...(typeof providerData.paused === 'boolean' ? { paused: providerData.paused } : {}),
+      ...(Array.isArray(providerData.portfolio)
+        ? { portfolio: providerData.portfolio.filter((x, i, all) => isPortfolioSlot(x) && all.indexOf(x) === i).slice(0, 8) }
+        : {}),
       updatedAt: new Date().toISOString(),
     } as Provider;
 
@@ -469,6 +477,7 @@ export class FirebaseRepository implements Repository {
       urgency: requestData.urgency || 'normal',
       status: firestoreStatus,
       createdAt: requestData.createdAt || new Date().toISOString(),
+      expiresAtMs: Date.now() + REQUEST_OPEN_MS,
     };
 
     // selectedOfferId is never set at creation: it is only written by acceptOffer
@@ -1236,7 +1245,7 @@ export class FirebaseRepository implements Repository {
           normStatus === 'CANCELLED'
         ) {
           const nonStatusKeys = Object.keys(safeUpdates).filter(
-            (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId' && k !== 'providerDoneAt'
+            (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId' && k !== 'providerDoneAt' && k !== 'finalPrice'
           );
           if (nonStatusKeys.length > 0) {
             throw new Error(
@@ -1344,30 +1353,37 @@ export class FirebaseRepository implements Repository {
 
     try {
       const offerRef = doc(firestore, 'offers', id);
-      const already = await getDoc(offerRef);
-      if (already.exists()) {
-        return { id, ...already.data() } as ProviderOffer;
-      }
-      await setDoc(offerRef, sanitizeForFirestore(newOffer));
-
-      // Upgrade request status to OFFERS_RECEIVED if it was NEW or MATCHING
-      if (newOffer.requestId) {
-        try {
-          const req = await this.getRequest(newOffer.requestId);
-          if (req) {
-            if (req.status === 'MATCHING' || req.status === 'NEW' || req.status === 'OPEN') {
-              await this.updateRequest(req.id, { status: 'OFFERS_RECEIVED', lastOfferId: newOffer.id });
-            }
-            // Trigger customer notification
-            notificationService.notifyNewOffer(req, newOffer).catch(() => {});
-          }
-        } catch (upgradeErr) {
-          console.warn('[FirebaseRepository] Note upgrading request status on offer creation:', upgradeErr);
+      const reqRef = doc(firestore, 'requests', newOffer.requestId);
+      // The offer and the request's offer count are written together (the rules check both), so a
+      // request never takes more than MAX_OFFERS_PER_REQUEST offers, even when masters answer at once
+      let existingOffer: ProviderOffer | null = null;
+      let req: ServiceRequest | null = null;
+      await runTransaction(firestore, async (transaction) => {
+        const already = await transaction.get(offerRef);
+        if (already.exists()) {
+          existingOffer = { id, ...already.data() } as ProviderOffer;
+          return;
         }
-      }
-
+        const reqSnap = await transaction.get(reqRef);
+        if (!reqSnap.exists()) throw new Error('Request not found');
+        const reqData = reqSnap.data() as ServiceRequest;
+        if (isRequestExpired(reqData)) throw new Error('Validation Error: request-expired');
+        if (isRequestFull(reqData)) throw new Error('Validation Error: offer-limit-reached');
+        const offerCount = (reqData.offerCount || 0) + 1;
+        transaction.set(offerRef, sanitizeForFirestore(newOffer));
+        transaction.update(reqRef, {
+          status: 'OFFERS_RECEIVED',
+          lastOfferId: id,
+          offerCount,
+          updatedAt: new Date().toISOString(),
+        });
+        req = { ...reqData, id: reqSnap.id, status: 'OFFERS_RECEIVED', lastOfferId: id, offerCount };
+      });
+      if (existingOffer) return existingOffer;
+      if (req) notificationService.notifyNewOffer(req, newOffer).catch(() => {});
       return newOffer;
     } catch (err) {
+      if (err instanceof Error && /request-expired|offer-limit-reached/.test(err.message)) throw err;
       handleFirestoreError(err, OperationType.WRITE, `offers/${id}`);
     }
   }

@@ -4,6 +4,7 @@ import { deleteObject, ref as storageRef } from 'firebase/storage';
 import { auth, db, isFirebaseConfigured, storage } from './firebase';
 import { LEGAL_VERSION } from '../data/legalTexts';
 import { clearPersonalLocalData } from './storage';
+import { deleteAllPortfolioPhotos } from './portfolio';
 import { forgetPushToken } from './pushNotifications';
 
 /** Deleting an account needs a recent sign-in (Firebase rule); older sessions confirm the number with a new code. */
@@ -121,6 +122,7 @@ export async function deleteMyAccount(): Promise<void> {
 
   // This phone stops getting push messages for the deleted account
   await forgetPushToken();
+  await deleteAllPortfolioPhotos(uid);
   await deleteIfExists(doc(firestore, 'providers', uid));
   await deleteIfExists(doc(firestore, 'users', uid));
 

@@ -21,6 +21,9 @@ import {
   validateChatAttachment,
   validateRequestAttachment,
   WorkStatus,
+  isRequestExpired,
+  isRequestFull,
+  REQUEST_OPEN_MS,
 } from '../types';
 import {
   OfferFilter,
@@ -41,6 +44,7 @@ import { logTechnicalError } from './errorHandler';
 import { auth, isFirebaseConfigured } from './firebase';
 import { normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 import { generateOfferId } from './ids';
+import { isPortfolioSlot } from './portfolio';
 import { clearDeviceFiles, dataUrlToBlob, saveDeviceFile } from './deviceFiles';
 
 const STORAGE_KEY_USER_ID = 'kerek_current_user_id_v2';
@@ -246,6 +250,10 @@ export class LocalRepository implements Repository {
         iinVerified: providerData.iinVerified ?? false,
         hasCertificate: providerData.hasCertificate ?? false,
         ...(providerData.tradeLicense ? { tradeLicense: providerData.tradeLicense } : {}),
+        ...(typeof providerData.paused === 'boolean' ? { paused: providerData.paused } : {}),
+        ...(Array.isArray(providerData.portfolio)
+          ? { portfolio: providerData.portfolio.filter((x, i, all) => isPortfolioSlot(x) && all.indexOf(x) === i).slice(0, 8) }
+          : {}),
         isDemo: false,
       };
 
@@ -398,6 +406,7 @@ export class LocalRepository implements Repository {
         urgency: requestData.urgency || 'normal',
         status: requestData.status || 'OPEN',
         createdAt: new Date().toISOString(),
+        expiresAtMs: Date.now() + REQUEST_OPEN_MS,
         ...(requestData.attachments && requestData.attachments.length > 0 ? { attachments: requestData.attachments } : {}),
         ...(requestData.location ? { location: requestData.location } : {}),
         ...(requestData.understanding ? { understanding: requestData.understanding } : {}),
@@ -583,7 +592,7 @@ export class LocalRepository implements Repository {
         normStatus === 'CANCELLED'
       ) {
         const nonStatusKeys = Object.keys(updates).filter(
-          (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId' && k !== 'providerDoneAt'
+          (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId' && k !== 'providerDoneAt' && k !== 'finalPrice'
         );
         if (nonStatusKeys.length > 0) {
           throw new Error(
@@ -687,16 +696,23 @@ export class LocalRepository implements Repository {
         hasCertificate: offerData.hasCertificate ?? false,
       };
 
+      // Same limits as the cloud rules: open requests only until they expire, at most 5 real offers
+      const req = newOffer.requestId ? await this.getRequest(newOffer.requestId) : null;
+      if (req && !newOffer.isDemo) {
+        if (isRequestExpired(req)) throw new Error('Validation Error: request-expired');
+        if (isRequestFull(req)) throw new Error('Validation Error: offer-limit-reached');
+      }
+
       const allOffers = await this.getAllOffersRaw();
       const updated = [newOffer, ...allOffers];
       safeStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify(updated));
 
-      // Upgrade request status to OFFERS_RECEIVED if it was NEW or MATCHING
-      if (newOffer.requestId) {
-        const req = await this.getRequest(newOffer.requestId);
-        if (req && (req.status === 'MATCHING' || req.status === 'NEW')) {
-          await this.updateRequest(req.id, { status: 'OFFERS_RECEIVED' });
-        }
+      // Count the offer and upgrade the request status to OFFERS_RECEIVED if it was NEW or MATCHING
+      if (req) {
+        const changes: Partial<ServiceRequest> = {};
+        if (!newOffer.isDemo) changes.offerCount = (req.offerCount || 0) + 1;
+        if (req.status === 'MATCHING' || req.status === 'NEW') changes.status = 'OFFERS_RECEIVED';
+        if (Object.keys(changes).length) await this.updateRequest(req.id, changes);
       }
 
       return newOffer;

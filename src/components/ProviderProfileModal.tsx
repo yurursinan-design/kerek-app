@@ -6,6 +6,8 @@ import { formatShortDate } from '../services/dateFormat';
 import { repository, getCurrentUserId } from '../services';
 import { isFavorite, masterProfileLink, onFavoritesChange, toggleFavorite } from '../services/favorites';
 import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
+import { PortfolioGallery } from './PortfolioPhotos';
+import { getProviderStats, ProviderStats, responseTimeLabel } from '../services/publicStats';
 import {
   X,
   Heart,
@@ -41,6 +43,21 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
 }) => {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [favorite, setFavorite] = useState(false);
+  const [stats, setStats] = useState<ProviderStats | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setStats(null);
+    const uid = provider && !provider.isDemo ? provider.userId || provider.id : '';
+    if (isOpen && uid) {
+      getProviderStats(uid).then((st) => alive && setStats(st));
+    }
+    return () => {
+      alive = false;
+    };
+    // The stats belong to the master's account, so only its id matters
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, provider?.id, provider?.userId, provider?.isDemo]);
   const [shareNote, setShareNote] = useState<string | null>(null);
 
   useEffect(() => {
@@ -315,6 +332,25 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
               </div>
             </div>
           )}
+
+          {stats && (stats.completedJobs > 0 || stats.avgResponseMinutes !== null) && (
+            <div className="flex flex-wrap gap-1.5">
+              {stats.completedJobs > 0 && (
+                <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800">
+                  ✅ {language === 'kz'
+                    ? `${stats.completedJobs} тапсырыс орындады`
+                    : `${stats.completedJobs} ${stats.completedJobs % 10 === 1 && stats.completedJobs % 100 !== 11 ? 'выполненный заказ' : stats.completedJobs % 10 >= 2 && stats.completedJobs % 10 <= 4 && (stats.completedJobs % 100 < 10 || stats.completedJobs % 100 >= 20) ? 'выполненных заказа' : 'выполненных заказов'}`}
+                </span>
+              )}
+              {stats.avgResponseMinutes !== null && (
+                <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-sky-50 border border-sky-200 text-[11px] font-bold text-sky-800">
+                  ⚡ {language === 'kz' ? 'Әдетте жауап береді:' : 'Обычно отвечает'} {responseTimeLabel(stats.avgResponseMinutes, language === 'kz' ? 'kz' : 'ru')}
+                </span>
+              )}
+            </div>
+          )}
+
+          <PortfolioGallery provider={provider} language={language} />
 
           {/* Category */}
           {provider.category && (

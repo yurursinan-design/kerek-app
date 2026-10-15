@@ -3,6 +3,7 @@ import { db, auth, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulato
 import { deleteApp } from 'firebase/app';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, getDoc, getDocs, collection, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { sendOfferCounted } from './helpers/offers';
 
 // Mock minimal localStorage required by Firebase Auth Node.js environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -119,7 +120,7 @@ async function runMessagingSecurityTests() {
   await setDoc(doc(providerDb, 'providers', providerUid), {
     id: providerUid, userId: providerUid, name: 'Test Шебер', city: 'Қызылорда', cityId: 'kyzylorda', category: 'appliances',
   });
-  await setDoc(doc(providerDb, 'offers', testOfferId), {
+  await sendOfferCounted(providerDb, testOfferId, {
     id: testOfferId,
     requestId: testReqId,
     providerId: providerUid,

@@ -18,6 +18,8 @@ export {
   notifyOnAppointmentWritten,
   pushOnNotificationCreated,
 } from './notifications';
+// Jobs done, answer speed and typical prices, counted from real events; see stats.ts
+export { statsOnOfferCreated, statsOnRequestCompleted } from './stats';
 // Copy of all personal data in Kazakhstan (Law 94-V art. 12 p. 2); see kzMirror.ts
 export {
   kzMirrorUsers,
@@ -210,9 +212,11 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
         const providerId = doc.id;
         const providerUserId = providerData.userId || providerId;
 
-        // Skip the customer themselves, and providers the operator blocked or hid
+        // Skip the customer themselves, providers the operator blocked or hid, and paused masters
         if (providerUserId === customerId) continue;
         if (providerData.blocked === true || providerData.hidden === true) continue;
+        // A master on a break ("not taking orders now") gets no new-request alerts
+        if (providerData.paused === true) continue;
 
         const notifId = `notif_new_request_${requestId}_${providerId}`;
         if (existing.has(notifId)) continue;

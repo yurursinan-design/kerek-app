@@ -5,9 +5,14 @@ import {
   formatDynamicBudget,
   formatDynamicDate,
   formatOfferDisplayPrice,
+  isRequestExpired,
+  isRequestFull,
   isTopMaster,
   Language,
+  MAX_OFFERS_PER_REQUEST,
   normalizeRequestStatus,
+  REQUEST_OPEN_DAYS,
+  REQUEST_OPEN_MS,
   paymentMethodLabel,
   Provider,
   ProviderOffer,
@@ -28,6 +33,7 @@ import { Emoji3D } from './CategoryIcon';
 import { RequestIcon, requestVisual } from './RequestIcon';
 import { ChatScreen } from './ChatScreen';
 import { AppointmentSection } from './AppointmentSection';
+import { formatTenge, getPriceRange, PriceRange } from '../services/publicStats';
 import {
   Clock,
   MapPin,
@@ -88,6 +94,34 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   // In-App Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [kaspiCopied, setKaspiCopied] = useState(false);
+  const [renewing, setRenewing] = useState(false);
+
+  // Typical price of this service in the city, from finished jobs (shown once there are enough)
+  const [priceRange, setPriceRange] = useState<PriceRange | null>(null);
+  const priceKeyId = request?.serviceId || request?.categoryId;
+  useEffect(() => {
+    let alive = true;
+    getPriceRange(request?.cityId, priceKeyId).then((r) => alive && setPriceRange(r));
+    return () => {
+      alive = false;
+    };
+  }, [request?.cityId, priceKeyId]);
+
+  // Another 3 days for masters to answer (the request stays the same, with its offers)
+  const handleRenew = async () => {
+    if (!request?.id || renewing) return;
+    setRenewing(true);
+    setActionError(null);
+    try {
+      const expiresAtMs = Date.now() + REQUEST_OPEN_MS;
+      await repository.updateRequest(request.id, { expiresAtMs });
+      setRequest((prev) => (prev ? { ...prev, expiresAtMs } : prev));
+    } catch (err) {
+      setActionError(getFriendlyErrorMessage(err, language));
+    } finally {
+      setRenewing(false);
+    }
+  };
 
   const handleOpenProviderProfile = async (providerId: string) => {
     if (!providerId) return;
@@ -729,6 +763,13 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                   {language === 'kz'
                     ? 'Шебер жұмысты аяқтағанын хабарлады. Бәрі дұрыс болса, төмендегі түйме арқылы растаңыз.'
                     : 'Мастер сообщил, что работа выполнена. Если всё в порядке, подтвердите кнопкой ниже.'}
+                  {request.finalPrice && (
+                    <span className="block mt-1">
+                      {language === 'kz' ? 'Шебер көрсеткен соңғы баға:' : 'Итоговая цена от мастера:'}{' '}
+                      <strong>{request.finalPrice}</strong>
+                      {language === 'kz' ? '. Келісім басқа болса, алдымен шебермен сөйлесіңіз.' : '. Если договаривались иначе, сначала обсудите с мастером.'}
+                    </span>
+                  )}
                 </p>
               )}
 
@@ -786,6 +827,66 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
           <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-center space-y-1">
             <p className="text-xs font-bold text-rose-800">{t.status_CANCELLED}</p>
             <p className="text-xs text-rose-600">{t.requestCancelledNotice}</p>
+          </div>
+        )}
+
+        {/* How long masters can still answer, and how many offers came (at most 5) */}
+        {request && reqStatus === 'OPEN' && !request.selectedOfferId && (
+          isRequestExpired(request) ? (
+            <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl space-y-2">
+              <p className="text-xs font-bold text-amber-900">
+                {language === 'kz' ? 'Өтінімнің мерзімі бітті' : 'Срок заявки истёк'}
+              </p>
+              <p className="text-xs text-amber-800 leading-relaxed">
+                {offers.length > 0
+                  ? language === 'kz'
+                    ? 'Шеберлер оны енді көрмейді. Түскен ұсыныстардан таңдай аласыз немесе мерзімін ұзартыңыз.'
+                    : 'Мастера её больше не видят. Выберите из полученных предложений или продлите срок.'
+                  : language === 'kz'
+                  ? 'Шеберлер оны енді көрмейді. Мерзімін ұзартсаңыз, қайта көрсетіледі.'
+                  : 'Мастера её больше не видят. Продлите срок, и заявка снова появится у мастеров.'}
+              </p>
+              <button
+                type="button"
+                onClick={handleRenew}
+                disabled={renewing}
+                className="w-full min-h-[44px] rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold disabled:opacity-60"
+              >
+                {renewing
+                  ? language === 'kz' ? 'Сақталуда...' : 'Сохраняем...'
+                  : language === 'kz' ? `${REQUEST_OPEN_DAYS} күнге ұзарту` : `Продлить на ${REQUEST_OPEN_DAYS} дня`}
+              </button>
+            </div>
+          ) : isRequestFull(request) ? (
+            <div className="p-3 bg-sky-50 border border-sky-200 rounded-2xl text-xs text-sky-900 leading-relaxed">
+              {language === 'kz'
+                ? `${MAX_OFFERS_PER_REQUEST} ұсыныс түсті, жаңалары қабылданбайды. Ең ыңғайлысын таңдаңыз.`
+                : `Получено ${MAX_OFFERS_PER_REQUEST} предложений, новые не принимаются. Выберите подходящее.`}
+            </div>
+          ) : typeof request.expiresAtMs === 'number' ? (
+            <p className="text-[11px] text-slate-500 px-1">
+              {(() => {
+                const left = request.expiresAtMs - Date.now();
+                const hours = Math.max(1, Math.ceil(left / 3600000));
+                const span = hours >= 24
+                  ? language === 'kz' ? `${Math.ceil(hours / 24)} күн` : `${Math.ceil(hours / 24)} ${Math.ceil(hours / 24) === 1 ? 'день' : 'дня'}`
+                  : language === 'kz' ? `${hours} сағ` : `${hours} ч`;
+                return language === 'kz'
+                  ? `Шеберлер тағы ${span} жауап бере алады · ұсыныстар: ${request.offerCount || 0} / ${MAX_OFFERS_PER_REQUEST}`
+                  : `Мастера могут ответить ещё ${span} · предложений: ${request.offerCount || 0} из ${MAX_OFFERS_PER_REQUEST}`;
+              })()}
+            </p>
+          ) : null
+        )}
+
+        {priceRange && reqStatus === 'OPEN' && (
+          <div className="p-3 bg-white border border-slate-200 rounded-2xl text-xs text-slate-700 flex items-center gap-2">
+            <span className="text-base" aria-hidden="true">📊</span>
+            <span>
+              {language === 'kz'
+                ? `Бұл қызмет әдетте ${formatTenge(priceRange.low)} – ${formatTenge(priceRange.high)} тұрады (${priceRange.count} тапсырыс бойынша)`
+                : `Обычно эта услуга стоит ${formatTenge(priceRange.low)} – ${formatTenge(priceRange.high)} (по ${priceRange.count} заказам)`}
+            </span>
           </div>
         )}
 
@@ -885,7 +986,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                           <Clock className="w-3 h-3 text-slate-400" />
                           <span>{formatDynamicDate(offer.availability, language)}</span>
                         </div>
-                        {(offer.paymentMethods?.length || offer.fixPledge) && (
+                        {(offer.paymentMethods?.length || offer.fixPledge || offer.inspectionFee) && (
                           <div className="flex flex-wrap gap-1 mt-1.5">
                             {(offer.paymentMethods || []).map((m) => (
                               <span key={m} className="text-[10px] font-semibold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded-full">
@@ -895,6 +996,11 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                             {offer.fixPledge && (
                               <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full">
                                 🛠 {language === 'kz' ? '14 күн тегін түзету' : '14 дней бесплатных исправлений'}
+                              </span>
+                            )}
+                            {offer.inspectionFee && (
+                              <span className="text-[10px] font-bold text-amber-900 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
+                                🚗 {language === 'kz' ? 'Келісім болмаса, шығу' : 'Выезд, если не договоритесь'}: {offer.inspectionFee}
                               </span>
                             )}
                           </div>

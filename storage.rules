@@ -3,6 +3,7 @@ rules_version = '2';
 // Firebase Storage Security Rules for KEREK
 //   chat/{conversationId}/{messageId}/{fileName}  — files shared in a conversation
 //   requests/{requestId}/{fileName}               — photos, videos and voice notes of a request
+//   providers/{uid}/portfolio/{slot}              — a master's work photos (slots p0 … p7)
 //
 // Only an explicit list of content types is accepted. Anything else (HTML, SVG, scripts,
 // archives, executables) is refused, so uploaded files can't be used to host pages or malware.
@@ -96,6 +97,19 @@ service firebase.storage {
       // Account deletion: the customer removes their own request files
       allow delete: if isRequestOwner(requestId);
       allow update: if false;
+    }
+
+    // A master's work photos: shown with the profile (to phone-verified accounts, like the profile
+    // itself); only the master adds, replaces or removes them
+    match /providers/{uid}/portfolio/{slot} {
+      allow read: if isSignedIn() && ('phone_number' in request.auth.token);
+      allow create, update: if isSignedIn()
+                            && request.auth.uid == uid
+                            && ('phone_number' in request.auth.token)
+                            && slot.matches('p[0-7]')
+                            && request.resource.size > 0
+                            && isImage(5 * 1024 * 1024);
+      allow delete: if isSignedIn() && request.auth.uid == uid;
     }
 
     // Deny all other storage access by default

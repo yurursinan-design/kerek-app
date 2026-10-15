@@ -126,6 +126,31 @@ async function run() {
   await test('Upload to a conversation that does not exist is refused', () => assertFails(put('alice', 'chat/conv_nope/m1/a.jpg', 'image/jpeg')));
   await test('Chat upload after the request is cancelled is refused', () => assertFails(put('alice', 'chat/conv_c/m1/a.jpg', 'image/jpeg')));
 
+  console.log('\n--- Master work photos ---');
+  const phoneStorage = (uid: string) => testEnv.authenticatedContext(uid, { phone_number: '+77000000000' }).storage();
+  const putPhoto = (uid: string, p: string, contentType = 'image/jpeg', data: Uint8Array = bytes) =>
+    uploadBytes(ref(phoneStorage(uid), p), data, { contentType });
+  await test('A master uploads and replaces a work photo in their own slots', async () => {
+    await assertSucceeds(putPhoto('pat', 'providers/pat/portfolio/p0'));
+    await assertSucceeds(putPhoto('pat', 'providers/pat/portfolio/p0', 'image/png'));
+  });
+  await test('Work photos: other slots, other masters, non-images and big files are refused', async () => {
+    await assertFails(putPhoto('pat', 'providers/pat/portfolio/p8'));
+    await assertFails(putPhoto('pat', 'providers/pat/portfolio/cover.jpg'));
+    await assertFails(putPhoto('sam', 'providers/pat/portfolio/p1'));
+    await assertFails(putPhoto('pat', 'providers/pat/portfolio/p1', 'text/html'));
+    await assertFails(putPhoto('pat', 'providers/pat/portfolio/p1', 'image/jpeg', new Uint8Array(5 * 1024 * 1024 + 1)));
+    await assertFails(put('pat', 'providers/pat/portfolio/p1', 'image/jpeg'));
+  });
+  await test('Phone-verified users see work photos; anonymous visitors do not', async () => {
+    await assertSucceeds(getBytes(ref(phoneStorage('alice'), 'providers/pat/portfolio/p0')));
+    await assertFails(read('alice', 'providers/pat/portfolio/p0'));
+  });
+  await test('Only the master deletes their work photo', async () => {
+    await assertFails(deleteObject(ref(phoneStorage('sam'), 'providers/pat/portfolio/p0')));
+    await assertSucceeds(deleteObject(ref(phoneStorage('pat'), 'providers/pat/portfolio/p0')));
+  });
+
   console.log('\n--- Other paths ---');
   await test('Upload outside the known folders is refused', () => assertFails(put('alice', 'public/x.jpg', 'image/jpeg')));
 

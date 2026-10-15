@@ -3,6 +3,7 @@ import { db, auth, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulato
 import { deleteApp } from 'firebase/app';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, getDocs, collection, setDoc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { sendOfferCounted } from './helpers/offers';
 
 // Mock minimal localStorage for Node environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -97,7 +98,7 @@ async function runSecurityAudit() {
     });
 
     // Provider creates valid offer for testReqId
-    await setDoc(validOfferRef, {
+    await sendOfferCounted(selectedProvDb, validOfferId, {
       id: validOfferId,
       requestId: testReqId,
       providerId: selectedProvUid,
@@ -111,7 +112,7 @@ async function runSecurityAudit() {
     console.log('✓ Created legitimate offer:', validOfferId);
 
     // Provider creates foreign offer for otherReqId
-    await setDoc(foreignOfferRef, {
+    await sendOfferCounted(selectedProvDb, foreignOfferId, {
       id: foreignOfferId,
       requestId: otherReqId,
       providerId: selectedProvUid,

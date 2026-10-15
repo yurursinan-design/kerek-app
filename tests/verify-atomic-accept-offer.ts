@@ -11,6 +11,7 @@ import { offlineQueueService } from '../src/services/offlineQueueService';
 import { auth, db, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { sendOfferCounted } from './helpers/offers';
 import { getConversationId, getAppointmentId } from '../src/types';
 
 let passed = 0;
@@ -315,7 +316,7 @@ async function runAcceptOfferFixTests() {
       const offerAId = `OFFER-${emuReqId}-${provA.uid}`;
       const offerBId = `OFFER-${emuReqId}-${provB.uid}`;
 
-      await setDoc(doc(provA.db, 'offers', offerAId), {
+      await sendOfferCounted(provA.db, offerAId, {
         id: offerAId,
         requestId: emuReqId,
         providerId: provA.uid,
@@ -327,7 +328,7 @@ async function runAcceptOfferFixTests() {
         createdAt: new Date().toISOString(),
       });
 
-      await setDoc(doc(provB.db, 'offers', offerBId), {
+      await sendOfferCounted(provB.db, offerBId, {
         id: offerBId,
         requestId: emuReqId,
         providerId: provB.uid,

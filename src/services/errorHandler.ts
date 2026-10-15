@@ -79,6 +79,14 @@ const MESSAGES = {
     kz: 'Бұл ұсыныс енді белсенді емес.',
     ru: 'Это предложение больше не активно.',
   },
+  offerLimit: {
+    kz: 'Бұл өтінімге 5 ұсыныс түсіп қойды. Басқа өтінімдерді қараңыз.',
+    ru: 'На эту заявку уже пришло 5 предложений. Посмотрите другие заявки.',
+  },
+  requestExpired: {
+    kz: 'Бұл өтінімнің мерзімі бітті, оған енді ұсыныс жіберуге болмайды.',
+    ru: 'Срок этой заявки истёк, отправить предложение уже нельзя.',
+  },
   notFound: {
     kz: 'Деректер табылмады. Бетті жаңартып, қайта көріңіз.',
     ru: 'Данные не найдены. Обновите страницу и попробуйте снова.',
@@ -111,6 +119,8 @@ export function getFriendlyErrorMessage(error: unknown, lang: Language = 'ru'): 
     if (/[\u0400-\u04FF]/.test(specific)) return specific;
   }
 
+  if (/offer-limit-reached/.test(msg)) return pick(MESSAGES.offerLimit, lang);
+  if (/request-expired/.test(msg)) return pick(MESSAGES.requestExpired, lang);
   if (/already been accepted/i.test(msg)) return pick(MESSAGES.alreadyAccepted, lang);
   if (/no longer pending|Cannot update offer/i.test(msg)) return pick(MESSAGES.offerClosed, lang);
   if (/duplicate/i.test(msg)) return pick(MESSAGES.duplicate, lang);
