@@ -10,6 +10,7 @@ import {
   popularServices,
   searchServices,
   serviceName,
+  getService,
 } from '../data/serviceCatalog';
 import { CategoryIcon, Emoji3D, tone } from './CategoryIcon';
 
@@ -26,6 +27,38 @@ interface ServiceDiscoveryProps {
   /** Shown between the categories and "how it works" (the free-text request box) */
   children?: React.ReactNode;
 }
+
+// A reminder for the season (Kyzylorda: cold winters, very hot summers): one tap opens the request
+const SEASONAL: { months: number[]; serviceId: string; emoji: string; title: { kz: string; ru: string }; text: { kz: string; ru: string } }[] = [
+  {
+    months: [8, 9, 10],
+    serviceId: 'boiler_repair',
+    emoji: '1f525',
+    title: { kz: 'Қысқа дайындалыңыз', ru: 'Подготовьтесь к зиме' },
+    text: { kz: 'Суық түскенше газ қазандығы мен батареяларды тексертіп алыңыз.', ru: 'Проверьте газовый котёл и батареи, пока не наступили холода.' },
+  },
+  {
+    months: [11, 0, 1],
+    serviceId: 'boiler_repair',
+    emoji: '1f525',
+    title: { kz: 'Үй жылы болсын', ru: 'Чтобы дома было тепло' },
+    text: { kz: 'Қазандық нашар жылытса немесе өшіп қалса, шебер шақырыңыз.', ru: 'Котёл плохо греет или гаснет? Вызовите мастера.' },
+  },
+  {
+    months: [2, 3, 4],
+    serviceId: 'ac_service',
+    emoji: '2744-fe0f',
+    title: { kz: 'Жазға дайындалыңыз', ru: 'Подготовьтесь к лету' },
+    text: { kz: 'Ыстық басталғанша кондиционерді тазалатып, фреон толтырыңыз.', ru: 'Почистите и заправьте кондиционер до жары.' },
+  },
+  {
+    months: [5, 6, 7],
+    serviceId: 'ac_service',
+    emoji: '2744-fe0f',
+    title: { kz: 'Ыстықта салқын болсын', ru: 'Прохлада в жару' },
+    text: { kz: 'Кондиционер нашар салқындатса, тазалау мен фреон көмектеседі.', ru: 'Кондиционер плохо охлаждает? Помогут чистка и заправка.' },
+  },
+];
 
 const T = {
   title: { kz: 'Сізге қандай қызмет керек?', ru: 'Какая услуга вам нужна?' },
@@ -77,6 +110,11 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
   const [openGroup, setOpenGroup] = useState<CatalogGroup | null>(null);
   const results = useMemo(() => searchServices(query, 6), [query]);
   const popular = useMemo(() => popularServices().slice(0, 12), []);
+  const season = useMemo(() => {
+    const tip = SEASONAL.find((x) => x.months.includes(new Date().getMonth()));
+    const found = tip && getService(tip.serviceId);
+    return tip && found ? { tip, ...found } : null;
+  }, []);
 
   // Keep the page behind the sheet still
   useEffect(() => {
@@ -195,6 +233,24 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
           </div>
         </div>
       </section>
+
+      {/* Seasonal reminder */}
+      {season && (
+        <button
+          type="button"
+          onClick={() => pick(season.group, season.service)}
+          className="press w-full flex items-center gap-3 p-3 rounded-3xl bg-linear-to-br from-amber-50 to-orange-50 border border-amber-200/80 text-left animate-fadeUp"
+        >
+          <span className="w-14 h-14 rounded-2xl bg-white/80 flex items-center justify-center shrink-0">
+            <Emoji3D code={season.tip.emoji} size={40} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-bold text-slate-900 leading-tight">{tx(season.tip.title)}</span>
+            <span className="block mt-0.5 text-[12px] text-slate-600 leading-snug">{tx(season.tip.text)}</span>
+          </span>
+          <ChevronRight className="w-5 h-5 text-amber-500 shrink-0" />
+        </button>
+      )}
 
       {/* Popular services */}
       <section className="space-y-3">

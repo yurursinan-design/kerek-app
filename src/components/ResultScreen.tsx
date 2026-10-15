@@ -22,7 +22,7 @@ import { repository, checkClientRateLimit, getFriendlyErrorMessage, getCurrentUs
 import { auth } from '../services/firebase';
 import { getCityDisplayName } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
-import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
+import { toIntlDigits, toTelHref, toWhatsAppHref } from '../services/phoneLinks';
 import { ReviewModal } from './ReviewModal';
 import { Emoji3D } from './CategoryIcon';
 import { RequestIcon, requestVisual } from './RequestIcon';
@@ -87,6 +87,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
 
   // In-App Chat state
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [kaspiCopied, setKaspiCopied] = useState(false);
 
   const handleOpenProviderProfile = async (providerId: string) => {
     if (!providerId) return;
@@ -692,6 +693,36 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                   </button>
                 )}
               </div>
+
+              {/* Kaspi transfer to the master's number, when the master accepts Kaspi */}
+              {!selectedOffer.isDemo && selectedOffer.paymentMethods?.includes('kaspi') && toIntlDigits(selectedOffer.providerPhone) && (
+                <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-white border border-rose-100">
+                  <span className="text-lg" aria-hidden="true">💳</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-bold text-slate-800">
+                      {language === 'kz' ? 'Kaspi аударымы шебердің нөміріне' : 'Kaspi-перевод по номеру мастера'}
+                    </p>
+                    <p className="text-xs font-mono text-slate-700">+{toIntlDigits(selectedOffer.providerPhone)}</p>
+                    <p className="text-[10px] text-slate-500">
+                      {language === 'kz' ? 'Жұмыс біткен соң төлеңіз.' : 'Оплачивайте после выполнения работы.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const num = `+${toIntlDigits(selectedOffer.providerPhone)}`;
+                      navigator.clipboard?.writeText(num).then(
+                        () => setKaspiCopied(true),
+                        () => setKaspiCopied(false)
+                      );
+                      window.setTimeout(() => setKaspiCopied(false), 2500);
+                    }}
+                    className="shrink-0 h-9 px-3 rounded-lg bg-rose-600 text-white text-[11px] font-bold"
+                  >
+                    {kaspiCopied ? (language === 'kz' ? 'Көшірілді' : 'Скопировано') : language === 'kz' ? 'Көшіру' : 'Копировать'}
+                  </button>
+                </div>
+              )}
 
               {canConfirmCompletion(reqStatus) && request?.providerDoneAt && (
                 <p className="text-xs text-amber-900 bg-amber-50 p-2.5 rounded-xl border border-amber-300 leading-relaxed font-semibold">

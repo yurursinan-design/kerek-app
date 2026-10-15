@@ -49,8 +49,12 @@ import {
   Star,
   UserCheck,
   MessageSquare,
+  Share2,
+  ShieldCheck,
 } from 'lucide-react';
 import { requestWhenLabel } from '../services/dateFormat';
+import { masterProfileLink } from '../services/favorites';
+import { SUPPORT_EMAIL } from '../config/support';
 
 export type ProviderTab = 'new' | 'offers' | 'active';
 
@@ -86,26 +90,52 @@ function isSelfRequest(
   return false;
 }
 
-// The master's usual offer extras, kept on this phone so the next offer starts with them
+// The master's usual offer extras and last messages, kept on this phone so the next offer starts with them
 const OFFER_PREFS_KEY = 'kerek_offer_prefs';
-function loadOfferPrefs(): { paymentMethods: OfferPaymentMethod[]; fixPledge: boolean } {
+interface OfferPrefs {
+  paymentMethods: OfferPaymentMethod[];
+  fixPledge: boolean;
+  templates: string[];
+}
+function loadOfferPrefs(): OfferPrefs {
   try {
     const raw = JSON.parse(localStorage.getItem(OFFER_PREFS_KEY) || 'null');
     const methods = Array.isArray(raw?.paymentMethods)
       ? (raw.paymentMethods as unknown[]).filter((m): m is OfferPaymentMethod => OFFER_PAYMENT_METHODS.includes(m as OfferPaymentMethod))
       : [];
-    return { paymentMethods: methods.length ? methods : [...OFFER_PAYMENT_METHODS], fixPledge: raw?.fixPledge === true };
+    const templates = Array.isArray(raw?.templates)
+      ? (raw.templates as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0).slice(0, 3)
+      : [];
+    return { paymentMethods: methods.length ? methods : [...OFFER_PAYMENT_METHODS], fixPledge: raw?.fixPledge === true, templates };
   } catch {
-    return { paymentMethods: [...OFFER_PAYMENT_METHODS], fixPledge: false };
+    return { paymentMethods: [...OFFER_PAYMENT_METHODS], fixPledge: false, templates: [] };
   }
 }
-function saveOfferPrefs(prefs: { paymentMethods: OfferPaymentMethod[]; fixPledge: boolean }) {
+function saveOfferPrefs(prefs: OfferPrefs) {
   try {
     localStorage.setItem(OFFER_PREFS_KEY, JSON.stringify(prefs));
   } catch {
     // private mode or full storage: the choice just isn't remembered
   }
 }
+
+// Ready phrases for a quick offer: one tap fills the field, the master can still edit it
+const OFFER_MESSAGE_PRESETS: Record<Language, string[]> = {
+  kz: [
+    'Сәлеметсіз бе! Құралдарым өзімде, келіп жасап беремін.',
+    'Алдымен келіп қарап, бағасын нақты айтамын.',
+    'Тәжірибем мол, жұмысқа кепілдік беремін.',
+  ],
+  ru: [
+    'Здравствуйте! Инструмент с собой, приеду и всё сделаю.',
+    'Сначала посмотрю на месте и скажу точную цену.',
+    'Большой опыт, даю гарантию на работу.',
+  ],
+};
+const OFFER_TIME_PRESETS: Record<Language, string[]> = {
+  kz: ['1 сағат ішінде', 'Бүгін кешке', 'Ертең таңертең', 'Келісім бойынша'],
+  ru: ['В течение часа', 'Сегодня вечером', 'Завтра утром', 'По договорённости'],
+};
 
 export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   language,
@@ -166,6 +196,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   // How the master takes payment and whether they give the 14-day free-fix pledge: remembered for the next offer
   const [offerPayments, setOfferPayments] = useState<OfferPaymentMethod[]>(() => loadOfferPrefs().paymentMethods);
   const [offerFixPledge, setOfferFixPledge] = useState<boolean>(() => loadOfferPrefs().fixPledge);
+  const [offerTemplates, setOfferTemplates] = useState<string[]>(() => loadOfferPrefs().templates);
 
   // Offer modal state
   const [selectedRequestForOffer, setSelectedRequestForOffer] =
@@ -409,6 +440,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     const prefs = loadOfferPrefs();
     setOfferPayments(prefs.paymentMethods);
     setOfferFixPledge(prefs.fixPledge);
+    setOfferTemplates(prefs.templates);
   };
 
   // Provider clicks "Не могу"
@@ -483,7 +515,14 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         setErrorMessage(language === 'kz' ? 'Төлем тәсілін таңдаңыз' : 'Выберите способ оплаты');
         return;
       }
-      saveOfferPrefs({ paymentMethods: offerPayments, fixPledge: offerFixPledge });
+      const sentMessage = offerMessage.trim();
+      saveOfferPrefs({
+        paymentMethods: offerPayments,
+        fixPledge: offerFixPledge,
+        templates: sentMessage
+          ? [sentMessage, ...offerTemplates.filter((x) => x !== sentMessage)].slice(0, 3)
+          : offerTemplates,
+      });
 
       const newOffer = await repository.createOffer({
         requestId: selectedRequestForOffer.id,
@@ -852,6 +891,45 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                       </strong>{' '}
                       {provider.experienceYears} {t.experienceYearsUnit}
                     </span>
+                  )}
+                </div>
+
+                {/* More clients: share the profile link, and ask for the ID badge */}
+                <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const link = masterProfileLink(provider.id);
+                      try {
+                        if (navigator.share) {
+                          await navigator.share({ title: provider.name, url: link });
+                        } else {
+                          await navigator.clipboard.writeText(link);
+                          setNotification(language === 'kz' ? 'Сілтеме көшірілді' : 'Ссылка скопирована');
+                        }
+                      } catch {
+                        // share sheet closed
+                      }
+                    }}
+                    className="min-h-[34px] px-2.5 rounded-lg bg-emerald-50 text-emerald-800 text-[11px] font-bold inline-flex items-center gap-1"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    {language === 'kz' ? 'Профиль сілтемесін WhatsApp-та бөлісу' : 'Поделиться профилем в WhatsApp'}
+                  </button>
+                  {!provider.iinVerified && SUPPORT_EMAIL && (
+                    <a
+                      href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
+                        language === 'kz' ? 'Жеке басты тексеру (Tapsyr шебері)' : 'Проверка личности (мастер Tapsyr)'
+                      )}&body=${encodeURIComponent(
+                        language === 'kz'
+                          ? `Сәлеметсіз бе! Жеке басымды тексертіп, «Жеке басы тексерілген» белгісін алғым келеді.\nШебер: ${provider.name}\nID: ${provider.id}`
+                          : `Здравствуйте! Хочу пройти проверку личности и получить значок «Личность проверена».\nМастер: ${provider.name}\nID: ${provider.id}`
+                      )}`}
+                      className="min-h-[34px] px-2.5 rounded-lg bg-sky-50 text-sky-800 text-[11px] font-bold inline-flex items-center gap-1"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      {language === 'kz' ? '«Жеке басы тексерілген» белгісін алу' : 'Получить значок «Личность проверена»'}
+                    </a>
                   )}
                 </div>
               </div>
@@ -1445,6 +1523,18 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                   placeholder={t.offerTimePlaceholder}
                   className="w-full h-11 px-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white"
                 />
+                <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 pb-0.5">
+                  {OFFER_TIME_PRESETS[language].map((text) => (
+                    <button
+                      key={text}
+                      type="button"
+                      onClick={() => setOfferTime(text)}
+                      className="shrink-0 h-8 px-3 rounded-full border border-sky-200 bg-sky-50 text-sky-800 text-[11px] font-semibold"
+                    >
+                      {text}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Message */}
@@ -1459,6 +1549,25 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                   placeholder={t.offerMessagePlaceholder}
                   className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-sky-500 focus:bg-white resize-none"
                 />
+                {/* My last messages first, then ready phrases */}
+                <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 pb-0.5">
+                  {[...offerTemplates, ...OFFER_MESSAGE_PRESETS[language].filter((x) => !offerTemplates.includes(x))].map((text, i) => (
+                    <button
+                      key={text}
+                      type="button"
+                      onClick={() => setOfferMessage(text)}
+                      className={`shrink-0 max-w-[240px] truncate h-8 px-3 rounded-full border text-[11px] font-semibold ${
+                        i < offerTemplates.length
+                          ? 'border-indigo-200 bg-indigo-50 text-indigo-800'
+                          : 'border-sky-200 bg-sky-50 text-sky-800'
+                      }`}
+                      title={text}
+                    >
+                      {i < offerTemplates.length ? '↺ ' : ''}
+                      {text}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* How the master takes payment (always paid to the master directly) */}

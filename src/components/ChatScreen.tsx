@@ -11,6 +11,7 @@ import {
 import { translations } from '../i18n/translations';
 import { getRequestTitle } from '../services/requestTitle';
 import { repository, getCurrentUserId, getFriendlyErrorMessage } from '../services';
+import { chatRisk, chatRiskWarning } from '../services/chatSafety';
 import { auth } from '../services/firebase';
 import {
   ChevronLeft,
@@ -523,6 +524,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               (Boolean(msg.senderRole) && msg.senderRole === (isCustomer ? 'customer' : 'provider'));
 
             const hasAttachments = Boolean(msg.attachments && msg.attachments.length > 0);
+            const risk = isMe ? null : chatRisk(msg.text);
 
             return (
               <div
@@ -627,6 +629,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                     )}
                   </div>
                 </div>
+                {!isMe && risk && (
+                  <div className="max-w-[85%] flex items-start gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] leading-snug text-amber-900">
+                    <ShieldAlert className="w-3.5 h-3.5 shrink-0 text-amber-600 mt-px" />
+                    <span>{chatRiskWarning(risk, language === 'kz' ? 'kz' : 'ru')}</span>
+                  </div>
+                )}
               </div>
             );
           })

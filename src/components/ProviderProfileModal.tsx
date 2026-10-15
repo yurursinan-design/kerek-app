@@ -3,9 +3,16 @@ import { ReportButton } from './ReportButton';
 import { isTopMaster, Language, Provider, Review } from '../types';
 import { translations } from '../i18n/translations';
 import { formatShortDate } from '../services/dateFormat';
-import { repository } from '../services';
+import { repository, getCurrentUserId } from '../services';
+import { isFavorite, masterProfileLink, onFavoritesChange, toggleFavorite } from '../services/favorites';
+import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
 import {
   X,
+  Heart,
+  Share2,
+  Phone,
+  MessageCircle,
+  ShieldCheck,
   CheckCircle,
   MapPin,
   Clock,
@@ -21,6 +28,8 @@ interface ProviderProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   language: Language;
+  /** Show call / WhatsApp buttons (a master the customer saved, worked with or got a link to) */
+  showContacts?: boolean;
 }
 
 export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
@@ -28,8 +37,17 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
   isOpen,
   onClose,
   language,
+  showContacts = false,
 }) => {
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [favorite, setFavorite] = useState(false);
+  const [shareNote, setShareNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!provider?.id) return;
+    setFavorite(isFavorite(provider.id));
+    return onFavoritesChange(() => setFavorite(isFavorite(provider.id)));
+  }, [provider?.id]);
   const [isLoadingReviews, setIsLoadingReviews] = useState<boolean>(false);
   // Counted on the server over all reviews (the list below shows the newest ones)
   const [ratingSummary, setRatingSummary] = useState<{ avg: number; count: number } | null>(null);
@@ -120,6 +138,28 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
 
   const experienceText = formatExperience(provider.experienceYears);
 
+  const me = getCurrentUserId();
+  const isOwnProfile = Boolean(me && (provider.userId === me || provider.id === me));
+  const telHref = showContacts && !isOwnProfile ? toTelHref(provider.phone) : null;
+  const waHref = showContacts && !isOwnProfile ? toWhatsAppHref(provider.whatsapp || provider.phone) : null;
+
+  const shareProfile = async () => {
+    const link = masterProfileLink(provider.id);
+    const text = language === 'kz' ? `${provider.name} — Tapsyr-дағы шебер` : `${provider.name} — мастер в Tapsyr`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: provider.name, text, url: link });
+        return;
+      }
+      await navigator.clipboard.writeText(link);
+      setShareNote(language === 'kz' ? 'Сілтеме көшірілді' : 'Ссылка скопирована');
+    } catch {
+      // closed share sheet or no clipboard access: show the link to copy by hand
+      setShareNote(link);
+    }
+    window.setTimeout(() => setShareNote(null), 4000);
+  };
+
   return (
     <div
       role="dialog"
@@ -155,6 +195,12 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                   >
                     <CheckCircle className="w-3 h-3 text-emerald-600 stroke-[2.5]" />
                     <span>{t.verifiedProviderBadge}</span>
+                  </span>
+                )}
+                {provider.iinVerified && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
+                    <ShieldCheck className="w-3 h-3 text-sky-600 stroke-[2.5]" />
+                    <span>{language === 'kz' ? 'Жеке басы тексерілген' : 'Личность проверена'}</span>
                   </span>
                 )}
                 {averageRating ? (
@@ -202,6 +248,53 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
           >
             <X className="w-4 h-4" />
           </button>
+        </div>
+
+        {/* Save, share, contact */}
+        <div className="px-5 pt-3 pb-1 flex flex-wrap gap-2">
+          {!isOwnProfile && !provider.isDemo && (
+            <button
+              type="button"
+              aria-pressed={favorite}
+              onClick={() => setFavorite(toggleFavorite({ id: provider.id, name: provider.name, category: provider.category }))}
+              className={`h-9 px-3 rounded-full border text-xs font-bold inline-flex items-center gap-1.5 transition-colors ${
+                favorite ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-700'
+              }`}
+            >
+              <Heart className={`w-4 h-4 ${favorite ? 'fill-rose-500 text-rose-500' : ''}`} />
+              {favorite ? (language === 'kz' ? 'Таңдаулыда' : 'В избранном') : language === 'kz' ? 'Таңдаулыға' : 'В избранное'}
+            </button>
+          )}
+          {!provider.isDemo && (
+            <button
+              type="button"
+              onClick={shareProfile}
+              className="h-9 px-3 rounded-full border border-slate-200 bg-white text-slate-700 text-xs font-bold inline-flex items-center gap-1.5"
+            >
+              <Share2 className="w-4 h-4" />
+              {isOwnProfile
+                ? language === 'kz' ? 'Профильмен бөлісу' : 'Поделиться профилем'
+                : language === 'kz' ? 'Бөлісу' : 'Поделиться'}
+            </button>
+          )}
+          {telHref && (
+            <a href={telHref} className="h-9 px-3 rounded-full bg-sky-600 text-white text-xs font-bold inline-flex items-center gap-1.5">
+              <Phone className="w-4 h-4" />
+              {language === 'kz' ? 'Қоңырау' : 'Позвонить'}
+            </a>
+          )}
+          {waHref && (
+            <a
+              href={waHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="h-9 px-3 rounded-full bg-emerald-600 text-white text-xs font-bold inline-flex items-center gap-1.5"
+            >
+              <MessageCircle className="w-4 h-4" />
+              WhatsApp
+            </a>
+          )}
+          {shareNote && <p className="w-full text-[11px] text-slate-500 break-all">{shareNote}</p>}
         </div>
 
         {/* Content Body */}

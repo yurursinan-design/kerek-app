@@ -40,6 +40,7 @@ const T = {
   addPhoto: { kz: 'Фото қосу', ru: 'Добавить фото' },
   whenTitle: { kz: 'Қашан керек?', ru: 'Когда нужно?' },
   whereTitle: { kz: 'Қай қалада?', ru: 'В каком городе?' },
+  partOfDayTitle: { kz: 'Қай уақытта ыңғайлы? (міндетті емес)', ru: 'В какое время удобно? (необязательно)' },
   soon: { kz: 'Жақында', ru: 'Скоро' },
   pilotNote: {
     kz: 'Tapsyr әзірге тек Қызылордада жұмыс істейді. Басқа қалалар жақында ашылады.',
@@ -77,6 +78,13 @@ const WHEN_OPTIONS: { id: string; kz: string; ru: string; urgency: Urgency; emoj
   { id: 'flexible', kz: 'Келісім бойынша', ru: 'По договорённости', urgency: 'low', emoji: '1f91d' },
 ];
 
+// Optional time of day for anything but "right now"
+const PART_OF_DAY: { id: string; kz: string; ru: string }[] = [
+  { id: 'morning', kz: 'таңертең', ru: 'утром' },
+  { id: 'day', kz: 'күндіз', ru: 'днём' },
+  { id: 'evening', kz: 'кешке', ru: 'вечером' },
+];
+
 /** 3D icon shown next to each step's title */
 const STEP_EMOJI = ['1f4dd', '23f0', '1f3d9-fe0f', '1f4b0', '1f4cb'];
 
@@ -101,6 +109,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
   const [photos, setPhotos] = useState<PendingAttachment[]>([]);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [when, setWhen] = useState<string | null>(null);
+  const [partOfDay, setPartOfDay] = useState<string | null>(null);
   // Pilot: only open cities can be chosen; Kyzylorda is preselected
   const [cityId, setCityId] = useState<string>(defaultCityId && isCityOpen(defaultCityId) ? defaultCityId : PILOT_CITY_ID);
   const [location, setLocation] = useState<RequestLocation | null>(null);
@@ -112,6 +121,8 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
   const svcName = serviceName(service, lang);
   const city = CANONICAL_CITIES.find((c) => c.id === cityId);
   const whenOpt = WHEN_OPTIONS.find((w) => w.id === when);
+  const dayPart = when !== 'urgent' ? PART_OF_DAY.find((p) => p.id === partOfDay) : undefined;
+  const whenLabel = whenOpt ? (dayPart ? `${tx(whenOpt)}, ${tx(dayPart)}` : tx(whenOpt)) : '';
   const budgetLabel = customBudget.trim()
     ? `${customBudget.replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} ₸`
     : budget
@@ -177,7 +188,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
       categoryId: group.id,
       serviceId: service.id,
       service: svcName,
-      date: whenOpt ? tx(whenOpt) : '',
+      date: whenLabel,
       budget: budgetLabel || (lang === 'kz' ? 'Келісімді' : 'Договорная'),
       urgency: whenOpt?.urgency || 'normal',
       originalQuery: text ? `${svcName}: ${text}` : svcName,
@@ -331,6 +342,30 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
                 </button>
               ))}
             </div>
+            {when && when !== 'urgent' && (
+              <div className="space-y-2 animate-fadeIn">
+                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">{tx(T.partOfDayTitle)}</div>
+                <div className="flex flex-wrap gap-2">
+                  {PART_OF_DAY.map((p) => {
+                    const on = partOfDay === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => setPartOfDay(on ? null : p.id)}
+                        className={`press h-10 px-4 rounded-full border-2 text-sm font-semibold inline-flex items-center gap-1.5 transition-colors ${
+                          on ? 'border-sky-500 bg-sky-600 text-white' : 'border-slate-200 bg-white text-slate-700'
+                        }`}
+                      >
+                        {on && <Check className="w-4 h-4" strokeWidth={3} />}
+                        {tx(p)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -430,7 +465,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
                 {[
                   { label: tx(T.details), value: [tagText, details.trim()].filter(Boolean).join('. ') || '—', to: 0 },
                   { label: tx(T.photos), value: photos.length ? String(photos.length) : '—', to: 0 },
-                  { label: tx(T.when), value: whenOpt ? tx(whenOpt) : '—', to: 1 },
+                  { label: tx(T.when), value: whenLabel || '—', to: 1 },
                   { label: tx(T.city), value: city ? (lang === 'kz' ? city.nameKz : city.nameRu) : '—', to: 2 },
                   { label: tx(T.budget), value: budgetLabel || '—', to: 3 },
                 ].map((row) => (

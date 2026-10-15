@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Language,
+  Provider,
   ServiceRequest,
   formatDynamicBudget,
   formatDynamicDate,
@@ -11,8 +12,10 @@ import { getRequestDescription, getRequestTitle } from '../services/requestTitle
 import { formatShortDate } from '../services/dateFormat';
 import { repository } from '../services';
 import { getCityDisplayName } from '../services/taxonomy';
-import { MapPin, Calendar, Wallet, ChevronRight, Plus, Phone, MessageCircle } from 'lucide-react';
+import { MapPin, Calendar, Wallet, ChevronRight, Plus, Phone, MessageCircle, Heart } from 'lucide-react';
 import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
+import { FavoriteMaster, getFavorites, onFavoritesChange } from '../services/favorites';
+import { ProviderProfileModal } from './ProviderProfileModal';
 import { Emoji3D } from './CategoryIcon';
 import { RequestIcon } from './RequestIcon';
 
@@ -133,6 +136,22 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completedIdsKey, language]);
+
+  // Masters saved with the heart button (on this phone)
+  const [favorites, setFavorites] = useState<FavoriteMaster[]>(() => getFavorites());
+  useEffect(() => onFavoritesChange(() => setFavorites(getFavorites())), []);
+  const [profile, setProfile] = useState<Provider | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const openProfile = async (id: string) => {
+    setProfileError(null);
+    try {
+      const prov = await repository.getProvider(id);
+      if (prov) setProfile(prov);
+      else setProfileError(language === 'kz' ? 'Шебер профилі табылмады' : 'Профиль мастера не найден');
+    } catch {
+      setProfileError(language === 'kz' ? 'Шебер профилі табылмады' : 'Профиль мастера не найден');
+    }
+  };
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col justify-between space-y-5">
@@ -288,13 +307,13 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
               const wa = toWhatsAppHref(m.whatsapp || m.phone);
               return (
                 <div key={m.key} className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs">
-                  <div className="min-w-0 flex-1">
+                  <button type="button" onClick={() => openProfile(m.key)} className="min-w-0 flex-1 text-left">
                     <span className="block text-sm font-bold text-slate-900 truncate">{m.name}</span>
                     <span className="block text-xs text-slate-500 truncate">
                       {m.lastJob}
                       {m.jobs > 1 ? ` · ${m.jobs} ${language === 'kz' ? 'жұмыс' : ruPlural(m.jobs, 'заказ', 'заказа', 'заказов')}` : ''}
                     </span>
-                  </div>
+                  </button>
                   {tel && (
                     <a
                       href={tel}
@@ -320,7 +339,36 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
             })}
           </section>
         )}
+
+        {favorites.length > 0 && (
+          <section className="space-y-2 pt-2">
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              <Heart className="w-4 h-4 fill-rose-500 text-rose-500" />
+              {language === 'kz' ? 'Таңдаулы шеберлер' : 'Избранные мастера'}
+            </h3>
+            {favorites.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => openProfile(f.id)}
+                className="press w-full flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs text-left"
+              >
+                <span className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 font-bold flex items-center justify-center shrink-0">
+                  {(f.name || '?').trim().charAt(0).toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-slate-900 truncate">{f.name}</span>
+                  {f.category && <span className="block text-xs text-slate-500 truncate">{f.category}</span>}
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+              </button>
+            ))}
+          </section>
+        )}
+        {profileError && <p className="text-xs text-rose-600">{profileError}</p>}
       </div>
+
+      <ProviderProfileModal provider={profile} isOpen={!!profile} onClose={() => setProfile(null)} language={language} showContacts />
     </div>
   );
 };

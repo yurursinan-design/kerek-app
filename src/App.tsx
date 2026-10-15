@@ -6,6 +6,7 @@ import {
   PendingAttachment,
   RequestAttachment,
   RequestLocation,
+  Provider,
   ServiceRequest,
 } from './types';
 import { Header } from './components/Header';
@@ -16,6 +17,7 @@ import { InterpretationScreen } from './components/InterpretationScreen';
 const ResultScreen = lazy(() => import('./components/ResultScreen').then((m) => ({ default: m.ResultScreen })));
 const MyRequestsScreen = lazy(() => import('./components/MyRequestsScreen').then((m) => ({ default: m.MyRequestsScreen })));
 const ProviderModeScreen = lazy(() => import('./components/ProviderModeScreen').then((m) => ({ default: m.ProviderModeScreen })));
+const ProviderProfileModal = lazy(() => import('./components/ProviderProfileModal').then((m) => ({ default: m.ProviderProfileModal })));
 import type { ProviderTab } from './components/ProviderModeScreen';
 import { RoleChooser, AppMode } from './components/RoleChooser';
 import { InAppToast } from './components/InAppToast';
@@ -125,6 +127,39 @@ export default function App() {
     afterPhoneLoginRef.current = action;
     setPhoneLogin(reason);
   };
+
+  // A shared master profile link (?master=<id>): after a phone login, show that master's profile
+  const [sharedMaster, setSharedMaster] = useState<Provider | null>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const masterId = (params.get('master') || '').trim();
+    if (!masterId || masterId.length > 128) return;
+    params.delete('master');
+    const rest = params.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`);
+    let cancelled = false;
+    const open = async () => {
+      try {
+        const prov = await repository.getProvider(masterId);
+        if (cancelled) return;
+        if (prov && !prov.isDemo) setSharedMaster(prov);
+        else setAppError(language === 'kz' ? 'Шебер профилі табылмады' : 'Профиль мастера не найден');
+      } catch {
+        if (!cancelled) setAppError(language === 'kz' ? 'Шебер профилі табылмады' : 'Профиль мастера не найден');
+      }
+    };
+    // Profiles carry phone numbers, so they open for phone-verified accounts only
+    ensureFirebaseAuth()
+      .catch(() => null)
+      .then(() => {
+        if (!cancelled) withPhoneLogin('header', () => void open());
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Runs once for the address the app was opened with
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** "Delete my account": a stale session confirms the number with a new code first, then deletion continues. */
   const handleDeleteAccount = async (): Promise<void> => {
@@ -781,6 +816,18 @@ export default function App() {
             if (next) next();
           }}
         />
+
+        {sharedMaster && (
+          <Suspense fallback={null}>
+            <ProviderProfileModal
+              provider={sharedMaster}
+              isOpen
+              onClose={() => setSharedMaster(null)}
+              language={language}
+              showContacts
+            />
+          </Suspense>
+        )}
 
         {/* Realtime In-App Notification Toast */}
         <InAppToast
