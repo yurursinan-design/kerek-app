@@ -485,8 +485,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       )}
 
       {/* Messages Scroll Area */}
-      <main className="flex-1 overflow-y-auto p-4 space-y-3">
-        <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] leading-relaxed text-amber-900">
+      <main className="flex-1 overflow-y-auto p-4 space-y-3 flex flex-col">
+        <div className="shrink-0 flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] leading-relaxed text-amber-900">
           <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600 mt-px" />
           <span>
             {language === 'kz'
@@ -495,12 +495,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           </span>
         </div>
         {isLoading ? (
-          <div className="h-full flex items-center justify-center text-slate-400 text-xs gap-2">
+          <div className="flex-1 flex items-center justify-center text-slate-400 text-xs gap-2">
             <span className="w-5 h-5 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
             <span>{language === 'kz' ? 'Жүктелуде...' : 'Загрузка сообщений...'}</span>
           </div>
         ) : messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-2.5 text-slate-400">
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-2.5 text-slate-400">
             <div className="w-12 h-12 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-slate-400 shadow-2xs">
               <MessageSquare className="w-6 h-6 stroke-1" />
             </div>
