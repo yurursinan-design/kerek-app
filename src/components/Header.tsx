@@ -67,7 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="flex items-center gap-2 text-left group transition-opacity hover:opacity-90"
             >
               {/* The app icon, so the header and the phone's home screen show the same mark */}
-              <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" className="w-8 h-8 rounded-lg shadow-xs" />
+              <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" className="w-8 h-8" />
               <div>
                 <span className="text-lg font-bold tracking-tight text-slate-900 group-hover:text-sky-600 transition-colors">
                   Tapsyr
