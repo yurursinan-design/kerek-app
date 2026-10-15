@@ -1,5 +1,4 @@
 import { parseTextWithGemini } from '../functions/src/geminiParser';
-import { GEMINI_CONFIG } from '../functions/src/config';
 import {
   normalizeCategoryId,
   normalizeCityId,
@@ -60,8 +59,8 @@ async function runE2ETests() {
     `Received: ${aiResult?.cityId}`
   );
   assert(
-    'categoryId returned by Gemini is "appliance_repair"',
-    aiResult?.categoryId === 'appliance_repair',
+    'categoryId returned by Gemini is "appliances"',
+    aiResult?.categoryId === 'appliances',
     `Received: ${aiResult?.categoryId}`
   );
   assert(
@@ -86,7 +85,7 @@ async function runE2ETests() {
   const canonicalCategoryId = normalizeCategoryId(aiResult?.categoryId || undefined);
 
   assert('Frontend canonical cityId is "kyzylorda"', canonicalCityId === 'kyzylorda');
-  assert('Frontend canonical categoryId is "appliance_repair"', canonicalCategoryId === 'appliance_repair');
+  assert('Frontend canonical categoryId is "appliances"', canonicalCategoryId === 'appliances');
 
   const cityDisplayKz = getCityDisplayName(canonicalCityId, 'kz');
   const catDisplayKz = getCategoryDisplayName(canonicalCategoryId, 'kz');
@@ -156,7 +155,7 @@ async function runE2ETests() {
   const req = requestsAfterConfirmation[0];
   assert('customerId matches authenticated user', req.customerId === customerId);
   assert('cityId is "kyzylorda"', req.cityId === 'kyzylorda');
-  assert('categoryId is "appliance_repair"', req.categoryId === 'appliance_repair');
+  assert('categoryId is "appliances"', req.categoryId === 'appliances');
   assert('description preserves original user query', req.description === testQuery);
   assert('requestText preserves original user query', req.requestText === testQuery);
   assert('urgency is "high"', req.urgency === 'high');
@@ -167,13 +166,13 @@ async function runE2ETests() {
   const fallbackResult = analyzeRequestLocally(testQuery, 'kz');
   assert('Fallback identifies city "Қызылорда"', fallbackResult.city === 'Қызылорда');
   assert('Fallback normalizes cityId "kyzylorda"', normalizeCityId(fallbackResult.city) === 'kyzylorda');
-  assert('Fallback normalizes categoryId "appliance_repair"', normalizeCategoryId(fallbackResult.category) === 'appliance_repair');
+  assert('Fallback normalizes categoryId "appliances"', normalizeCategoryId(fallbackResult.category) === 'appliances');
   assert('Fallback preserves original query', fallbackResult.originalQuery === testQuery);
 
-  console.log('\n======================================================');
-  console.log('ALL END-TO-END VERIFICATION STEPS PASSED SUCCESSFULLY');
-  console.log('======================================================\n');
-  process.exit(0);
+  const failed = process.exitCode === 1;
+  console.log(failed ? '\nSOME CHECKS FAILED (see [FAIL] lines above)\n' : '\nALL CHECKS PASSED\n');
+  // Exit with the real result: a [FAIL] above must fail the run
+  process.exit(failed ? 1 : 0);
 }
 
 runE2ETests().catch((err) => {

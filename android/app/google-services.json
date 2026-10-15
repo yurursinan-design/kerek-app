@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "24155315039",
+    "project_id": "kerek-9d153",
+    "storage_bucket": "kerek-9d153.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:24155315039:android:d8341f478c0d92d62574ea",
+        "android_client_info": {
+          "package_name": "kz.kerek.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDR6pOtntmuw7AidoEJqu2R45QNm-SUZbU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:24155315039:android:6fcd4f5ba531f47c2574ea",
+        "android_client_info": {
+          "package_name": "kerek.kz.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDR6pOtntmuw7AidoEJqu2R45QNm-SUZbU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

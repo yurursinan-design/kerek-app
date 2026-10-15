@@ -83,7 +83,9 @@ async function runStaleStateProtectionTests() {
     assert(
       appt1Completed.workStatus === 'WORK_COMPLETED' &&
         appt1Completed.status === 'COMPLETED' &&
-        req1State?.status === 'COMPLETED',
+        // the provider reports the job finished; the customer still confirms it
+        req1State?.status === 'IN_PROGRESS' &&
+        Boolean(req1State?.providerDoneAt),
       'TEST 1: OPEN appointment -> WORK_STARTED -> WORK_COMPLETED succeeds'
     );
 

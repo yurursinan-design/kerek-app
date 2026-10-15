@@ -1,7 +1,7 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth, signInAnonymously, onAuthStateChanged, connectAuthEmulator, User as FirebaseUser } from 'firebase/auth';
 import { getFirestore, Firestore, doc, getDoc, setDoc, getDocFromServer, connectFirestoreEmulator } from 'firebase/firestore';
-import { getStorage, FirebaseStorage } from 'firebase/storage';
+import { connectStorageEmulator, getStorage, FirebaseStorage } from 'firebase/storage';
 
 /**
  * Firebase Client Initialization
@@ -16,23 +16,9 @@ const getEnvVar = (viteVal: string | undefined, nodeVal: string | undefined): st
   return undefined;
 };
 
-// Read fallback configuration from root firebase-applet-config.json if present
-let fileConfig: Record<string, any> = {};
-try {
-  const configs = import.meta.glob(
-    ['/firebase-applet-config.json', '../*.json', '../../firebase-applet-config.json'],
-    { eager: true }
-  ) as Record<string, any>;
-  for (const [key, value] of Object.entries(configs)) {
-    if (key.endsWith('firebase-applet-config.json') && value) {
-      fileConfig = ((value as any).default || value) as Record<string, any>;
-      break;
-    }
-  }
-} catch {
-  fileConfig = {};
-}
-const rootConfig = fileConfig.firebaseConfig || fileConfig;
+// Configuration comes only from VITE_* build variables. (An older loader also bundled any JSON
+// file found next to the sources, which could have published a credential file by accident.)
+const rootConfig: Record<string, any> = {};
 
 const getEnvOrFile = (envVal: string | undefined, fieldKey: string): string | undefined => {
   if (envVal && typeof envVal === 'string' && envVal.trim().length > 0) {
@@ -112,13 +98,14 @@ if (isFirebaseConfigured()) {
     db = getFirestore(app);
 
     const isNodeEnv = typeof window === 'undefined' && typeof process !== 'undefined';
+    const env = processEnv();
     const shouldConnectEmulator =
-      Boolean(process.env?.FIRESTORE_EMULATOR_HOST) ||
-      process.env?.VITE_USE_EMULATOR === 'true' ||
-      (isNodeEnv && process.env?.ALLOW_LIVE_FIREBASE !== 'true');
+      Boolean(env.FIRESTORE_EMULATOR_HOST) ||
+      env.VITE_USE_EMULATOR === 'true' ||
+      (isNodeEnv && env.ALLOW_LIVE_FIREBASE !== 'true');
 
     if (shouldConnectEmulator) {
-      const emulatorHostStr = process.env?.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
+      const emulatorHostStr = env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
       const parts = emulatorHostStr.split(':');
       const host = parts[0] && parts[0].trim().length > 0 ? parts[0].trim() : '127.0.0.1';
       const port = parseInt(parts[1] || '8088', 10) || 8088;
@@ -127,7 +114,7 @@ if (isFirebaseConfigured()) {
       } catch {}
 
       if (auth) {
-        const authHostStr = process.env?.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
+        const authHostStr = env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
         const authParts = authHostStr.replace(/^https?:\/\//, '').split(':');
         const authHost = authParts[0] && authParts[0].trim().length > 0 ? authParts[0].trim() : '127.0.0.1';
         const authPort = parseInt(authParts[1] || '9099', 10) || 9099;
@@ -138,6 +125,13 @@ if (isFirebaseConfigured()) {
     }
     try {
       storage = getStorage(app);
+      // Tests and local development use the Storage emulator too, never the real bucket
+      if (shouldConnectEmulator && storage) {
+        const [sHost, sPort] = (env.FIREBASE_STORAGE_EMULATOR_HOST || '127.0.0.1:9199').split(':');
+        try {
+          connectStorageEmulator(storage, sHost || '127.0.0.1', parseInt(sPort || '9199', 10) || 9199);
+        } catch {}
+      }
     } catch (stErr) {
       console.warn('[KEREK Firebase] Storage init note:', stErr);
       storage = null;
@@ -162,6 +156,18 @@ if (isFirebaseConfigured()) {
 
 export { app, auth, db, storage };
 
+/**
+ * Emulator settings: Node tests read process.env; browser builds get it from the Vite config, or
+ * not at all (a browser has no `process`, so reading it must not throw).
+ */
+function processEnv(): Record<string, string | undefined> {
+  try {
+    return process.env || {};
+  } catch {
+    return {};
+  }
+}
+
 export function createSecondaryFirebaseApp(appName: string) {
   if (!app) return null;
   const secondaryApp = initializeApp(app.options, appName);
@@ -169,13 +175,14 @@ export function createSecondaryFirebaseApp(appName: string) {
   const secondaryDb = getFirestore(secondaryApp);
 
   const isNodeEnv = typeof window === 'undefined' && typeof process !== 'undefined';
+  const env = processEnv();
   const shouldConnectEmulator =
-    Boolean(process.env?.FIRESTORE_EMULATOR_HOST) ||
-    process.env?.VITE_USE_EMULATOR === 'true' ||
-    (isNodeEnv && process.env?.ALLOW_LIVE_FIREBASE !== 'true');
+    Boolean(env.FIRESTORE_EMULATOR_HOST) ||
+    env.VITE_USE_EMULATOR === 'true' ||
+    (isNodeEnv && env.ALLOW_LIVE_FIREBASE !== 'true');
 
   if (shouldConnectEmulator) {
-    const emulatorHostStr = process.env?.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
+    const emulatorHostStr = env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
     const parts = emulatorHostStr.split(':');
     const host = parts[0] && parts[0].trim().length > 0 ? parts[0].trim() : '127.0.0.1';
     const port = parseInt(parts[1] || '8088', 10) || 8088;
@@ -183,7 +190,7 @@ export function createSecondaryFirebaseApp(appName: string) {
       connectFirestoreEmulator(secondaryDb, host, port);
     } catch {}
 
-    const authHostStr = process.env?.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
+    const authHostStr = env.FIREBASE_AUTH_EMULATOR_HOST || '127.0.0.1:9099';
     const authParts = authHostStr.replace(/^https?:\/\//, '').split(':');
     const authHost = authParts[0] && authParts[0].trim().length > 0 ? authParts[0].trim() : '127.0.0.1';
     const authPort = parseInt(authParts[1] || '9099', 10) || 9099;
@@ -195,6 +202,38 @@ export function createSecondaryFirebaseApp(appName: string) {
   return { app: secondaryApp, auth: secondaryAuth, db: secondaryDb };
 }
 
+/**
+ * Test support, Auth emulator only: gives the signed-in test user a verified phone number, the way
+ * phone login does in production (publishing requires a phone-verified account). The browser build
+ * never runs this: there `process.env` is empty, so no emulator host is set.
+ */
+export async function attachEmulatorTestPhone(targetAuth: Auth | null = auth): Promise<void> {
+  const host = typeof process !== 'undefined' ? process.env?.FIREBASE_AUTH_EMULATOR_HOST : undefined;
+  const user = targetAuth?.currentUser;
+  // Skip when there is no real signed-in user (some tests stub currentUser with a plain object)
+  if (!host || !user || user.phoneNumber || typeof user.getIdToken !== 'function') return;
+  // Unique, stable number per test user (the emulator rejects one number on two accounts)
+  let hash = 0;
+  for (const ch of user.uid) hash = (hash * 31 + ch.charCodeAt(0)) % 10000000;
+  const phoneNumber = `+7700${String(hash).padStart(7, '0')}`;
+  const res = await fetch(
+    `http://${host}/identitytoolkit.googleapis.com/v1/projects/${firebaseConfig.projectId}/accounts:update`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+      body: JSON.stringify({ localId: user.uid, phoneNumber }),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Auth emulator could not attach a test phone number: ${res.status} ${await res.text()}`);
+  }
+  await user.reload();
+  await user.getIdToken(true);
+}
+
+const autoTestPhone =
+  typeof process !== 'undefined' && process.env?.KEREK_TEST_AUTO_PHONE === '1' && Boolean(process.env?.FIREBASE_AUTH_EMULATOR_HOST);
+
 let authInitPromise: Promise<string | null> | null = null;
 
 /**
@@ -205,10 +244,19 @@ export async function ensureFirebaseAuth(): Promise<string | null> {
   if (!isFirebaseConfigured() || !auth) {
     return null;
   }
+  // Wait for the saved session to be restored first. Before that, currentUser is null even for a
+  // signed-in visitor, and signing in anonymously at that moment replaced a phone-verified session
+  // with a new anonymous account on every page load.
+  try {
+    await auth.authStateReady();
+  } catch {}
   if (auth.currentUser?.uid) {
     try {
       localStorage.setItem('kerek_current_user_id_v2', auth.currentUser.uid);
     } catch {}
+    if (autoTestPhone && !auth.currentUser.phoneNumber) {
+      await attachEmulatorTestPhone(auth).catch((e) => console.warn('[KEREK Firebase] test phone note:', e?.message || e));
+    }
     return auth.currentUser.uid;
   }
 
@@ -221,6 +269,9 @@ export async function ensureFirebaseAuth(): Promise<string | null> {
             try {
               localStorage.setItem('kerek_current_user_id_v2', cred.user.uid);
             } catch {}
+            if (autoTestPhone) {
+              await attachEmulatorTestPhone(auth).catch((e) => console.warn('[KEREK Firebase] test phone note:', e?.message || e));
+            }
             return cred.user.uid;
           }
         }
@@ -334,12 +385,16 @@ export async function runFirebaseDiagnostics(): Promise<FirebaseDiagnosticReport
     // Step 5: Firestore Write (user profile)
     if (report.auth.uid) {
       try {
-        await setDoc(doc(db, 'users', report.auth.uid), {
-          id: report.auth.uid,
-          role: 'customer',
-          diagnosticPingAt: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-        }, { merge: true });
+        // Touch only the ping field; never overwrite the user's role or original createdAt
+        const userRef = doc(db, 'users', report.auth.uid);
+        const existingUser = await getDoc(userRef);
+        await setDoc(
+          userRef,
+          existingUser.exists()
+            ? { id: report.auth.uid, diagnosticPingAt: new Date().toISOString() }
+            : { id: report.auth.uid, createdAt: new Date().toISOString(), diagnosticPingAt: new Date().toISOString() },
+          { merge: true }
+        );
         report.firestoreWrite = { ok: true };
         console.log(`✅ [5/6 Firestore Write] Successfully wrote user record to "users/${report.auth.uid}".`);
       } catch (err: any) {
@@ -379,12 +434,8 @@ export async function runFirebaseDiagnostics(): Promise<FirebaseDiagnosticReport
   return report;
 }
 
-// Auto-run diagnostic in background on startup if configured (browser only)
-if (isFirebaseConfigured() && typeof window !== 'undefined') {
-  setTimeout(() => {
-    runFirebaseDiagnostics().catch(() => {});
-  }, 100);
-}
+// Diagnostics run only on demand from the developer panel (?debug=1). Running them on every app
+// open cost extra reads/writes and overwrote the user's record (role and createdAt) each time.
 
 
 // Standardized error context handling conforming to Firebase skill

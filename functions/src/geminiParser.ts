@@ -27,7 +27,7 @@ function buildPrompt(userInput: string): string {
     (c) => `- "${c.id}": ${c.nameRu} / ${c.nameKz}`
   ).join('\n');
 
-  return `You are an expert NLP parser for "КЕРЕК", a local service and goods marketplace in Kazakhstan.
+  return `You are an expert NLP parser for "Tapsyr", a local service and goods marketplace in Kazakhstan.
 Your task is to analyze a customer's informal request written in Russian, Kazakh, or mixed colloquial language, and extract structured metadata into JSON.
 
 ALLOWED CATEGORY IDs:
@@ -74,11 +74,8 @@ export async function parseTextWithGemini(
 
   const prompt = buildPrompt(text);
 
-  const candidateModels = [
-    GEMINI_CONFIG.model,
-    'gemini-flash-latest',
-    'gemini-3.1-flash-lite',
-  ];
+  // Main model, then a lighter one if it fails (each listed once, so a failure costs at most two calls)
+  const candidateModels = Array.from(new Set([GEMINI_CONFIG.model, GEMINI_CONFIG.fallbackModel]));
 
   let responseText = '{}';
   let lastErr: unknown = null;
@@ -91,6 +88,8 @@ export async function parseTextWithGemini(
         config: {
           responseMimeType: 'application/json',
           temperature: GEMINI_CONFIG.temperature,
+          // The answer is a small JSON object; a cap keeps a manipulated request from running up output tokens
+          maxOutputTokens: GEMINI_CONFIG.maxOutputTokens,
         },
       });
 
@@ -115,7 +114,8 @@ export async function parseTextWithGemini(
   try {
     rawJson = JSON.parse(responseText);
   } catch (parseErr) {
-    console.warn('[geminiParser] Failed to parse JSON response:', responseText, parseErr);
+    // The raw answer may echo the customer's text (personal data), so it is not logged
+    console.warn('[geminiParser] Failed to parse JSON response, length', responseText.length, parseErr instanceof Error ? parseErr.message : '');
     rawJson = {};
   }
 

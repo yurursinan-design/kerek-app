@@ -1,10 +1,13 @@
+// Device mode: the app makes notices itself only without the cloud (with it, the server does;
+// see verify-server-notifications.ts)
+import './helpers/deviceMode';
 import { localRepository } from '../src/services/localRepository';
-import { firebaseRepository } from '../src/services/firebaseRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
 import { notificationService } from '../src/services/notificationService';
-import { ensureFirebaseAuth, auth, db } from '../src/services/firebase';
-import { collection, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
-import { AppNotification, ServiceRequest, ProviderOffer, Conversation, ChatMessage } from '../src/types';
+import { ensureFirebaseAuth, auth, db, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
+import { signInAnonymously } from 'firebase/auth';
+import { doc, setDoc } from 'firebase/firestore';
+import { AppNotification, ProviderOffer, Conversation, ChatMessage } from '../src/types';
 
 async function runNotificationsVerification() {
   console.log('====================================================');
@@ -30,7 +33,21 @@ async function runNotificationsVerification() {
   console.log(`Authenticated UID for tests: ${currentUid}\n`);
 
   // --- Real Request created via repository so it exists in Firestore ---
-  const otherUserId = `other_user_${Date.now()}`;
+  // In cloud mode the provider is a real second account, so its offer can exist in Firestore and the
+  // notification rules (which verify the referenced offer) can be exercised for real.
+  let otherUserId = `other_user_${Date.now()}`;
+  let providerDb: any = null;
+  if (resilientRepository.isCloudActive()) {
+    const provClient = createSecondaryFirebaseApp(`notif-provider-${Date.now()}`)!;
+    await signInAnonymously(provClient.auth);
+    await attachEmulatorTestPhone(provClient.auth);
+    otherUserId = provClient.auth.currentUser!.uid;
+    providerDb = provClient.db;
+    // Offers come from a provider profile in the request's city
+    await setDoc(doc(providerDb, 'providers', otherUserId), {
+      id: otherUserId, userId: otherUserId, name: 'Ерлан Мастер', city: 'Алматы', cityId: 'almaty', category: 'appliances',
+    });
+  }
   const mockReq = await resilientRepository.createRequest({
     customerId: currentUid,
     customerName: 'Айгүл Клиент',
@@ -46,7 +63,7 @@ async function runNotificationsVerification() {
   console.log(`Created test request: ${mockReq.id}`);
 
   const mockOffer: ProviderOffer = {
-    id: `OFFER_TEST_${Date.now()}`,
+    id: `OFFER-${mockReq.id}-${otherUserId}`,
     requestId: mockReq.id,
     providerId: otherUserId,
     providerUserId: otherUserId,
@@ -59,6 +76,10 @@ async function runNotificationsVerification() {
     status: 'PENDING',
     createdAt: new Date().toISOString(),
   };
+
+  if (providerDb) {
+    await setDoc(doc(providerDb, 'offers', mockOffer.id), mockOffer);
+  }
 
   // --- Test 1: Customer receives notification when new offer is created ---
   // In local mode / test:
@@ -89,6 +110,10 @@ async function runNotificationsVerification() {
   // --- Test 2: Offer acceptance notifications ---
   // Customer (currentUid) accepts provider's offer:
   // Both provider notification (PROVIDER_OFFER_ACCEPTED) and customer confirmation (CUSTOMER_OFFER_ACCEPTED) are created.
+  // In cloud mode the offer is really accepted first: the rules only allow these notices for the selected offer.
+  if (providerDb) {
+    await resilientRepository.acceptOffer(mockReq.id, mockOffer.id);
+  }
   await notificationService.notifyOfferAccepted(mockReq, mockOffer);
 
   // Customer checks their own notifications in resilientRepository
@@ -224,7 +249,7 @@ async function runNotificationsVerification() {
         createdAt: new Date().toISOString(),
         // No valid request or offer backing this write!
       });
-    } catch (secErr: any) {
+    } catch {
       securityBlocked = true;
     }
 
@@ -253,7 +278,7 @@ async function runNotificationsVerification() {
   // --- Test 11: Realtime listener subscription & unsubscribe ---
   let receivedUpdatesCount = 0;
   const testSubUser = `user_sub_${Date.now()}`;
-  const unsub = localRepository.subscribeToNotifications(testSubUser, (items) => {
+  const unsub = localRepository.subscribeToNotifications(testSubUser, () => {
     receivedUpdatesCount++;
   });
 

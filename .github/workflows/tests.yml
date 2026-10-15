@@ -1,0 +1,64 @@
+# Runs the test suites on every Pull Request and on main:
+#   - type check (strict) and lint (React hooks, TypeScript and correctness rules, oxlint)
+#   - Firestore and Storage security rules tests (emulator)
+#   - verify-* tests against the Firestore, Auth and Storage emulators
+name: Testler
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # The deploy workflow runs these same tests first and only deploys when they pass
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The Firestore emulator runs on Java
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Cache Firebase emulators
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-15.31.0
+
+      - name: Bağımlılıkları kur
+        run: bun install --frozen-lockfile
+
+      - name: Tip kontrolü ve kod denetimi (lint)
+        run: bun run lint
+
+      - name: Cloud Functions derleme kontrolü
+        run: npm --prefix functions ci && npm --prefix functions run build
+
+      - name: Güvenlik kuralı testleri
+        run: npm run test:rules
+
+      - name: Dosya (Storage) kuralı testleri
+        run: npm run test:storage
+
+      - name: Uygulama testleri
+        run: npm run test:verify

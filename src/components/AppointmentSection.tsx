@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Appointment,
   AppointmentStatus,
@@ -9,7 +9,7 @@ import {
   WorkStatus,
 } from '../types';
 import { translations } from '../i18n/translations';
-import { repository, getCurrentUserId } from '../services';
+import { repository, getCurrentUserId, getFriendlyErrorMessage } from '../services';
 import { auth } from '../services/firebase';
 import {
   Calendar,
@@ -18,17 +18,13 @@ import {
   AlertCircle,
   RotateCcw,
   X,
-  FileText,
   Send,
   CalendarCheck,
   CalendarX,
-  ChevronDown,
-  ChevronUp,
   Car,
   MapPin,
   Wrench,
   CheckCircle2,
-  ShieldCheck,
 } from 'lucide-react';
 
 interface AppointmentSectionProps {
@@ -68,11 +64,20 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
 
   const effectiveUserId = currentUserId || auth?.currentUser?.uid || getCurrentUserId();
 
-  // Set default date to today
+  // Default date: today on the phone's own calendar (toISOString would give the UTC date, which
+  // is yesterday in Kazakhstan between midnight and 05:00)
+  const localToday = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+  // The date field starts at today (set once when the section opens)
+  const todayRef = useRef(localToday);
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    setDateStr(today);
+    setDateStr(todayRef.current);
   }, []);
+  // Latest callback from the parent, without re-subscribing when the parent re-renders
+  const onChangedRef = useRef(onAppointmentChanged);
+  onChangedRef.current = onAppointmentChanged;
 
   // Subscribe to appointment changes
   useEffect(() => {
@@ -85,9 +90,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
         if (!isMounted) return;
         setAppointment(appt);
         setLoading(false);
-        if (onAppointmentChanged) {
-          onAppointmentChanged(appt);
-        }
+        onChangedRef.current?.(appt);
       },
       (err) => {
         console.warn('[AppointmentSection] subscription note:', err);
@@ -132,7 +135,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       setNoteStr('');
     } catch (err: any) {
       console.error('[AppointmentSection] Create appointment error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Қате орын алды' : 'Произошла ошибка'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -147,7 +150,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       await repository.confirmAppointment(appointment.id, currentRole);
     } catch (err: any) {
       console.error('[AppointmentSection] Confirm error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Растау қатесі' : 'Ошибка подтверждения'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -171,7 +174,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       setNoteStr('');
     } catch (err: any) {
       console.error('[AppointmentSection] Reschedule error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Өзгерту қатесі' : 'Ошибка переноса'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -192,7 +195,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       setCancelReason('');
     } catch (err: any) {
       console.error('[AppointmentSection] Cancel error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Болдырмау қатесі' : 'Ошибка отмены'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -207,7 +210,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       await repository.completeAppointment(appointment.id);
     } catch (err: any) {
       console.error('[AppointmentSection] Complete error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Аяқтау қатесі' : 'Ошибка завершения'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -229,14 +232,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       }
     } catch (err: any) {
       console.error('[AppointmentSection] Confirm completion error:', err);
-      setErrorMsg(
-        err?.message ||
-          (language === 'kz'
-            ? 'Жұмысты аяқтау қатесі'
-            : language === 'tr'
-            ? 'İş tamamlanırken bir hata oluştu'
-            : 'Ошибка завершения работы')
-      );
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -251,7 +247,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       await repository.updateWorkStatus(appointment.id, targetStatus, effectiveUserId);
     } catch (err: any) {
       console.error('[AppointmentSection] Work status error:', err);
-      setErrorMsg(err?.message || (language === 'kz' ? 'Күйді жаңарту қатесі' : 'Ошибка обновления статуса'));
+      setErrorMsg(getFriendlyErrorMessage(err, language));
     } finally {
       setSubmitting(false);
     }
@@ -347,8 +343,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
             <p className="text-[10px] text-slate-500">
               {language === 'kz'
                 ? 'Тараптардың келісілген уақыты'
-                : language === 'tr'
-                ? 'Karşılıklı mutabık kalınan randevu zamanı'
                 : 'Согласованное время встречи'}
             </p>
           </div>
@@ -358,27 +352,12 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       </div>
 
       {/* Order Status Badges */}
-      {request.paymentStatus === 'held_in_escrow' && request.status !== 'COMPLETED' && (
-        <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center gap-2 text-xs font-bold text-emerald-900">
-          <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>
-            {language === 'kz'
-              ? 'Тапсырыс келісілді: Сенімді мәміле'
-              : language === 'tr'
-              ? 'Sipariş Onaylandı: Güvenli İşlem'
-              : 'Заказ подтвержден: Безопасная сделка'}
-          </span>
-        </div>
-      )}
-
-      {(request.status === 'COMPLETED' || request.paymentStatus === 'released') && (
+      {request.status === 'COMPLETED' && (
         <div className="p-2.5 bg-teal-50 border border-teal-300 rounded-xl flex items-center gap-2 text-xs font-bold text-teal-900">
           <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
           <span>
             {language === 'kz'
               ? 'Жұмыс сәтті аяқталды'
-              : language === 'tr'
-              ? 'İş Başarıyla Tamamlandı'
               : 'Работа успешно завершена'}
           </span>
         </div>
@@ -427,6 +406,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                     <input
                       type="date"
                       required
+                      min={localToday}
                       value={dateStr}
                       onChange={(e) => setDateStr(e.target.value)}
                       className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
@@ -494,8 +474,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   >
                     {language === 'kz'
                       ? 'Жабу'
-                      : language === 'tr'
-                      ? 'İptal'
                       : 'Отмена'}
                   </button>
                 </div>
@@ -529,8 +507,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               <span className="text-slate-500">
                 {language === 'kz'
                   ? 'Ұсынған'
-                  : language === 'tr'
-                  ? 'Öneren'
                   : 'Предложено'}:
               </span>
               <span className="font-medium text-slate-700">
@@ -677,15 +653,11 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   <p className="font-bold text-slate-800">
                     {language === 'kz'
                       ? 'Кездесу күту күйінде қалды'
-                      : language === 'tr'
-                      ? 'Randevu beklemede kaldı'
                       : 'Встреча осталась в ожидании'}
                   </p>
                   <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
                     {language === 'kz'
                       ? 'Тапсырыс аяқталғандықтан, бұл кездесу ұсынысы бекітілмей күту күйінде қалды және оған әрекет жасау талап етілмейді.'
-                      : language === 'tr'
-                      ? 'İş tamamlandığı için bu randevu önerisi onaylanmadan beklemede kaldı ve artık işlem gerektirmez.'
                       : 'Так как заказ уже завершен, это предложение о встрече осталось без подтверждения и более не требует действий.'}
                   </p>
                 </div>
@@ -716,6 +688,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   <input
                     type="date"
                     required
+                    min={localToday}
                     value={dateStr}
                     onChange={(e) => setDateStr(e.target.value)}
                     className="w-full px-2 py-1.5 rounded-lg border border-sky-200 text-xs bg-white text-slate-800"
@@ -761,8 +734,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                 >
                   {language === 'kz'
                     ? 'Жабу'
-                    : language === 'tr'
-                    ? 'İptal'
                     : 'Отмена'}
                 </button>
               </div>
@@ -815,8 +786,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   <span>
                     {language === 'kz'
                       ? 'Жұмыстың аяқталғанын растау'
-                      : language === 'tr'
-                      ? 'İşin Tamamlandığını Onayla'
                       : 'Подтвердить завершение работы'}
                   </span>
                 </button>
@@ -868,6 +837,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               <button
                 type="button"
                 onClick={() => setIsCancelDialogOpen(false)}
+                data-dialog-close
                 className="text-slate-400 hover:text-slate-600"
               >
                 <X className="w-4 h-4" />
@@ -877,8 +847,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
             <p className="text-xs text-slate-500">
               {language === 'kz'
                 ? 'Кездесуді шынымен тоқтатқыңыз келе ме?'
-                : language === 'tr'
-                ? 'Randevuyu gerçekten iptal etmek istiyor musunuz?'
                 : 'Вы действительно хотите отменить назначенную встречу?'}
             </p>
 
@@ -886,8 +854,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               <label className="block text-[10px] font-bold text-slate-600 uppercase mb-1">
                 {language === 'kz'
                   ? 'Себебі (қалауыңыз бойынша)'
-                  : language === 'tr'
-                  ? 'Neden (İsteğe bağlı)'
                   : 'Причина (необязательно)'}
               </label>
               <input
@@ -895,8 +861,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                 placeholder={
                   language === 'kz'
                     ? 'Мысалы: Басқа уақыт ыңғайлырақ'
-                    : language === 'tr'
-                    ? 'Örn: Başka bir zaman daha uygun'
                     : 'Например: Изменились планы'
                 }
                 value={cancelReason}
@@ -921,8 +885,6 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               >
                 {language === 'kz'
                   ? 'Жоқ'
-                  : language === 'tr'
-                  ? 'Vazgeç'
                   : 'Назад'}
               </button>
             </div>

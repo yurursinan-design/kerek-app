@@ -15,9 +15,15 @@ import {
 import {
   doc,
   getDoc,
+  getDocs,
   setDoc,
   updateDoc,
   deleteDoc,
+  collection,
+  query,
+  where,
+  writeBatch,
+  deleteField,
 } from 'firebase/firestore';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -67,6 +73,28 @@ async function runTestSuite() {
     },
   });
 
+  // Publishing (requests, offers, provider profiles) requires a phone-verified account, so test users
+  // carry a phone_number claim unless a test deliberately uses anonymousUser().
+  const phoneUser = (uid: string) => testEnv.authenticatedContext(uid, { phone_number: '+77000000000' });
+  const anonymousUser = (uid: string) => testEnv.authenticatedContext(uid);
+
+  // An offer is written together with the request's offer count, as the app does (the rules require both)
+  const sendOffer = async (db: any, offerId: string, data: Record<string, unknown>) => {
+    const requestId = String(data.requestId || '');
+    if (!requestId) return setDoc(doc(db, 'offers', offerId), data);
+    let count = 0;
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const snap = await getDoc(doc(ctx.firestore(), 'requests', requestId));
+      count = (snap.exists() && (snap.data().offerCount as number)) || 0;
+    });
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'offers', offerId), data);
+    batch.update(doc(db, 'requests', requestId), {
+      status: 'OFFERS_RECEIVED', lastOfferId: offerId, offerCount: count + 1, updatedAt: new Date().toISOString(),
+    });
+    return batch.commit();
+  };
+
   console.log('2. Test environment ready. Running isolated security scenarios...\n');
 
   try {
@@ -105,7 +133,7 @@ async function runTestSuite() {
     console.log('\n--- SECTION 2: User Profiles (/users/{userId}) ---');
 
     await test('Authenticated user can create and read their own profile', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'users', 'user_alice'), {
           id: 'user_alice',
@@ -117,7 +145,7 @@ async function runTestSuite() {
     });
 
     await test('User cannot read or write another user private profile', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       // Read Alice's profile
       await assertFails(getDoc(doc(bobDb, 'users', 'user_alice')));
       // Write / spoof Alice's profile
@@ -136,20 +164,21 @@ async function runTestSuite() {
     console.log('\n--- SECTION 3: Provider Profiles (/providers/{providerId}) ---');
 
     await test('Provider can create their own profile with matching UID', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
         setDoc(doc(masterDb, 'providers', 'prov_master1'), {
           id: 'prov_master1',
           userId: 'prov_master1',
           name: 'Master Ruslan',
           city: 'almaty',
+          cityId: 'almaty',
           category: 'appliance_repair',
         })
       );
     });
 
     await test('Provider cannot create profile under another user ID or spoof userId', async () => {
-      const attackerDb = testEnv.authenticatedContext('user_attacker').firestore();
+      const attackerDb = phoneUser('user_attacker').firestore();
       await assertFails(
         setDoc(doc(attackerDb, 'providers', 'prov_master2'), {
           id: 'prov_master2',
@@ -176,12 +205,13 @@ async function runTestSuite() {
     console.log('\n--- SECTION 4: Requests (/requests/{requestId}) ---');
 
     await test('Customer can create OPEN request with matching customerId', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'requests', 'req_alice_01'), {
           id: 'req_alice_01',
           customerId: 'user_alice',
           city: 'almaty',
+          cityId: 'almaty',
           category: 'appliances',
           service: 'Washing machine repair',
           status: 'OPEN',
@@ -190,7 +220,7 @@ async function runTestSuite() {
     });
 
     await test('User cannot create request on behalf of another customer', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         setDoc(doc(bobDb, 'requests', 'req_bob_spoof'), {
           id: 'req_bob_spoof',
@@ -204,7 +234,7 @@ async function runTestSuite() {
     });
 
     await test('Customer cannot alter request id or customerId on update', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         updateDoc(doc(aliceDb, 'requests', 'req_alice_01'), {
           customerId: 'user_bob',
@@ -225,13 +255,14 @@ async function runTestSuite() {
         userId: 'prov_master2',
         name: 'Master Sergey',
         city: 'almaty',
+        cityId: 'almaty',
         category: 'appliance_repair',
       });
     });
 
     // Provider who has not submitted an offer cannot change request status to OFFERS_RECEIVED
     await test('Provider who has not submitted an offer cannot change status to OFFERS_RECEIVED', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
       await assertFails(
         updateDoc(doc(master2Db, 'requests', 'req_alice_01'), {
           status: 'OFFERS_RECEIVED',
@@ -242,7 +273,7 @@ async function runTestSuite() {
 
     // Request Privacy & Field Security Tests
     await test('Marketplace query / read returns open listing without sensitive contact information', async () => {
-      const master1Db = testEnv.authenticatedContext('prov_master1').firestore();
+      const master1Db = phoneUser('prov_master1').firestore();
       const reqSnap = await getDoc(doc(master1Db, 'requests', 'req_alice_01'));
       // Provider can read the public request document to make an offer
       await assertSucceeds(getDoc(doc(master1Db, 'requests', 'req_alice_01')));
@@ -254,8 +285,8 @@ async function runTestSuite() {
     });
 
     await test('Unrelated user or unselected provider cannot access private customer contact in requestContacts', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
       await assertFails(getDoc(doc(bobDb, 'requestContacts', 'req_alice_01')));
       await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_alice_01')));
     });
@@ -266,9 +297,9 @@ async function runTestSuite() {
     console.log('\n--- SECTION 5: Offers Creation & Security (/offers/{offerId}) ---');
 
     await test('Creating offer for non-existent request is rejected', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertFails(
-        setDoc(doc(masterDb, 'offers', 'offer_m1_ghost'), {
+        sendOffer(masterDb, 'offer_m1_ghost', {
           id: 'offer_m1_ghost',
           requestId: 'req_non_existent',
           providerId: 'prov_master1',
@@ -293,9 +324,9 @@ async function runTestSuite() {
     });
 
     await test('Creating offer for closed/cancelled request is rejected', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertFails(
-        setDoc(doc(masterDb, 'offers', 'offer_m1_closed'), {
+        sendOffer(masterDb, 'offer_m1_closed', {
           id: 'offer_m1_closed',
           requestId: 'req_closed_01',
           providerId: 'prov_master1',
@@ -307,9 +338,9 @@ async function runTestSuite() {
     });
 
     await test('Attacker cannot create offer with someone else providerUserId', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
-        setDoc(doc(bobDb, 'offers', 'offer_fake_01'), {
+        sendOffer(bobDb, 'offer_fake_01', {
           id: 'offer_fake_01',
           requestId: 'req_alice_01',
           providerId: 'prov_master1',
@@ -320,22 +351,113 @@ async function runTestSuite() {
       );
     });
 
+    const validOffer = (id: string, uid: string, name: string, extra: Record<string, unknown> = {}) => ({
+      id,
+      requestId: 'req_alice_01',
+      providerId: uid,
+      providerUserId: uid,
+      providerName: name,
+      price: '12 000 ₸',
+      availability: 'Today 15:00',
+      message: 'Can fix today',
+      createdAt: new Date().toISOString(),
+      status: 'PENDING',
+      ...extra,
+    });
+
     await test('Provider can submit valid PENDING offer for open request', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
-        setDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
-          id: 'offer_m1_01',
-          requestId: 'req_alice_01',
-          providerId: 'prov_master1',
-          providerUserId: 'prov_master1',
-          providerName: 'Master Ruslan',
-          price: '12 000 ₸',
-          availability: 'Today 15:00',
-          message: 'Can fix today',
-          createdAt: new Date().toISOString(),
-          status: 'PENDING',
-        })
+        sendOffer(masterDb, 'OFFER-req_alice_01-prov_master1', validOffer('OFFER-req_alice_01-prov_master1', 'prov_master1', 'Master Ruslan'))
       );
+    });
+
+    await test('An offer can carry payment methods and the 14-day free-fix pledge', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        const adminDb = ctx.firestore();
+        await setDoc(doc(adminDb, 'requests', 'req_extras'), {
+          id: 'req_extras', customerId: 'user_alice', city: 'almaty', cityId: 'almaty',
+          category: 'appliances', service: 'Fridge repair', status: 'OPEN',
+        });
+        for (const uid of ['prov_extras', 'prov_extras2']) {
+          await setDoc(doc(adminDb, 'providers', uid), {
+            id: uid, userId: uid, name: 'Master ' + uid, city: 'almaty', cityId: 'almaty', category: 'appliance_repair',
+          });
+        }
+      });
+      const offer = (uid: string, extra: Record<string, unknown>) => ({
+        ...validOffer('OFFER-req_extras-' + uid, uid, 'Master ' + uid, extra),
+        requestId: 'req_extras',
+      });
+      const db = phoneUser('prov_extras').firestore();
+      await assertSucceeds(
+        sendOffer(db, 'OFFER-req_extras-prov_extras', offer('prov_extras', { paymentMethods: ['cash', 'kaspi'], fixPledge: true }))
+      );
+    });
+
+    await test('Offer extras are checked: only cash/kaspi, at least one, and the pledge is a plain yes/no', async () => {
+      const db = phoneUser('prov_extras2').firestore();
+      const offer = (extra: Record<string, unknown>) => ({
+        ...validOffer('OFFER-req_extras-prov_extras2', 'prov_extras2', 'Master prov_extras2', extra),
+        requestId: 'req_extras',
+      });
+      await assertFails(sendOffer(db, 'OFFER-req_extras-prov_extras2', offer({ paymentMethods: ['crypto'] })));
+      await assertFails(sendOffer(db, 'OFFER-req_extras-prov_extras2', offer({ paymentMethods: [] })));
+      await assertFails(sendOffer(db, 'OFFER-req_extras-prov_extras2', offer({ paymentMethods: ['cash', 'kaspi', 'cash'] })));
+      await assertFails(sendOffer(db, 'OFFER-req_extras-prov_extras2', offer({ fixPledge: 'yes' })));
+    });
+
+    await test('A provider can change payment methods on their own PENDING offer, only to known ones', async () => {
+      const db = phoneUser('prov_extras').firestore();
+      const ref = doc(db, 'offers', 'OFFER-req_extras-prov_extras');
+      await assertSucceeds(updateDoc(ref, { paymentMethods: ['cash'], fixPledge: false, updatedAt: new Date().toISOString() }));
+      await assertFails(updateDoc(ref, { paymentMethods: ['card'], updatedAt: new Date().toISOString() }));
+    });
+
+    await test('A provider has one offer per request: any other offer id is rejected', async () => {
+      const masterDb = phoneUser('prov_master1').firestore();
+      await assertFails(sendOffer(masterDb, 'offer_m1_second', validOffer('offer_m1_second', 'prov_master1', 'Master Ruslan')));
+    });
+
+    await test('A user without a provider profile cannot send an offer', async () => {
+      const bobDb = phoneUser('user_bob').firestore();
+      await assertFails(sendOffer(bobDb, 'OFFER-req_alice_01-user_bob', validOffer('OFFER-req_alice_01-user_bob', 'user_bob', 'Bob')));
+    });
+
+    await test('A provider from another city cannot send an offer', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), 'providers', 'prov_astana'), {
+          id: 'prov_astana', userId: 'prov_astana', name: 'Astana Master', city: 'astana', cityId: 'astana', category: 'appliance_repair',
+        });
+      });
+      const astanaDb = phoneUser('prov_astana').firestore();
+      await assertFails(sendOffer(astanaDb, 'OFFER-req_alice_01-prov_astana', validOffer('OFFER-req_alice_01-prov_astana', 'prov_astana', 'Astana Master')));
+    });
+
+    await test('Customer cannot send an offer on their own request', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), 'providers', 'user_alice'), {
+          id: 'user_alice', userId: 'user_alice', name: 'Alice Pro', city: 'almaty', cityId: 'almaty', category: 'appliance_repair',
+        });
+      });
+      const aliceDb = phoneUser('user_alice').firestore();
+      await assertFails(sendOffer(aliceDb, 'OFFER-req_alice_01-user_alice', validOffer('OFFER-req_alice_01-user_alice', 'user_alice', 'Alice Pro')));
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await deleteDoc(doc(ctx.firestore(), 'providers', 'user_alice'));
+      });
+    });
+
+    await test('Offer cannot carry demo flags, ratings or a name other than the provider profile', async () => {
+      const master2Db = phoneUser('prov_master2').firestore();
+      const id = 'OFFER-req_alice_01-prov_master2';
+      await assertFails(sendOffer(master2Db, id, validOffer(id, 'prov_master2', 'Master Sergey', { isDemo: true })));
+      await assertFails(sendOffer(master2Db, id, validOffer(id, 'prov_master2', 'Master Sergey', { rating: 5, reviewsCount: 99 })));
+      await assertFails(sendOffer(master2Db, id, validOffer(id, 'prov_master2', 'KEREK Support')));
+    });
+
+    // Later scenarios use a fixed offer id for the first provider
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      await setDoc(doc(adminContext.firestore(), 'offers', 'offer_m1_01'), validOffer('offer_m1_01', 'prov_master1', 'Master Ruslan'));
     });
 
     // Seed a second offer by prov_master2 for cross-offer exploit testing
@@ -355,7 +477,7 @@ async function runTestSuite() {
 
     // Now test Request OFFERS_RECEIVED transition under strict offer verification:
     await test('Attacker cannot use another provider offer to update request status', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
       // prov_master2 attempts to claim offer_m1_01 belonging to prov_master1
       await assertFails(
         updateDoc(doc(master2Db, 'requests', 'req_alice_01'), {
@@ -367,8 +489,8 @@ async function runTestSuite() {
     });
 
     await test('Customer and other unauthorized users cannot use provider privilege to set OFFERS_RECEIVED', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       // Customer cannot use provider branch to transition OPEN -> OFFERS_RECEIVED
       await assertFails(
         updateDoc(doc(aliceDb, 'requests', 'req_alice_01'), {
@@ -387,15 +509,91 @@ async function runTestSuite() {
       );
     });
 
-    await test('Legitimate provider who submitted offer can update request to OFFERS_RECEIVED', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
-      await assertSucceeds(
+    await test('A provider cannot move the request or its offer count without sending a new offer', async () => {
+      const masterDb = phoneUser('prov_master1').firestore();
+      await assertFails(
         updateDoc(doc(masterDb, 'requests', 'req_alice_01'), {
           status: 'OFFERS_RECEIVED',
           lastOfferId: 'offer_m1_01',
           updatedAt: new Date().toISOString(),
         })
       );
+      // Their offer already exists, so the count can't be bumped again with it
+      await assertFails(
+        updateDoc(doc(masterDb, 'requests', 'req_alice_01'), {
+          status: 'OFFERS_RECEIVED',
+          lastOfferId: 'OFFER-req_alice_01-prov_master1',
+          offerCount: 2,
+          updatedAt: new Date().toISOString(),
+        })
+      );
+    });
+
+    // ---- Offer limit (5 per request), request expiry, inspection fee
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const adminDb = ctx.firestore();
+      const base = { customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances', service: 'Repair', status: 'OPEN' };
+      await setDoc(doc(adminDb, 'requests', 'req_full'), { id: 'req_full', ...base, status: 'OFFERS_RECEIVED', offerCount: 5 });
+      await setDoc(doc(adminDb, 'requests', 'req_four'), { id: 'req_four', ...base, status: 'OFFERS_RECEIVED', offerCount: 4 });
+      await setDoc(doc(adminDb, 'requests', 'req_expired'), { id: 'req_expired', ...base, expiresAtMs: Date.now() - 60000 });
+      await setDoc(doc(adminDb, 'requests', 'req_fresh'), { id: 'req_fresh', ...base, expiresAtMs: Date.now() + 86400000 });
+      await setDoc(doc(adminDb, 'providers', 'prov_lim'), {
+        id: 'prov_lim', userId: 'prov_lim', name: 'Master Lim', city: 'almaty', cityId: 'almaty', category: 'appliance_repair',
+      });
+    });
+    const limOffer = (requestId: string, extra: Record<string, unknown> = {}) => ({
+      ...validOffer(`OFFER-${requestId}-prov_lim`, 'prov_lim', 'Master Lim', extra),
+      requestId,
+    });
+
+    await test('An offer must be counted on the request: a plain offer write is rejected', async () => {
+      const db = phoneUser('prov_lim').firestore();
+      await assertFails(setDoc(doc(db, 'offers', 'OFFER-req_four-prov_lim'), limOffer('req_four')));
+    });
+
+    await test('The counter goes up by exactly one with the offer', async () => {
+      const db = phoneUser('prov_lim').firestore();
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'offers', 'OFFER-req_four-prov_lim'), limOffer('req_four'));
+      batch.update(doc(db, 'requests', 'req_four'), {
+        status: 'OFFERS_RECEIVED', lastOfferId: 'OFFER-req_four-prov_lim', offerCount: 6, updatedAt: new Date().toISOString(),
+      });
+      await assertFails(batch.commit());
+    });
+
+    await test('The fifth offer is accepted; a request with 5 offers takes no more', async () => {
+      const db = phoneUser('prov_lim').firestore();
+      await assertSucceeds(sendOffer(db, 'OFFER-req_four-prov_lim', limOffer('req_four')));
+      await assertFails(sendOffer(db, 'OFFER-req_full-prov_lim', limOffer('req_full')));
+    });
+
+    await test('An expired request takes no offers; an open one does', async () => {
+      const db = phoneUser('prov_lim').firestore();
+      await assertFails(sendOffer(db, 'OFFER-req_expired-prov_lim', limOffer('req_expired')));
+      await assertSucceeds(sendOffer(db, 'OFFER-req_fresh-prov_lim', limOffer('req_fresh', { priceType: 'inspection', inspectionFee: '2 000 ₸' })));
+    });
+
+    await test('Inspection fee is short text, editable while the offer is pending', async () => {
+      const db = phoneUser('prov_lim').firestore();
+      const ref = doc(db, 'offers', 'OFFER-req_fresh-prov_lim');
+      await assertSucceeds(updateDoc(ref, { inspectionFee: 'Бесплатно', updatedAt: new Date().toISOString() }));
+      await assertFails(updateDoc(ref, { inspectionFee: 'x'.repeat(51), updatedAt: new Date().toISOString() }));
+    });
+
+    await test('Customer sets the request end within 4 days, extends it later, and never sets the offer count', async () => {
+      const aliceDb = phoneUser('user_alice').firestore();
+      const req = (id: string, extra: Record<string, unknown>) => ({
+        id, customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances', service: 'Repair', status: 'OPEN', ...extra,
+      });
+      await assertSucceeds(setDoc(doc(aliceDb, 'requests', 'req_exp_ok'), req('req_exp_ok', { expiresAtMs: Date.now() + 3 * 86400000 })));
+      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_exp_long'), req('req_exp_long', { expiresAtMs: Date.now() + 10 * 86400000 })));
+      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_exp_past'), req('req_exp_past', { expiresAtMs: Date.now() - 1000 })));
+      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_exp_str'), req('req_exp_str', { expiresAtMs: 'tomorrow' })));
+      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_cnt'), req('req_cnt', { offerCount: 0 })));
+      const ref = doc(aliceDb, 'requests', 'req_expired');
+      await assertSucceeds(updateDoc(ref, { expiresAtMs: Date.now() + 3 * 86400000, updatedAt: new Date().toISOString() }));
+      await assertFails(updateDoc(ref, { expiresAtMs: Date.now() + 10 * 86400000, updatedAt: new Date().toISOString() }));
+      await assertFails(updateDoc(ref, { offerCount: 0, updatedAt: new Date().toISOString() }));
     });
 
     // =========================================================================
@@ -404,7 +602,7 @@ async function runTestSuite() {
     console.log('\n--- SECTION 5B: Offer Updates & Customer Selection ---');
 
     await test('Provider can update allowed fields of their own PENDING offer', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
         updateDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
           price: '11 500 ₸',
@@ -416,7 +614,7 @@ async function runTestSuite() {
     });
 
     await test('Provider cannot alter immutable identity fields on offer update', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertFails(
         updateDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
           providerUserId: 'user_bob',
@@ -435,7 +633,7 @@ async function runTestSuite() {
     });
 
     await test('Unrelated user cannot update or tamper with offer', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         updateDoc(doc(bobDb, 'offers', 'offer_m1_01'), {
           price: '500 ₸',
@@ -446,7 +644,7 @@ async function runTestSuite() {
 
     // Unrelated user cannot accept or reject offer while still PENDING (fixes false-positive)
     await test('Unrelated user cannot accept or reject PENDING offer of another customer request', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         updateDoc(doc(bobDb, 'offers', 'offer_m1_01'), {
           status: 'REJECTED',
@@ -462,7 +660,7 @@ async function runTestSuite() {
     });
 
     await test('Customer cannot tamper with paymentStatus (cannot set held_in_escrow, released, or refunded)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       // Test setting held_in_escrow directly by customer
       await assertFails(
         updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), {
@@ -486,14 +684,23 @@ async function runTestSuite() {
       );
     });
 
+    await test('Customer cannot mark an offer ACCEPTED without selecting it on the request', async () => {
+      const aliceDb = phoneUser('user_alice').firestore();
+      await assertFails(updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), { status: 'ACCEPTED', updatedAt: new Date().toISOString() }));
+    });
+
+    await test('Customer cannot select an offer on the request without accepting it in the same write', async () => {
+      const aliceDb = phoneUser('user_alice').firestore();
+      await assertFails(updateDoc(doc(aliceDb, 'requests', 'req_alice_01'), { status: 'PROVIDER_SELECTED', selectedOfferId: 'offer_m1_01', updatedAt: new Date().toISOString() }));
+    });
+
     await test('Customer owning the request can accept offer (status -> ACCEPTED) without modifying paymentStatus', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      await assertSucceeds(
-        updateDoc(doc(aliceDb, 'offers', 'offer_m1_01'), {
-          status: 'ACCEPTED',
-          updatedAt: new Date().toISOString(),
-        })
-      );
+      const aliceDb = phoneUser('user_alice').firestore();
+      const batch = writeBatch(aliceDb);
+      const now = new Date().toISOString();
+      batch.update(doc(aliceDb, 'requests', 'req_alice_01'), { status: 'PROVIDER_SELECTED', selectedOfferId: 'offer_m1_01', updatedAt: now });
+      batch.update(doc(aliceDb, 'offers', 'offer_m1_01'), { status: 'ACCEPTED', updatedAt: now });
+      await assertSucceeds(batch.commit());
     });
 
     // Seed state: update request to PROVIDER_SELECTED via admin/bypass for subsequent tests
@@ -544,7 +751,7 @@ async function runTestSuite() {
     });
 
     await test('Parallel concurrent offer acceptance via firebaseRepository.acceptOffer results in exactly 1 ACCEPTED offer and consistent request state', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       // acceptOffer's client-side ownership check reads the app's current user id, not the
       // test context's auth, so align it with the context the transaction runs under.
       setCurrentUserId('user_alice');
@@ -593,7 +800,7 @@ async function runTestSuite() {
     console.log('\n--- SECTION 6: Private Contact Info (/requestContacts/{requestId}) ---');
 
     await test('Customer can create their private contact info', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'requestContacts', 'req_alice_01'), {
           customerId: 'user_alice',
@@ -604,13 +811,13 @@ async function runTestSuite() {
 
     // 1. İsteğin sahibi müşteri iletişim bilgilerini okuyabilir
     await test('1. Customer owning the request can read their private contact info', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(getDoc(doc(aliceDb, 'requestContacts', 'req_alice_01')));
     });
 
     // 2. Kabul edilmiş teklifin sağlayıcısı okuyabilir
     await test('2. Provider of an ACCEPTED offer can read customer contact info', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(getDoc(doc(masterDb, 'requestContacts', 'req_alice_01')));
     });
 
@@ -696,20 +903,20 @@ async function runTestSuite() {
 
     // 3. "PENDING" durumundaki teklifin sağlayıcısı okuyamaz
     await test('3. Provider with PENDING offer cannot read customer contact info', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
       await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_pending_contact')));
     });
 
     // 4. "REJECTED" durumundaki teklifin sağlayıcısı okuyamaz
     await test('4. Provider with REJECTED offer cannot read customer contact info', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
       await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_rejected_contact')));
     });
 
     // 5. Başka sağlayıcı ve ilgisiz kullanıcı okuyamaz
     await test('5. Other providers and unrelated users cannot read customer contact info', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const master2Db = phoneUser('prov_master2').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       const unauthDb = testEnv.unauthenticatedContext().firestore();
       await assertFails(getDoc(doc(master2Db, 'requestContacts', 'req_alice_01')));
       await assertFails(getDoc(doc(bobDb, 'requestContacts', 'req_alice_01')));
@@ -718,7 +925,7 @@ async function runTestSuite() {
 
     // 6. Eksik veya geçersiz "selectedOfferId" durumunda erişim reddedilir
     await test('6. Access denied when selectedOfferId is missing, invalid, or belongs to another request', async () => {
-      const master1Db = testEnv.authenticatedContext('prov_master1').firestore();
+      const master1Db = phoneUser('prov_master1').firestore();
       // Missing selectedOfferId
       await assertFails(getDoc(doc(master1Db, 'requestContacts', 'req_no_selection')));
       // Invalid (non-existent) selectedOfferId
@@ -729,8 +936,8 @@ async function runTestSuite() {
 
     // 7. Kabul edilmiş geçerli teklif akışı çalışmaya devam eder
     await test('7. Valid accepted offer flow continues to work seamlessly', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      const master1Db = testEnv.authenticatedContext('prov_master1').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
+      const master1Db = phoneUser('prov_master1').firestore();
       // Customer reads their contact
       await assertSucceeds(getDoc(doc(aliceDb, 'requestContacts', 'req_alice_01')));
       // Accepted provider reads customer contact
@@ -749,7 +956,7 @@ async function runTestSuite() {
     const convId = 'conv_req_alice_01';
 
     await test('Customer can create conversation with selected provider', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'conversations', convId), {
           id: convId,
@@ -762,12 +969,12 @@ async function runTestSuite() {
     });
 
     await test('Unrelated third party cannot read conversation', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(getDoc(doc(bobDb, 'conversations', convId)));
     });
 
     await test('Participant can send message in conversation', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, `conversations/${convId}/messages`, 'msg_001'), {
           id: 'msg_001',
@@ -783,7 +990,7 @@ async function runTestSuite() {
     });
 
     await test('Unrelated user cannot send message into conversation', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         setDoc(doc(bobDb, `conversations/${convId}/messages`, 'msg_attacker'), {
           id: 'msg_attacker',
@@ -807,7 +1014,7 @@ async function runTestSuite() {
     const createdAtIso = new Date().toISOString();
 
     await test('Customer can create appointment with proposedBy = customer', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'appointments', apptId), {
           id: apptId,
@@ -826,7 +1033,7 @@ async function runTestSuite() {
     });
 
     await test('Customer cannot mutate providerId or customerId on appointment update', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         updateDoc(doc(aliceDb, 'appointments', apptId), {
           providerId: 'hacked_provider',
@@ -840,7 +1047,7 @@ async function runTestSuite() {
     });
 
     await test('Mutating appointment id, requestId, providerUserId, or createdAt is rejected', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         updateDoc(doc(aliceDb, 'appointments', apptId), {
           id: 'appointment_hacked',
@@ -864,7 +1071,7 @@ async function runTestSuite() {
     });
 
     await test('Injecting unauthorized or unexpected fields into appointment update is rejected', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         updateDoc(doc(aliceDb, 'appointments', apptId), {
           maliciousInjectedField: 'attack_payload',
@@ -874,7 +1081,7 @@ async function runTestSuite() {
     });
 
     await test('Unrelated user cannot update appointment', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
+      const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
         updateDoc(doc(bobDb, 'appointments', apptId), {
           status: 'CANCELLED',
@@ -884,7 +1091,7 @@ async function runTestSuite() {
     });
 
     await test('Provider can confirm appointment (PROPOSED -> CONFIRMED)', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
         updateDoc(doc(masterDb, 'appointments', apptId), {
           status: 'CONFIRMED',
@@ -894,7 +1101,7 @@ async function runTestSuite() {
     });
 
     await test('Provider can update workStatus linearly (PROVIDER_ON_THE_WAY)', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
         updateDoc(doc(masterDb, 'appointments', apptId), {
           workStatus: 'PROVIDER_ON_THE_WAY',
@@ -905,7 +1112,7 @@ async function runTestSuite() {
     });
 
     await test('Invalid appointment status regression is rejected', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       // Cannot regress CONFIRMED back to PROPOSED
       await assertFails(
         updateDoc(doc(masterDb, 'appointments', apptId), {
@@ -922,7 +1129,7 @@ async function runTestSuite() {
 
     // Attempt review before request is COMPLETED -> must FAIL
     await test('Customer cannot submit review while request is not COMPLETED', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         setDoc(doc(aliceDb, 'reviews', 'req_alice_01'), {
           id: 'req_alice_01',
@@ -945,7 +1152,7 @@ async function runTestSuite() {
     });
 
     await test('Customer can submit review for COMPLETED request with accepted provider', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'reviews', 'req_alice_01'), {
           id: 'req_alice_01',
@@ -983,7 +1190,7 @@ async function runTestSuite() {
     });
 
     await test('Provider cannot submit review for themselves on a fresh completed request (Self-Review)', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
+      const masterDb = phoneUser('prov_master1').firestore();
       // prov_master1 tries to create reviews/req_self_audit_01 for their own service
       await assertFails(
         setDoc(doc(masterDb, 'reviews', 'req_self_audit_01'), {
@@ -999,7 +1206,7 @@ async function runTestSuite() {
     });
 
     await test('Legitimate customer can review provider on the fresh completed request', async () => {
-      const charlieDb = testEnv.authenticatedContext('user_charlie').firestore();
+      const charlieDb = phoneUser('user_charlie').firestore();
       await assertSucceeds(
         setDoc(doc(charlieDb, 'reviews', 'req_self_audit_01'), {
           id: 'req_self_audit_01',
@@ -1014,7 +1221,7 @@ async function runTestSuite() {
     });
 
     await test('Reviews are strictly immutable (update and delete forbidden)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
+      const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
         updateDoc(doc(aliceDb, 'reviews', 'req_alice_01'), {
           rating: 1,
@@ -1028,391 +1235,102 @@ async function runTestSuite() {
     // =========================================================================
     console.log('\n--- SECTION 10: In-App Notification Security ---');
 
-    // Branch 1: Customer Self Notification
-    await test('Customer can create self notification on owned request (CUSTOMER_OFFER_ACCEPTED)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      await assertSucceeds(
-        setDoc(doc(aliceDb, 'notifications', 'notif_alice_self_01'), {
-          id: 'notif_alice_self_01',
-          recipientUserId: 'user_alice',
-          recipientRole: 'customer',
-          type: 'CUSTOMER_OFFER_ACCEPTED',
-          title: { kz: 'Ұсыныс қабылданды', ru: 'Предложение принято' },
-          body: { kz: 'Сіз шебер ұсынысын қабылдадыңыз', ru: 'Вы приняли предложение мастера' },
-          requestId: 'req_alice_01',
-          targetScreen: 'request_detail',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
+    // Fixtures: a request with a selected provider (prov_master1), a still-pending offer
+    // (prov_master2), a rejected offer (prov_rej), a conversation with one message from each side,
+    // and a cancelled request.
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      const now = new Date().toISOString();
+      await setDoc(doc(db, 'requests', 'req_n'), {
+        id: 'req_n', customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances',
+        service: 'Repair', status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-req_n-prov_master1', createdAt: now,
+      });
+      const offer = (uid: string, status: string) => ({
+        id: `OFFER-req_n-${uid}`, requestId: 'req_n', providerId: uid, providerUserId: uid, providerName: uid,
+        price: '1000', status, createdAt: now,
+      });
+      await setDoc(doc(db, 'offers', 'OFFER-req_n-prov_master1'), offer('prov_master1', 'ACCEPTED'));
+      await setDoc(doc(db, 'offers', 'OFFER-req_n-prov_master2'), offer('prov_master2', 'PENDING'));
+      await setDoc(doc(db, 'offers', 'OFFER-req_n-prov_rej'), offer('prov_rej', 'REJECTED'));
+      await setDoc(doc(db, 'conversations', 'conv_req_n'), {
+        id: 'conv_req_n', requestId: 'req_n', customerId: 'user_alice', providerId: 'prov_master1',
+        providerUserId: 'prov_master1', status: 'ACTIVE', createdAt: now, updatedAt: now,
+      });
+      await setDoc(doc(db, 'conversations', 'conv_req_n', 'messages', 'msg_p1'), {
+        id: 'msg_p1', conversationId: 'conv_req_n', requestId: 'req_n', senderId: 'prov_master1', senderRole: 'provider', type: 'text', text: 'Hi', createdAt: now,
+      });
+      await setDoc(doc(db, 'conversations', 'conv_req_n', 'messages', 'msg_c1'), {
+        id: 'msg_c1', conversationId: 'conv_req_n', requestId: 'req_n', senderId: 'user_alice', senderRole: 'customer', type: 'text', text: 'Hello', createdAt: now,
+      });
+      await setDoc(doc(db, 'requests', 'req_nc'), {
+        id: 'req_nc', customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances',
+        service: 'Repair', status: 'CANCELLED', selectedOfferId: 'OFFER-req_nc-prov_master1', createdAt: now,
+      });
+      await setDoc(doc(db, 'offers', 'OFFER-req_nc-prov_master1'), {
+        id: 'OFFER-req_nc-prov_master1', requestId: 'req_nc', providerId: 'prov_master1', providerUserId: 'prov_master1',
+        providerName: 'Master Ruslan', price: '1000', status: 'ACCEPTED', createdAt: now,
+      });
     });
 
-    await test('Unrelated user or wrong recipient is denied customer self notification', async () => {
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
-      await assertFails(
-        setDoc(doc(bobDb, 'notifications', 'notif_fake_self_01'), {
-          id: 'notif_fake_self_01',
-          recipientUserId: 'user_alice',
-          recipientRole: 'customer',
-          type: 'CUSTOMER_OFFER_ACCEPTED',
-          title: { kz: 'Тақырып', ru: 'Заголовок' },
-          body: { kz: 'Мәтін', ru: 'Текст' },
-          requestId: 'req_alice_01',
-          targetScreen: 'request_detail',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
+    const notif = (id: string, extra: Record<string, unknown>) => ({
+      id,
+      title: { kz: 'Тақырып', ru: 'Заголовок' },
+      body: { kz: 'Мәтін', ru: 'Текст' },
+      requestId: 'req_n',
+      targetScreen: 'request_detail',
+      isRead: false,
+      readAt: null,
+      createdAt: new Date().toISOString(),
+      ...extra,
+    });
+    const toCustomer = { recipientUserId: 'user_alice', recipientRole: 'customer' };
+    const toMaster1 = { recipientUserId: 'prov_master1', recipientRole: 'provider' };
+    const aliceN = () => phoneUser('user_alice').firestore();
+    const m1N = () => phoneUser('prov_master1').firestore();
+    const m2N = () => phoneUser('prov_master2').firestore();
+    const rejN = () => phoneUser('prov_rej').firestore();
+    const put = (db: any, id: string, extra: Record<string, unknown>) => setDoc(doc(db, 'notifications', id), notif(id, extra));
+
+    await test('Nobody in the app can create a notification (the server makes them from real events)', async () => {
+      await assertFails(put(aliceN(), 'notif_offer_accepted_cust_OFFER-req_n-prov_master1',
+        { ...toCustomer, type: 'CUSTOMER_OFFER_ACCEPTED', offerId: 'OFFER-req_n-prov_master1' }));
+      await assertFails(put(aliceN(), 'notif_offer_accepted_prov_OFFER-req_n-prov_master1',
+        { ...toMaster1, type: 'PROVIDER_OFFER_ACCEPTED', offerId: 'OFFER-req_n-prov_master1' }));
+      await assertFails(put(m2N(), 'notif_offer_OFFER-req_n-prov_master2',
+        { ...toCustomer, type: 'CUSTOMER_NEW_OFFER', offerId: 'OFFER-req_n-prov_master2', targetScreen: 'offers_list' }));
+      await assertFails(put(m1N(), 'notif_msg_msg_p1',
+        { ...toCustomer, type: 'CUSTOMER_NEW_MESSAGE', conversationId: 'conv_req_n', targetScreen: 'chat' }));
+      await assertFails(put(m1N(), 'notif_workstatus_appointment_req_n_provider_on_the_way_1',
+        { ...toCustomer, type: 'CUSTOMER_PROVIDER_ON_THE_WAY' }));
+      await assertFails(put(rejN(), 'notif_appt_create_appointment_req_n_1',
+        { ...toCustomer, type: 'CUSTOMER_APPOINTMENT_CREATED', offerId: 'OFFER-req_n-prov_rej' }));
     });
 
-    // Branch 2: Customer to Provider
-    await test('Customer can create notification for provider of selected offer (PROVIDER_OFFER_ACCEPTED)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      await assertSucceeds(
-        setDoc(doc(aliceDb, 'notifications', 'notif_prov_accept_01'), {
-          id: 'notif_prov_accept_01',
-          recipientUserId: 'prov_master1',
-          recipientRole: 'provider',
-          type: 'PROVIDER_OFFER_ACCEPTED',
-          title: { kz: 'Ұсынысыңыз қабылданды', ru: 'Ваше предложение принято' },
-          body: { kz: 'Тапсырыс беруші сізді таңдады', ru: 'Заказчик выбрал вас' },
-          requestId: 'req_alice_01',
-          offerId: 'offer_m1_01',
-          targetScreen: 'offers_list',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
+    await test('The recipient marks their notification read; others cannot touch it', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'notifications', 'notif_done_cust_req_n'), notif('notif_done_cust_req_n', { ...toCustomer, type: 'CUSTOMER_WORK_COMPLETED' }));
+      });
+      await assertFails(updateDoc(doc(m1N(), 'notifications', 'notif_done_cust_req_n'), { isRead: true }));
+      await assertFails(updateDoc(doc(aliceN(), 'notifications', 'notif_done_cust_req_n'), { title: { kz: 'x', ru: 'x' } }));
+      await assertSucceeds(updateDoc(doc(aliceN(), 'notifications', 'notif_done_cust_req_n'), { isRead: true, readAt: new Date().toISOString() }));
     });
 
-    await test('Customer can create notification for provider who submitted offer (PROVIDER_NEW_MESSAGE)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      await assertSucceeds(
-        setDoc(doc(aliceDb, 'notifications', 'notif_prov_msg_01'), {
-          id: 'notif_prov_msg_01',
-          recipientUserId: 'prov_master2',
-          recipientRole: 'provider',
-          type: 'PROVIDER_NEW_MESSAGE',
-          title: { kz: 'Жаңа хабарлама', ru: 'Новое сообщение' },
-          body: { kz: 'Тапсырыс беруші жазды', ru: 'Заказчик написал' },
-          requestId: 'req_concurrent_01',
-          offerId: 'offer_conc_B',
-          targetScreen: 'chat',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
+    await test('A phone is registered for push messages only under its own user; tokens are not readable', async () => {
+      const token = 'fcm_token_' + 'a'.repeat(40);
+      const reg = { platform: 'android', lang: 'kz', updatedAt: new Date().toISOString() };
+      await assertFails(setDoc(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'prov_master1' }));
+      await assertSucceeds(setDoc(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'user_alice' }));
+      await assertFails(getDoc(doc(aliceN(), 'pushTokens', token)));
+      await assertFails(setDoc(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'user_alice', extra: 'x' }));
+      // The same phone signed in by someone else is taken over; only the owner removes it
+      await assertSucceeds(setDoc(doc(m1N(), 'pushTokens', token), { ...reg, uid: 'prov_master1' }));
+      await assertFails(deleteDoc(doc(aliceN(), 'pushTokens', token)));
+      await assertSucceeds(deleteDoc(doc(m1N(), 'pushTokens', token)));
     });
 
-    await test('Customer is denied sending notification to unrelated provider with no offer or relationship', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      await assertFails(
-        setDoc(doc(aliceDb, 'notifications', 'notif_unrelated_prov_01'), {
-          id: 'notif_unrelated_prov_01',
-          recipientUserId: 'prov_unrelated_uid',
-          recipientRole: 'provider',
-          type: 'PROVIDER_OFFER_ACCEPTED',
-          title: { kz: 'Тақырып', ru: 'Заголовок' },
-          body: { kz: 'Мәтін', ru: 'Текст' },
-          requestId: 'req_alice_01',
-          targetScreen: 'offers_list',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
-    });
-
-    await test('Customer is denied using cross-tenant offerId belonging to a different request', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      await assertFails(
-        setDoc(doc(aliceDb, 'notifications', 'notif_cross_offer_01'), {
-          id: 'notif_cross_offer_01',
-          recipientUserId: 'prov_master1',
-          recipientRole: 'provider',
-          type: 'PROVIDER_OFFER_ACCEPTED',
-          title: { kz: 'Тақырып', ru: 'Заголовок' },
-          body: { kz: 'Мәтін', ru: 'Текст' },
-          requestId: 'req_concurrent_01',
-          offerId: 'offer_charlie_m1', // offer_charlie_m1 belongs to req_self_audit_01!
-          targetScreen: 'offers_list',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
-    });
-
-    // Branch 3: Provider to Customer
-    await test('Provider who submitted offer can notify customer (CUSTOMER_NEW_OFFER)', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
-      await assertSucceeds(
-        setDoc(doc(masterDb, 'notifications', 'notif_cust_offer_01'), {
-          id: 'notif_cust_offer_01',
-          recipientUserId: 'user_alice',
-          recipientRole: 'customer',
-          type: 'CUSTOMER_NEW_OFFER',
-          title: { kz: 'Жаңа ұсыныс', ru: 'Новое предложение' },
-          body: { kz: 'Шебер баға ұсынды', ru: 'Мастер предложил цену' },
-          requestId: 'req_alice_01',
-          offerId: 'offer_m1_01',
-          targetScreen: 'offers_list',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
-    });
-
-    await test('Unrelated provider is denied notifying customer on request where they have no offer', async () => {
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
-      await assertFails(
-        setDoc(doc(master2Db, 'notifications', 'notif_unauth_offer_01'), {
-          id: 'notif_unauth_offer_01',
-          recipientUserId: 'user_alice',
-          recipientRole: 'customer',
-          type: 'CUSTOMER_NEW_OFFER',
-          title: { kz: 'Жаңа ұсыныс', ru: 'Новое предложение' },
-          body: { kz: 'Шебер баға ұсынды', ru: 'Мастер предложил цену' },
-          requestId: 'req_alice_01',
-          targetScreen: 'offers_list',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
-    });
-
-    await test('Notification for non-existent request is denied', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
-      await assertFails(
-        setDoc(doc(masterDb, 'notifications', 'notif_nonexistent_req_01'), {
-          id: 'notif_nonexistent_req_01',
-          recipientUserId: 'user_alice',
-          recipientRole: 'customer',
-          type: 'CUSTOMER_NEW_OFFER',
-          title: { kz: 'Тақырып', ru: 'Заголовок' },
-          body: { kz: 'Мәтін', ru: 'Текст' },
-          requestId: 'req_fake_999999',
-          targetScreen: 'offers_list',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
-    });
-
-    // Additional coverage for remaining canonical notification types
-    await test('Customer can create self notification for review prompt (CUSTOMER_REVIEW_REQUIRED)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      await assertSucceeds(
-        setDoc(doc(aliceDb, 'notifications', 'notif_alice_review_01'), {
-          id: 'notif_alice_review_01',
-          recipientUserId: 'user_alice',
-          recipientRole: 'customer',
-          type: 'CUSTOMER_REVIEW_REQUIRED',
-          title: { kz: 'Бағалаңыз', ru: 'Оцените работу' },
-          body: { kz: 'Пікір қалдырыңыз', ru: 'Оставьте отзыв' },
-          requestId: 'req_alice_01',
-          targetScreen: 'review_modal',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
-    });
-
-    await test('Provider of selected offer can notify customer on work completed (PROVIDER_WORK_COMPLETED)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      await assertSucceeds(
-        setDoc(doc(aliceDb, 'notifications', 'notif_prov_completed_01'), {
-          id: 'notif_prov_completed_01',
-          recipientUserId: 'prov_master1',
-          recipientRole: 'provider',
-          type: 'PROVIDER_WORK_COMPLETED',
-          title: { kz: 'Жұмыс аяқталды', ru: 'Работа завершена' },
-          body: { kz: 'Тапсырыс аяқталды', ru: 'Заказ завершен' },
-          requestId: 'req_alice_01',
-          offerId: 'offer_m1_01',
-          targetScreen: 'request_detail',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
-    });
-
-    await test('Customer can notify provider when request is cancelled (PROVIDER_REQUEST_CANCELLED)', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      await assertSucceeds(
-        setDoc(doc(aliceDb, 'notifications', 'notif_prov_cancel_01'), {
-          id: 'notif_prov_cancel_01',
-          recipientUserId: 'prov_master1',
-          recipientRole: 'provider',
-          type: 'PROVIDER_REQUEST_CANCELLED',
-          title: { kz: 'Тоқтатылды', ru: 'Отменено' },
-          body: { kz: 'Өтініш тоқтатылды', ru: 'Заявка отменена' },
-          requestId: 'req_alice_01',
-          offerId: 'offer_m1_01',
-          targetScreen: 'request_detail',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
-    });
-
-    await test('Notification with invalid or unknown notification type is denied', async () => {
-      const masterDb = testEnv.authenticatedContext('prov_master1').firestore();
-      await assertFails(
-        setDoc(doc(masterDb, 'notifications', 'notif_invalid_type_01'), {
-          id: 'notif_invalid_type_01',
-          recipientUserId: 'user_alice',
-          recipientRole: 'customer',
-          type: 'INVALID_SUPER_ADMIN_SPAM' as any,
-          title: { kz: 'Тақырып', ru: 'Заголовок' },
-          body: { kz: 'Мәтін', ru: 'Текст' },
-          requestId: 'req_alice_01',
-          targetScreen: 'offers_list',
-          isRead: false,
-          readAt: null,
-          createdAt: new Date().toISOString(),
-        })
-      );
-    });
-
-    await test('All 21 canonical notification types succeed with valid relationship documents and fail with unauthorized actor/mismatched offer', async () => {
-      const aliceDb = testEnv.authenticatedContext('user_alice').firestore();
-      const master1Db = testEnv.authenticatedContext('prov_master1').firestore();
-      const master2Db = testEnv.authenticatedContext('prov_master2').firestore();
-      const bobDb = testEnv.authenticatedContext('user_bob').firestore();
-
-      // Customer -> Provider Types (Customer creating notification for Provider)
-      const custToProvTypes: Array<{ type: any; id: string }> = [
-        { type: 'PROVIDER_WORK_STATUS_UPDATED', id: 'n_c2p_01' },
-        { type: 'PROVIDER_OFFER_ACCEPTED', id: 'n_c2p_02' },
-        { type: 'PROVIDER_NEW_MESSAGE', id: 'n_c2p_03' },
-        { type: 'PROVIDER_NEW_ATTACHMENT', id: 'n_c2p_04' },
-        { type: 'PROVIDER_REQUEST_CANCELLED', id: 'n_c2p_05' },
-        { type: 'PROVIDER_WORK_COMPLETED', id: 'n_c2p_06' },
-        { type: 'PROVIDER_APPOINTMENT_CREATED', id: 'n_c2p_07' },
-        { type: 'PROVIDER_APPOINTMENT_UPDATED', id: 'n_c2p_08' },
-        { type: 'PROVIDER_APPOINTMENT_CANCELLED', id: 'n_c2p_09' },
-      ];
-
-      for (const item of custToProvTypes) {
-        await assertSucceeds(
-          setDoc(doc(aliceDb, 'notifications', item.id), {
-            id: item.id,
-            recipientUserId: 'prov_master1',
-            recipientRole: 'provider',
-            type: item.type,
-            title: { kz: 'Тақырып', ru: 'Заголовок' },
-            body: { kz: 'Мәтін', ru: 'Текст' },
-            requestId: 'req_alice_01',
-            offerId: 'offer_m1_01',
-            targetScreen: 'request_detail',
-            isRead: false,
-            readAt: null,
-            createdAt: new Date().toISOString(),
-          })
-        );
-
-        await assertFails(
-          setDoc(doc(bobDb, 'notifications', `fail_${item.id}`), {
-            id: `fail_${item.id}`,
-            recipientUserId: 'prov_master1',
-            recipientRole: 'provider',
-            type: item.type,
-            title: { kz: 'Тақырып', ru: 'Заголовок' },
-            body: { kz: 'Мәтін', ru: 'Текст' },
-            requestId: 'req_alice_01',
-            offerId: 'offer_m1_01',
-            targetScreen: 'request_detail',
-            isRead: false,
-            readAt: null,
-            createdAt: new Date().toISOString(),
-          })
-        );
-      }
-
-      // Provider -> Customer Types (Provider creating notification for Customer)
-      const provToCustTypes: Array<{ type: any; id: string }> = [
-        { type: 'CUSTOMER_NEW_OFFER', id: 'n_p2c_01' },
-        { type: 'CUSTOMER_NEW_MESSAGE', id: 'n_p2c_02' },
-        { type: 'CUSTOMER_NEW_ATTACHMENT', id: 'n_p2c_03' },
-        { type: 'CUSTOMER_WORK_COMPLETED', id: 'n_p2c_04' },
-        { type: 'CUSTOMER_APPOINTMENT_CREATED', id: 'n_p2c_05' },
-        { type: 'CUSTOMER_APPOINTMENT_UPDATED', id: 'n_p2c_06' },
-        { type: 'CUSTOMER_APPOINTMENT_CANCELLED', id: 'n_p2c_07' },
-        { type: 'CUSTOMER_PROVIDER_ON_THE_WAY', id: 'n_p2c_08' },
-        { type: 'CUSTOMER_PROVIDER_ARRIVED', id: 'n_p2c_09' },
-        { type: 'CUSTOMER_WORK_STARTED', id: 'n_p2c_10' },
-      ];
-
-      for (const item of provToCustTypes) {
-        await assertSucceeds(
-          setDoc(doc(master1Db, 'notifications', item.id), {
-            id: item.id,
-            recipientUserId: 'user_alice',
-            recipientRole: 'customer',
-            type: item.type,
-            title: { kz: 'Тақырып', ru: 'Заголовок' },
-            body: { kz: 'Мәтін', ru: 'Текст' },
-            requestId: 'req_alice_01',
-            offerId: 'offer_m1_01',
-            targetScreen: 'request_detail',
-            isRead: false,
-            readAt: null,
-            createdAt: new Date().toISOString(),
-          })
-        );
-
-        await assertFails(
-          setDoc(doc(master2Db, 'notifications', `fail_${item.id}`), {
-            id: `fail_${item.id}`,
-            recipientUserId: 'user_alice',
-            recipientRole: 'customer',
-            type: item.type,
-            title: { kz: 'Тақырып', ru: 'Заголовок' },
-            body: { kz: 'Мәтін', ru: 'Текст' },
-            requestId: 'req_alice_01',
-            offerId: 'offer_m1_01',
-            targetScreen: 'request_detail',
-            isRead: false,
-            readAt: null,
-            createdAt: new Date().toISOString(),
-          })
-        );
-      }
-
-      // Customer Self Types (Customer creating self notification)
-      const custSelfTypes: Array<{ type: any; id: string }> = [
-        { type: 'CUSTOMER_OFFER_ACCEPTED', id: 'n_self_01' },
-        { type: 'CUSTOMER_REVIEW_REQUIRED', id: 'n_self_02' },
-      ];
-
-      for (const item of custSelfTypes) {
-        await assertSucceeds(
-          setDoc(doc(aliceDb, 'notifications', item.id), {
-            id: item.id,
-            recipientUserId: 'user_alice',
-            recipientRole: 'customer',
-            type: item.type,
-            title: { kz: 'Тақырып', ru: 'Заголовок' },
-            body: { kz: 'Мәтін', ru: 'Текст' },
-            requestId: 'req_alice_01',
-            targetScreen: 'request_detail',
-            isRead: false,
-            readAt: null,
-            createdAt: new Date().toISOString(),
-          })
-        );
-      }
+    await test('The recipient can delete their notification; others cannot', async () => {
+      await assertFails(deleteDoc(doc(m1N(), 'notifications', 'notif_done_cust_req_n')));
+      await assertSucceeds(deleteDoc(doc(aliceN(), 'notifications', 'notif_done_cust_req_n')));
     });
 
     // =========================================================================
@@ -1427,6 +1345,7 @@ async function runTestSuite() {
         id: 'req_h_open',
         customerId: 'user_alice',
         city: 'almaty',
+        cityId: 'almaty',
         category: 'appliances',
         service: 'Repair',
         status: 'OPEN',
@@ -1436,6 +1355,7 @@ async function runTestSuite() {
         userId: 'prov_trusted',
         name: 'Trusted Master',
         city: 'almaty',
+        cityId: 'almaty',
         category: 'appliances',
       });
       await setDoc(doc(adminDb, 'providers', 'mallory'), {
@@ -1443,6 +1363,7 @@ async function runTestSuite() {
         userId: 'mallory',
         name: 'Mallory',
         city: 'almaty',
+        cityId: 'almaty',
         category: 'appliances',
       });
       await setDoc(doc(adminDb, 'offers', 'offer_h_mallory'), {
@@ -1463,11 +1384,12 @@ async function runTestSuite() {
       });
     });
 
-    const malloryDb = () => testEnv.authenticatedContext('mallory').firestore();
+    const malloryDb = () => phoneUser('mallory').firestore();
     const baseOffer = (id: string, extra: Record<string, unknown> = {}) => ({
       id,
       requestId: 'req_h_open',
       providerUserId: 'mallory',
+      providerName: 'Mallory',
       price: '9 000 ₸',
       status: 'PENDING',
       ...extra,
@@ -1475,28 +1397,28 @@ async function runTestSuite() {
 
     await test('Provider cannot create an offer that impersonates another provider profile', async () => {
       await assertFails(
-        setDoc(doc(malloryDb(), 'offers', 'offer_h_imp'), baseOffer('offer_h_imp', { providerId: 'prov_trusted', providerName: 'Trusted Master' }))
+        sendOffer(malloryDb(), 'offer_h_imp', baseOffer('offer_h_imp', { providerId: 'prov_trusted', providerName: 'Trusted Master' }))
       );
     });
 
     await test('Provider can create an offer under their own provider profile', async () => {
       await assertSucceeds(
-        setDoc(doc(malloryDb(), 'offers', 'offer_h_own'), baseOffer('offer_h_own', { providerId: 'mallory', iinVerified: false, hasCertificate: false }))
+        sendOffer(malloryDb(), 'OFFER-req_h_open-mallory', baseOffer('OFFER-req_h_open-mallory', { providerId: 'mallory', iinVerified: false, hasCertificate: false }))
       );
     });
 
     await test('Provider cannot create an offer with a pre-set paymentStatus', async () => {
       await assertFails(
-        setDoc(doc(malloryDb(), 'offers', 'offer_h_pay'), baseOffer('offer_h_pay', { providerId: 'mallory', paymentStatus: 'held_in_escrow' }))
+        sendOffer(malloryDb(), 'offer_h_pay', baseOffer('offer_h_pay', { providerId: 'mallory', paymentStatus: 'held_in_escrow' }))
       );
     });
 
     await test('Provider cannot create an offer carrying self-assigned trust badges', async () => {
       await assertFails(
-        setDoc(doc(malloryDb(), 'offers', 'offer_h_badge'), baseOffer('offer_h_badge', { providerId: 'mallory', iinVerified: true }))
+        sendOffer(malloryDb(), 'offer_h_badge', baseOffer('offer_h_badge', { providerId: 'mallory', iinVerified: true }))
       );
       await assertFails(
-        setDoc(doc(malloryDb(), 'offers', 'offer_h_badge2'), baseOffer('offer_h_badge2', { providerId: 'mallory', hasCertificate: true }))
+        sendOffer(malloryDb(), 'offer_h_badge2', baseOffer('offer_h_badge2', { providerId: 'mallory', hasCertificate: true }))
       );
     });
 
@@ -1510,13 +1432,13 @@ async function runTestSuite() {
 
     await test('Offer message longer than 2000 characters is rejected', async () => {
       await assertFails(
-        setDoc(doc(malloryDb(), 'offers', 'offer_h_long'), baseOffer('offer_h_long', { providerId: 'mallory', message: 'x'.repeat(2001) }))
+        sendOffer(malloryDb(), 'offer_h_long', baseOffer('offer_h_long', { providerId: 'mallory', message: 'x'.repeat(2001) }))
       );
     });
 
     await test('Provider cannot create a profile with self-assigned verified / IIN / certificate badges', async () => {
-      const eveDb = testEnv.authenticatedContext('eve').firestore();
-      const base = { id: 'eve', userId: 'eve', name: 'Eve', city: 'almaty', category: 'appliances' };
+      const eveDb = phoneUser('eve').firestore();
+      const base = { id: 'eve', userId: 'eve', name: 'Eve', city: 'almaty', cityId: 'almaty', category: 'appliances' };
       await assertFails(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, iinVerified: true }));
       await assertFails(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, verified: true }));
       await assertFails(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, hasCertificate: true }));
@@ -1532,7 +1454,7 @@ async function runTestSuite() {
       await assertFails(updateDoc(doc(malloryDb(), 'providers', 'mallory'), { description: 'x'.repeat(5001) }));
     });
 
-    const aliceDb = () => testEnv.authenticatedContext('user_alice').firestore();
+    const aliceDb = () => phoneUser('user_alice').firestore();
     const baseRequest = (id: string, extra: Record<string, unknown> = {}) => ({
       id,
       customerId: 'user_alice',
@@ -1570,6 +1492,491 @@ async function runTestSuite() {
           unreadCountProvider: 1,
         })
       );
+    });
+
+    // =========================================================================
+    // SECTION 12: Request visibility — only the customer, providers in the same
+    // city, and the selected provider can read a request
+    // =========================================================================
+    console.log('\n--- SECTION 12: Request visibility ---');
+
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      const adminDb = adminContext.firestore();
+      await setDoc(doc(adminDb, 'requests', 'req_v_almaty'), {
+        id: 'req_v_almaty',
+        customerId: 'cust_v',
+        customerName: 'Клиент',
+        city: 'Алматы',
+        cityId: 'almaty',
+        category: 'appliances',
+        categoryId: 'appliances',
+        service: 'Тоңазытқыш жөндеу',
+        status: 'MATCHING',
+        location: { latitude: 43.24, longitude: 76.95 },
+      });
+      await setDoc(doc(adminDb, 'providers', 'prov_v_almaty'), {
+        id: 'prov_v_almaty', userId: 'prov_v_almaty', name: 'Almaty Master', city: 'Алматы', cityId: 'almaty', category: 'appliances', categoryId: 'appliances',
+      });
+      await setDoc(doc(adminDb, 'providers', 'prov_v_astana'), {
+        id: 'prov_v_astana', userId: 'prov_v_astana', name: 'Astana Master', city: 'Астана', cityId: 'astana', category: 'appliances', categoryId: 'appliances',
+      });
+      // A request in Almaty whose selected provider is based in Astana
+      await setDoc(doc(adminDb, 'offers', 'offer_v_sel'), {
+        id: 'offer_v_sel', requestId: 'req_v_sel', providerId: 'prov_v_astana', providerUserId: 'prov_v_astana', price: '1', status: 'ACCEPTED',
+      });
+      await setDoc(doc(adminDb, 'requests', 'req_v_sel'), {
+        id: 'req_v_sel', customerId: 'cust_v', city: 'Алматы', cityId: 'almaty', category: 'appliances', categoryId: 'appliances',
+        service: 'x', status: 'PROVIDER_SELECTED', selectedOfferId: 'offer_v_sel',
+      });
+    });
+
+    const ctx = (uid: string) => phoneUser(uid).firestore();
+    const OPEN = ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'];
+    const cityQuery = (db: any, cityId: string) =>
+      getDocs(query(collection(db, 'requests'), where('cityId', '==', cityId), where('categoryId', '==', 'appliances'), where('status', 'in', OPEN)));
+
+    await test('A signed-in stranger without a provider profile cannot list or read requests', async () => {
+      await assertFails(getDocs(collection(ctx('stranger_v'), 'requests')));
+      await assertFails(cityQuery(ctx('stranger_v'), 'almaty'));
+      await assertFails(getDoc(doc(ctx('stranger_v'), 'requests', 'req_v_almaty')));
+    });
+
+    await test('Customer can list and read their own requests', async () => {
+      await assertSucceeds(getDocs(query(collection(ctx('cust_v'), 'requests'), where('customerId', '==', 'cust_v'))));
+      await assertSucceeds(getDoc(doc(ctx('cust_v'), 'requests', 'req_v_almaty')));
+    });
+
+    await test('Provider can list and read requests in their own city', async () => {
+      await assertSucceeds(cityQuery(ctx('prov_v_almaty'), 'almaty'));
+      await assertSucceeds(getDoc(doc(ctx('prov_v_almaty'), 'requests', 'req_v_almaty')));
+    });
+
+    await test('Provider cannot list or read requests in another city', async () => {
+      await assertFails(cityQuery(ctx('prov_v_astana'), 'almaty'));
+      await assertFails(getDoc(doc(ctx('prov_v_astana'), 'requests', 'req_v_almaty')));
+    });
+
+    await test('Provider cannot list the whole requests collection', async () => {
+      await assertFails(getDocs(collection(ctx('prov_v_almaty'), 'requests')));
+    });
+
+    await test('Selected provider from another city can still read the request they work on', async () => {
+      await assertSucceeds(getDoc(doc(ctx('prov_v_astana'), 'requests', 'req_v_sel')));
+    });
+
+    await test('Once a provider is chosen, other providers of the city lose access to the request', async () => {
+      await assertFails(getDoc(doc(ctx('prov_v_almaty'), 'requests', 'req_v_sel')));
+      await assertFails(getDocs(query(collection(ctx('prov_v_almaty'), 'requests'), where('cityId', '==', 'almaty'), where('categoryId', '==', 'appliances'))));
+    });
+
+    await test('A request without a recognised city is not visible to providers with no city', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        await setDoc(doc(db, 'requests', 'req_v_nocity'), { id: 'req_v_nocity', customerId: 'cust_v', city: '?', cityId: '', category: 'x', service: 'x', status: 'MATCHING' });
+        await setDoc(doc(db, 'providers', 'prov_v_nocity'), { id: 'prov_v_nocity', userId: 'prov_v_nocity', name: 'X', city: '', cityId: '', category: 'x' });
+      });
+      await assertFails(getDoc(doc(ctx('prov_v_nocity'), 'requests', 'req_v_nocity')));
+    });
+
+    await test('A blocked provider sees no requests', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'providers', 'prov_v_blocked'), { id: 'prov_v_blocked', userId: 'prov_v_blocked', name: 'B', city: 'Алматы', cityId: 'almaty', category: 'appliances', blocked: true });
+      });
+      await assertFails(getDoc(doc(ctx('prov_v_blocked'), 'requests', 'req_v_almaty')));
+      await assertFails(cityQuery(ctx('prov_v_blocked'), 'almaty'));
+    });
+
+    await test('A provider cannot unblock or hide/unhide themselves', async () => {
+      await assertFails(updateDoc(doc(ctx('prov_v_blocked'), 'providers', 'prov_v_blocked'), { blocked: false }));
+      await assertFails(updateDoc(doc(ctx('prov_v_almaty'), 'providers', 'prov_v_almaty'), { hidden: true }));
+    });
+
+    await test('Counted numbers (master stats, typical prices) are read-only for the app', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'providerStats', 'prov_v_almaty'), { completedJobs: 3, offersSent: 5 });
+        await setDoc(doc(c.firestore(), 'priceStats', 'almaty_tap_repair'), { prices: [5000, 7000, 9000], count: 3 });
+      });
+      await assertSucceeds(getDoc(doc(ctx('user_alice'), 'providerStats', 'prov_v_almaty')));
+      await assertFails(getDoc(doc(anonymousUser('anon_s').firestore(), 'providerStats', 'prov_v_almaty')));
+      await assertFails(updateDoc(doc(ctx('prov_v_almaty'), 'providerStats', 'prov_v_almaty'), { completedJobs: 99 }));
+      await assertFails(getDocs(collection(ctx('user_alice'), 'providerStats')));
+      await assertSucceeds(getDoc(doc(anonymousUser('anon_s').firestore(), 'priceStats', 'almaty_tap_repair')));
+      await assertFails(setDoc(doc(ctx('user_alice'), 'priceStats', 'almaty_tap_repair'), { prices: [1], count: 1 }));
+    });
+
+    await test('A provider pauses new orders and lists work photos in the fixed slots only', async () => {
+      const ref = doc(ctx('prov_v_almaty'), 'providers', 'prov_v_almaty');
+      await assertSucceeds(updateDoc(ref, { paused: true }));
+      await assertSucceeds(updateDoc(ref, { paused: false, portfolio: ['p0', 'p3'] }));
+      await assertFails(updateDoc(ref, { paused: 'yes' }));
+      await assertFails(updateDoc(ref, { portfolio: ['https://example.com/x.jpg'] }));
+      await assertFails(updateDoc(ref, { portfolio: ['p0', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p7'] }));
+    });
+
+    await test('Provider profile phone numbers are not readable by anonymous visitors', async () => {
+      await assertFails(getDoc(doc(anonymousUser('anon_v').firestore(), 'providers', 'prov_v_almaty')));
+      await assertSucceeds(getDoc(doc(ctx('cust_v'), 'providers', 'prov_v_almaty')));
+    });
+
+    // =========================================================================
+    // SECTION 13: Phone verification — anonymous accounts can browse but not publish
+    // =========================================================================
+    console.log('\n--- SECTION 13: Phone verification required to publish ---');
+
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      await setDoc(doc(adminContext.firestore(), 'requests', 'req_p_open'), {
+        id: 'req_p_open', customerId: 'cust_p', city: 'Алматы', cityId: 'almaty', category: 'appliances', categoryId: 'appliances', service: 'x', status: 'MATCHING',
+      });
+    });
+
+    await test('Anonymous account cannot create a request', async () => {
+      await assertFails(setDoc(doc(anonymousUser('anon_p').firestore(), 'requests', 'req_p_anon'), {
+        id: 'req_p_anon', customerId: 'anon_p', city: 'Алматы', category: 'appliances', service: 'x', status: 'MATCHING',
+      }));
+    });
+
+    await test('Phone-verified account can create a request', async () => {
+      await assertSucceeds(setDoc(doc(phoneUser('cust_p2').firestore(), 'requests', 'req_p_phone'), {
+        id: 'req_p_phone', customerId: 'cust_p2', city: 'Алматы', category: 'appliances', service: 'x', status: 'MATCHING',
+      }));
+    });
+
+    await test('Anonymous account cannot create a provider profile', async () => {
+      await assertFails(setDoc(doc(anonymousUser('anon_p').firestore(), 'providers', 'anon_p'), {
+        id: 'anon_p', userId: 'anon_p', name: 'Anon', city: 'Алматы', category: 'appliances',
+      }));
+    });
+
+    await test('Anonymous account cannot send an offer', async () => {
+      await assertFails(sendOffer(anonymousUser('anon_p').firestore(), 'offer_p_anon', {
+        id: 'offer_p_anon', requestId: 'req_p_open', providerUserId: 'anon_p', providerId: 'anon_p', price: '1 000 ₸', status: 'PENDING',
+      }));
+    });
+
+    // =========================================================================
+    // SECTION 14: Job completion — the provider reports the job finished, only the
+    // customer closes it (COMPLETED)
+    // =========================================================================
+    console.log('\n--- SECTION 14: Job completion needs the customer ---');
+
+    const seedJob = async (id: string, status: string) => {
+      await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+        const db = adminContext.firestore();
+        await setDoc(doc(db, 'offers', `offer_${id}`), {
+          id: `offer_${id}`, requestId: id, providerId: 'prov_job', providerUserId: 'prov_job', status: 'ACCEPTED',
+        });
+        await setDoc(doc(db, 'requests', id), {
+          id, customerId: 'cust_job', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status, selectedOfferId: `offer_${id}`,
+        });
+      });
+    };
+
+    await seedJob('req_job_1', 'IN_PROGRESS');
+    await test('Selected provider cannot mark the request COMPLETED', async () => {
+      await assertFails(updateDoc(doc(phoneUser('prov_job').firestore(), 'requests', 'req_job_1'), { status: 'COMPLETED' }));
+    });
+    await test('Selected provider can report the job finished (providerDoneAt)', async () => {
+      await assertSucceeds(updateDoc(doc(phoneUser('prov_job').firestore(), 'requests', 'req_job_1'), { providerDoneAt: '2026-10-12T10:00:00Z' }));
+    });
+    await test('Another provider cannot report the job finished', async () => {
+      await assertFails(updateDoc(doc(phoneUser('prov_other').firestore(), 'requests', 'req_job_1'), { providerDoneAt: '2026-10-12T10:00:00Z' }));
+    });
+    await test('Customer cannot set providerDoneAt', async () => {
+      await assertFails(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_1'), { providerDoneAt: '2026-10-12T10:00:00Z' }));
+    });
+    await test('Selected provider reports the final price with the finished job; the customer cannot set it', async () => {
+      const provRef = doc(phoneUser('prov_job').firestore(), 'requests', 'req_job_1');
+      await assertSucceeds(updateDoc(provRef, { providerDoneAt: '2026-10-12T11:00:00Z', finalPrice: '12 000 ₸' }));
+      await assertFails(updateDoc(provRef, { finalPrice: 'x'.repeat(51) }));
+      await assertFails(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_1'), { finalPrice: '1 ₸' }));
+    });
+    await test('Customer confirms completion', async () => {
+      await assertSucceeds(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_1'), { status: 'COMPLETED' }));
+    });
+
+    await seedJob('req_job_2', 'PROVIDER_SELECTED');
+    await test('Selected provider can start the job (IN_PROGRESS)', async () => {
+      await assertSucceeds(updateDoc(doc(phoneUser('prov_job').firestore(), 'requests', 'req_job_2'), { status: 'IN_PROGRESS' }));
+    });
+    await test('Customer can cancel a job in progress', async () => {
+      await assertSucceeds(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_2'), { status: 'CANCELLED' }));
+    });
+
+    await seedJob('req_job_3', 'PROVIDER_SELECTED');
+    await test('Customer can confirm completion straight from PROVIDER_SELECTED', async () => {
+      await assertSucceeds(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_3'), { status: 'COMPLETED' }));
+    });
+
+    // =========================================================================
+    // SECTION 15: Account deletion — users remove their own records only
+    // =========================================================================
+    console.log('\n--- SECTION 15: Account deletion ---');
+
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      const db = adminContext.firestore();
+      await setDoc(doc(db, 'users', 'del_user'), { id: 'del_user', createdAt: '2026-10-12T00:00:00Z' });
+      await setDoc(doc(db, 'providers', 'del_user'), { id: 'del_user', userId: 'del_user', name: 'X', city: 'Алматы', category: 'x' });
+      await setDoc(doc(db, 'requests', 'req_del'), { id: 'req_del', customerId: 'del_user', city: 'Алматы', category: 'x', service: 'x', status: 'OPEN' });
+      await setDoc(doc(db, 'requestContacts', 'req_del'), { customerId: 'del_user', customerPhone: '+77010000000' });
+      await setDoc(doc(db, 'users', 'other_user'), { id: 'other_user', createdAt: '2026-10-12T00:00:00Z' });
+    });
+
+    await test("Another user cannot delete someone's user record", async () => {
+      await assertFails(deleteDoc(doc(phoneUser('intruder').firestore(), 'users', 'del_user')));
+    });
+    await test("Another user cannot delete someone's provider profile", async () => {
+      await assertFails(deleteDoc(doc(phoneUser('intruder').firestore(), 'providers', 'del_user')));
+    });
+    await test("Another user cannot delete someone's contact details", async () => {
+      await assertFails(deleteDoc(doc(phoneUser('intruder').firestore(), 'requestContacts', 'req_del')));
+    });
+    await test('Owner deletes their contact details', async () => {
+      await assertSucceeds(deleteDoc(doc(phoneUser('del_user').firestore(), 'requestContacts', 'req_del')));
+    });
+    await test('Owner deletes their provider profile', async () => {
+      await assertSucceeds(deleteDoc(doc(phoneUser('del_user').firestore(), 'providers', 'del_user')));
+    });
+    await test('Owner deletes their user record', async () => {
+      await assertSucceeds(deleteDoc(doc(phoneUser('del_user').firestore(), 'users', 'del_user')));
+    });
+    await test('Requests themselves still cannot be deleted', async () => {
+      await assertFails(deleteDoc(doc(phoneUser('del_user').firestore(), 'requests', 'req_del')));
+    });
+
+    // =========================================================================
+    // SECTION 16: Audit fixes — sizes, field lists, chat access, contacts after cancel
+    // =========================================================================
+    console.log('\n--- SECTION 16: Audit fixes ---');
+
+    await testEnv.withSecurityRulesDisabled(async (c) => {
+      const db = c.firestore();
+      const now = new Date().toISOString();
+      await setDoc(doc(db, 'requests', 'req_a'), {
+        id: 'req_a', customerId: 'cust_a', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x',
+        status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-req_a-prov_a', createdAt: now,
+      });
+      await setDoc(doc(db, 'offers', 'OFFER-req_a-prov_a'), {
+        id: 'OFFER-req_a-prov_a', requestId: 'req_a', providerId: 'prov_a', providerUserId: 'prov_a', providerName: 'A', price: '1', status: 'ACCEPTED',
+      });
+      await setDoc(doc(db, 'requestContacts', 'req_a'), { requestId: 'req_a', customerId: 'cust_a', customerPhone: '+77010000001' });
+      await setDoc(doc(db, 'conversations', 'conv_req_a_existing'), {
+        id: 'conv_req_a_existing', requestId: 'req_a', customerId: 'cust_a', providerId: 'prov_a', providerUserId: 'prov_a', status: 'ACTIVE',
+      });
+    });
+    const custA = () => phoneUser('cust_a').firestore();
+    const provA = () => phoneUser('prov_a').firestore();
+    const convBase = {
+      id: 'conv_req_a', requestId: 'req_a', customerId: 'cust_a', providerUserId: 'prov_a', status: 'ACTIVE',
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+
+    await test('Conversation cannot be created with a third person as providerId', async () => {
+      await assertFails(setDoc(doc(custA(), 'conversations', 'conv_req_a'), { ...convBase, providerId: 'accomplice' }));
+      await assertFails(setDoc(doc(provA(), 'conversations', 'conv_req_a'), { ...convBase, providerId: 'accomplice' }));
+    });
+
+    await test('Conversation is created with the selected provider', async () => {
+      await assertSucceeds(setDoc(doc(custA(), 'conversations', 'conv_req_a'), { ...convBase, providerId: 'prov_a' }));
+    });
+
+    await test('Participants cannot change conversation status or add junk fields', async () => {
+      await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { status: 'ARCHIVED' }));
+      await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { junk: 'x'.repeat(1000) }));
+      await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { lastMessageText: 'x'.repeat(301) }));
+      await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { lastMessageSenderId: 'prov_a', lastMessageText: 'Клиент: согласен на 50 000' }));
+    });
+
+    await test('Each participant sets only their own read mark', async () => {
+      const t = new Date().toISOString();
+      await assertSucceeds(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { customerLastReadAt: t, unreadCountCustomer: 0 }));
+      await assertSucceeds(updateDoc(doc(provA(), 'conversations', 'conv_req_a'), { providerLastReadAt: t, unreadCountProvider: 0 }));
+      const later = new Date(Date.now() + 60000).toISOString();
+      await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { providerLastReadAt: later }));
+      await assertFails(updateDoc(doc(provA(), 'conversations', 'conv_req_a'), { customerLastReadAt: later }));
+      await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { customerLastReadAt: 'x'.repeat(41) }));
+      await assertFails(updateDoc(doc(phoneUser('outsider_x').firestore(), 'conversations', 'conv_req_a'), { customerLastReadAt: later }));
+    });
+
+    await test('Messages accept only the known fields', async () => {
+      await assertFails(setDoc(doc(custA(), 'conversations', 'conv_req_a', 'messages', 'm1'), {
+        id: 'm1', conversationId: 'conv_req_a', requestId: 'req_a', senderId: 'cust_a', senderRole: 'customer', type: 'text', text: 'x', createdAt: new Date().toISOString(), extra: 'x',
+      }));
+      await assertSucceeds(setDoc(doc(custA(), 'conversations', 'conv_req_a', 'messages', 'm2'), {
+        id: 'm2', conversationId: 'conv_req_a', requestId: 'req_a', senderId: 'cust_a', senderRole: 'customer', type: 'text', text: 'Сәлем', isRead: false, readAt: null, createdAt: new Date().toISOString(),
+      }));
+    });
+
+    await test('Appointment is created as a proposal only (no self-confirmed or completed work)', async () => {
+      const base = {
+        id: 'appointment_req_a', requestId: 'req_a', customerId: 'cust_a', providerId: 'prov_a', providerUserId: 'prov_a',
+        proposedBy: 'customer', scheduledAt: '2026-10-20 10:00', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      };
+      await assertFails(setDoc(doc(custA(), 'appointments', 'appointment_req_a'), { ...base, status: 'CONFIRMED' }));
+      await assertFails(setDoc(doc(custA(), 'appointments', 'appointment_req_a'), { ...base, status: 'PROPOSED', workStatus: 'WORK_COMPLETED' }));
+      await assertSucceeds(setDoc(doc(custA(), 'appointments', 'appointment_req_a'), { ...base, status: 'PROPOSED' }));
+    });
+
+    await test('Selected provider reads the customer contacts while the job is active', async () => {
+      await assertSucceeds(getDoc(doc(provA(), 'requestContacts', 'req_a')));
+    });
+
+    await test('After cancellation the provider can no longer read contacts or change the appointment', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await updateDoc(doc(c.firestore(), 'requests', 'req_a'), { status: 'CANCELLED' });
+      });
+      await assertFails(getDoc(doc(provA(), 'requestContacts', 'req_a')));
+      await assertFails(updateDoc(doc(provA(), 'appointments', 'appointment_req_a'), { note: 'hi', updatedAt: new Date().toISOString() }));
+    });
+
+    await test('Request location must be numbers; understanding and fields are bounded', async () => {
+      const base = { id: 'req_b', customerId: 'cust_a', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'MATCHING' };
+      await assertFails(setDoc(doc(custA(), 'requests', 'req_b'), { ...base, location: { latitude: 'x', longitude: 'x' } }));
+      await assertFails(setDoc(doc(custA(), 'requests', 'req_b'), { ...base, understanding: { description: 'x'.repeat(5001) } }));
+      await assertFails(setDoc(doc(custA(), 'requests', 'req_b'), { ...base, rating: 5 }));
+      await assertSucceeds(setDoc(doc(custA(), 'requests', 'req_b'), { ...base, location: { latitude: 43.24, longitude: 76.95, approximate: true } }));
+    });
+
+    await test('Reviews accept only the known fields with bounded sizes', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        await setDoc(doc(db, 'requests', 'req_r'), {
+          id: 'req_r', customerId: 'cust_a', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'COMPLETED', selectedOfferId: 'OFFER-req_r-prov_a',
+        });
+        await setDoc(doc(db, 'offers', 'OFFER-req_r-prov_a'), {
+          id: 'OFFER-req_r-prov_a', requestId: 'req_r', providerId: 'prov_a', providerUserId: 'prov_a', providerName: 'A', price: '1', status: 'ACCEPTED',
+        });
+      });
+      const review = { id: 'req_r', requestId: 'req_r', customerId: 'cust_a', providerId: 'prov_a', rating: 5, createdAt: new Date().toISOString() };
+      await assertFails(setDoc(doc(custA(), 'reviews', 'req_r'), { ...review, comment: 'x'.repeat(1001) }));
+      await assertFails(setDoc(doc(custA(), 'reviews', 'req_r'), { ...review, providerName: 'x'.repeat(101) }));
+      await assertFails(setDoc(doc(custA(), 'reviews', 'req_r'), { ...review, verifiedPurchase: true }));
+      await assertSucceeds(setDoc(doc(custA(), 'reviews', 'req_r'), { ...review, comment: 'Жақсы' }));
+    });
+
+    // ---------------- 17. Reports ----------------
+    await test('Reports: a verified user files one report per target; only operators can read them', async () => {
+      const db = phoneUser('rep_a').firestore();
+      const id = 'REPORT-rep_a-provider-prov_x';
+      const base = { id, reporterId: 'rep_a', targetType: 'provider', targetId: 'prov_x', reason: 'fraud', createdAt: new Date().toISOString() };
+      // Anonymous accounts cannot report
+      await assertFails(setDoc(doc(anonymousUser('rep_a').firestore(), 'reports', id), base));
+      // Id must be bound to reporter and target, reporter must be the caller, reason from the list
+      await assertFails(setDoc(doc(db, 'reports', 'REPORT-rep_a-provider-other'), base));
+      await assertFails(setDoc(doc(db, 'reports', id), { ...base, reporterId: 'someone' }));
+      await assertFails(setDoc(doc(db, 'reports', id), { ...base, reason: 'whatever' }));
+      await assertFails(setDoc(doc(db, 'reports', id), { ...base, details: 'x'.repeat(1001) }));
+      await assertFails(setDoc(doc(db, 'reports', id), { ...base, status: 'RESOLVED' }));
+      // Checking for an existing report before writing is allowed
+      await assertSucceeds(getDoc(doc(db, 'reports', id)));
+      await assertSucceeds(setDoc(doc(db, 'reports', id), { ...base, details: 'Алдады' }));
+      // Write-once
+      await assertFails(setDoc(doc(db, 'reports', id), { ...base, reason: 'spam' }));
+      await assertFails(deleteDoc(doc(db, 'reports', id)));
+      // Others cannot read it or list reports; an operator can
+      await assertFails(getDoc(doc(phoneUser('prov_x').firestore(), 'reports', id)));
+      await assertFails(getDocs(collection(phoneUser('rep_a').firestore(), 'reports')));
+      const admin = testEnv.authenticatedContext('op_1', { admin: true, phone_number: '+77000000001' }).firestore();
+      await assertSucceeds(getDocs(collection(admin, 'reports')));
+    });
+
+    // ---------------- 18. Account deletion clean-up ----------------
+    await test('Account deletion: customer strips personal data from own request in any status; others cannot', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        await setDoc(doc(db, 'requests', 'req_del'), {
+          id: 'req_del', customerId: 'cust_d', customerName: 'Айгүл', requestText: 'Кран ағады', description: 'd', city: 'Алматы', cityId: 'almaty',
+          category: 'x', service: 'x', status: 'COMPLETED', selectedOfferId: 'OFFER-req_del-prov_d', attachments: [], location: { latitude: 43, longitude: 76 },
+        });
+        await setDoc(doc(db, 'offers', 'OFFER-req_del-prov_d'), {
+          id: 'OFFER-req_del-prov_d', requestId: 'req_del', providerId: 'prov_d', providerUserId: 'prov_d', providerName: 'D', price: '1',
+          providerPhone: '+77011112233', providerWhatsapp: '+77011112233', status: 'ACCEPTED',
+        });
+      });
+      const strip = { customerName: deleteField(), requestText: deleteField(), description: deleteField(), attachments: deleteField(), location: deleteField(), updatedAt: new Date().toISOString() };
+      await assertFails(updateDoc(doc(phoneUser('prov_d').firestore(), 'requests', 'req_del'), strip));
+      // Not a way to rewrite the request: values may only be removed, and status stays
+      await assertFails(updateDoc(doc(phoneUser('cust_d').firestore(), 'requests', 'req_del'), { requestText: 'new text' }));
+      await assertFails(updateDoc(doc(phoneUser('cust_d').firestore(), 'requests', 'req_del'), { ...strip, status: 'OPEN' }));
+      await assertSucceeds(updateDoc(doc(phoneUser('cust_d').firestore(), 'requests', 'req_del'), strip));
+
+      // Provider removes phone numbers from their own accepted offer, nothing else
+      await assertFails(updateDoc(doc(phoneUser('cust_d').firestore(), 'offers', 'OFFER-req_del-prov_d'), { providerPhone: deleteField() }));
+      await assertFails(updateDoc(doc(phoneUser('prov_d').firestore(), 'offers', 'OFFER-req_del-prov_d'), { providerPhone: '+77000000000' }));
+      await assertFails(updateDoc(doc(phoneUser('prov_d').firestore(), 'offers', 'OFFER-req_del-prov_d'), { providerPhone: deleteField(), price: '999' }));
+      await assertSucceeds(updateDoc(doc(phoneUser('prov_d').firestore(), 'offers', 'OFFER-req_del-prov_d'), { providerPhone: deleteField(), providerWhatsapp: deleteField() }));
+    });
+
+    // ---------------- 19. Appointment confirmation ----------------
+    await test('Appointments: the side that proposed a time cannot confirm it; the other side can', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        await setDoc(doc(db, 'requests', 'req_ap'), {
+          id: 'req_ap', customerId: 'cust_ap', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-req_ap-prov_ap',
+        });
+        await setDoc(doc(db, 'offers', 'OFFER-req_ap-prov_ap'), {
+          id: 'OFFER-req_ap-prov_ap', requestId: 'req_ap', providerId: 'prov_ap', providerUserId: 'prov_ap', providerName: 'P', price: '1', status: 'ACCEPTED',
+        });
+        await setDoc(doc(db, 'appointments', 'appointment_req_ap'), {
+          id: 'appointment_req_ap', requestId: 'req_ap', customerId: 'cust_ap', providerId: 'prov_ap', providerUserId: 'prov_ap',
+          proposedBy: 'customer', scheduledAt: '2026-10-20T10:00:00.000Z', status: 'PROPOSED', workStatus: 'NOT_STARTED',
+          createdAt: '2026-10-13T10:00:00.000Z', updatedAt: '2026-10-13T10:00:00.000Z',
+        });
+      });
+      const confirm = { status: 'CONFIRMED', updatedAt: new Date().toISOString() };
+      await assertFails(updateDoc(doc(phoneUser('cust_ap').firestore(), 'appointments', 'appointment_req_ap'), confirm));
+      await assertSucceeds(updateDoc(doc(phoneUser('prov_ap').firestore(), 'appointments', 'appointment_req_ap'), confirm));
+    });
+
+    // ---------------- 20. Second audit ----------------
+    await test('Audit 2: banned user cannot recreate a provider profile', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'bans', 'prov_banned'), { reason: 'fraud' });
+      });
+      const profile = { id: 'prov_banned', userId: 'prov_banned', name: 'B', phone: '+77011112233', city: 'Алматы', cityId: 'almaty', category: 'x', categoryId: 'plumbing' };
+      await assertFails(setDoc(doc(phoneUser('prov_banned').firestore(), 'providers', 'prov_banned'), profile));
+      await assertFails(getDoc(doc(phoneUser('prov_banned').firestore(), 'bans', 'prov_banned')));
+    });
+
+    await test('Audit 2: request title must be text', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'requests', 'req_svc'), {
+          id: 'req_svc', customerId: 'cust_svc', city: 'Алматы', cityId: 'almaty', category: 'Сантехника', service: 'Кран', status: 'OPEN',
+        });
+      });
+      await assertFails(updateDoc(doc(phoneUser('cust_svc').firestore(), 'requests', 'req_svc'), { service: { x: 1 } }));
+      await assertSucceeds(updateDoc(doc(phoneUser('cust_svc').firestore(), 'requests', 'req_svc'), { service: 'Кран ағады' }));
+    });
+
+    await test('Audit 2: account deletion may replace the title with the category, nothing else', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'requests', 'req_del2'), {
+          id: 'req_del2', customerId: 'cust_d2', customerName: 'А', city: 'Алматы', cityId: 'almaty', category: 'Сантехника', service: 'Айгүлдің краны', status: 'CANCELLED',
+        });
+      });
+      const db = phoneUser('cust_d2').firestore();
+      await assertFails(updateDoc(doc(db, 'requests', 'req_del2'), { customerName: deleteField(), service: 'Басқа мәтін' }));
+      await assertSucceeds(updateDoc(doc(db, 'requests', 'req_del2'), { customerName: deleteField(), service: 'Сантехника' }));
+    });
+
+    await test('Audit 2: a confirmed time changes only through a new proposal; a cancelled appointment can be proposed again', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        await setDoc(doc(db, 'requests', 'req_ap2'), {
+          id: 'req_ap2', customerId: 'cust_ap2', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-req_ap2-prov_ap2',
+        });
+        await setDoc(doc(db, 'offers', 'OFFER-req_ap2-prov_ap2'), {
+          id: 'OFFER-req_ap2-prov_ap2', requestId: 'req_ap2', providerId: 'prov_ap2', providerUserId: 'prov_ap2', providerName: 'P', price: '1', status: 'ACCEPTED',
+        });
+        const base = { id: 'appointment_req_ap2', requestId: 'req_ap2', customerId: 'cust_ap2', providerId: 'prov_ap2', providerUserId: 'prov_ap2',
+          proposedBy: 'customer', scheduledAt: '2026-10-20T10:00:00.000Z', workStatus: 'NOT_STARTED', createdAt: '2026-10-13T10:00:00.000Z', updatedAt: '2026-10-13T10:00:00.000Z' };
+        await setDoc(doc(db, 'appointments', 'appointment_req_ap2'), { ...base, status: 'CONFIRMED' });
+        await setDoc(doc(db, 'appointments', 'appointment_req_ap3'), { ...base, id: 'appointment_req_ap3', status: 'CANCELLED' });
+      });
+      const cust = phoneUser('cust_ap2').firestore();
+      const later = '2026-10-21T10:00:00.000Z';
+      await assertFails(updateDoc(doc(cust, 'appointments', 'appointment_req_ap2'), { scheduledAt: later, updatedAt: later }));
+      await assertSucceeds(updateDoc(doc(cust, 'appointments', 'appointment_req_ap2'), { scheduledAt: later, status: 'RESCHEDULED', updatedAt: later }));
+      await assertSucceeds(updateDoc(doc(cust, 'appointments', 'appointment_req_ap3'), { status: 'PROPOSED', scheduledAt: later, updatedAt: later }));
     });
 
   } finally {

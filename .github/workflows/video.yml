@@ -1,0 +1,77 @@
+# A short promo video made with MoneyPrinterTurbo (https://github.com/harry0703/MoneyPrinterTurbo).
+# Runs only for a commit on a claude/** branch whose message starts with "[video] ": it voices
+# marketing/video-sample/script-kk.txt in Kazakh over the frames in marketing/video-sample/kk/ (in file
+# name order), adds subtitles and background music, and puts the MP4 on the "video-sample" GitHub
+# pre-release. It runs on GitHub because the voice (Microsoft Edge TTS) needs a WebSocket connection,
+# which the cloud session's network does not allow.
+name: Video
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  # contents: write puts the video on a GitHub pre-release
+  contents: write
+
+concurrency:
+  group: video
+  cancel-in-progress: false
+
+env:
+  # The MoneyPrinterTurbo version that was reviewed and tried
+  MPT_COMMIT: c184fccd05621d7a654b6e6ea34102a0a0de0657
+  TASK_ID: 00000000-0000-4000-8000-000000000001
+
+jobs:
+  video:
+    if: startsWith(github.event.head_commit.message, '[video] ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: MoneyPrinterTurbo kurulumu
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg fonts-dejavu-core >/dev/null
+          mkdir "$RUNNER_TEMP/mpt" && cd "$RUNNER_TEMP/mpt"
+          git init -q
+          git fetch -q --depth 1 https://github.com/harry0703/MoneyPrinterTurbo "$MPT_COMMIT"
+          git checkout -q FETCH_HEAD
+          # A subtitle font that has the Kazakh letters (ә, ғ, қ, ң, ө, ұ, ү, һ, і)
+          cp /usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf resource/fonts/
+          python -m pip install -q uv
+          uv pip install --system -q -r requirements.txt
+
+      - name: Video
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/mpt"
+          materials=$(ls "$GITHUB_WORKSPACE"/marketing/video-sample/kk/*.jpg | sort -V | paste -sd, -)
+          python cli.py \
+            --video-script "$(cat "$GITHUB_WORKSPACE/marketing/video-sample/script-kk.txt")" \
+            --video-language kk-KZ \
+            --video-source local --video-materials "$materials" \
+            --video-concat-mode sequential --video-clip-duration 4 --video-transition-mode none \
+            --video-aspect 9:16 \
+            --voice-name kk-KZ-AigulNeural-Female \
+            --font-name DejaVuSans-Bold.ttf --subtitle-position bottom \
+            --bgm-type random --bgm-volume 0.15 \
+            --task-id "$TASK_ID"
+          cp "storage/tasks/$TASK_ID/final-1.mp4" "$GITHUB_WORKSPACE/ornek-video-kk.mp4"
+
+      - name: Videoyu GitHub'a koy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete video-sample --yes --cleanup-tag || true
+          gh release create video-sample ornek-video-kk.mp4 \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Örnek video (Kazakça ses)" \
+            --notes "MoneyPrinterTurbo ile: uygulama ekranları, Kazakça ses (Aigul), altyazı ve müzik. Kaynak: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"

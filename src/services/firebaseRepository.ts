@@ -1,8 +1,13 @@
+import { cleanCatalogIds } from '../data/serviceCatalog';
 import {
   collection,
   doc,
   getDoc,
   getDocs,
+  getCountFromServer,
+  getAggregateFromServer,
+  average,
+  count,
   setDoc,
   updateDoc,
   writeBatch,
@@ -12,12 +17,14 @@ import {
   orderBy,
   limit,
   onSnapshot,
+  increment,
   type Firestore,
+  type Query,
+  type QuerySnapshot,
 } from 'firebase/firestore';
 import {
   ref as storageRef,
   uploadBytes,
-  getDownloadURL,
 } from 'firebase/storage';
 import {
   Appointment,
@@ -27,6 +34,10 @@ import {
   Conversation,
   getAppointmentId,
   getConversationId,
+  offerExtras,
+  isRequestExpired,
+  isRequestFull,
+  REQUEST_OPEN_MS,
   Provider,
   ProviderOffer,
   RequestAttachment,
@@ -59,7 +70,6 @@ import {
   testFirestoreConnection,
 } from './firebase';
 import { matchProviders } from './matchingService';
-import { INITIAL_DEMO_PROVIDERS } from './storage';
 import { notificationService } from './notificationService';
 import {
   validateOfferData,
@@ -68,8 +78,10 @@ import {
   validateReviewData,
 } from './validation';
 import { getCurrentUserId } from './localRepository';
-import { generateOfferId, generateRequestId } from './ids';
+import { generateRequestId, providerOfferId } from './ids';
 import { CANONICAL_CITIES, CANONICAL_CATEGORIES, normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
+import { cleanImageForUpload } from './imageClean';
+import { isPortfolioSlot } from './portfolio';
 
 /**
  * Sanitizes an object before sending to Cloud Firestore.
@@ -84,8 +96,13 @@ export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): Rec
       if (key === 'selectedOfferId' && typeof value === 'string' && !value.trim()) {
         continue;
       }
-      if (value !== null && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+      // Only plain objects are cleaned recursively; Firestore values (increment(), timestamps) pass through
+      if (value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
         clean[key] = sanitizeForFirestore(value);
+      } else if (Array.isArray(value)) {
+        clean[key] = value
+          .filter((v) => v !== undefined)
+          .map((v) => (v !== null && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype ? sanitizeForFirestore(v) : v));
       } else {
         clean[key] = value;
       }
@@ -118,6 +135,54 @@ export function normalizeRequestStatus(status?: string): RequestStatus {
     return 'CANCELLED';
   }
   return 'OPEN';
+}
+
+// Statuses a provider still needs to see. Completed and cancelled requests (the bulk of the data
+// over time) are left out of provider queries so the provider screen doesn't download all history.
+/** Requests providers of a city can see (firestore.rules isOpenStatus); jobs a provider was chosen for are read one by one. */
+const PROVIDER_VISIBLE_STATUSES = ['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'];
+/** Upper bound for one customer's request list (one read per document) */
+const CUSTOMER_REQUESTS_LIMIT = 200;
+/** Lists read newest first with a cap, so reads don't grow with the whole history */
+const PROVIDER_FEED_LIMIT = 300;
+const PROVIDER_OFFERS_LIMIT = 300;
+const PROVIDER_REVIEWS_LIMIT = 100;
+const NOTIFICATIONS_LIMIT = 50;
+
+/**
+ * Reads the newest documents first, with a cap (firestore.indexes.json has the indexes). Until an
+ * index exists (failed-precondition, e.g. while indexes build right after a release) the plain
+ * query is used, so the screen still works.
+ */
+async function getDocsNewestFirst(newest: Query, plain: Query): Promise<QuerySnapshot> {
+  try {
+    return await getDocs(newest);
+  } catch (err: any) {
+    if (err?.code === 'failed-precondition') return getDocs(plain);
+    throw err;
+  }
+}
+
+function onSnapshotNewestFirst(
+  newest: Query,
+  plain: Query,
+  next: (snap: QuerySnapshot) => void,
+  error: (err: any) => void
+): () => void {
+  let unsub = onSnapshot(newest, next, (err: any) => {
+    if (err?.code === 'failed-precondition') unsub = onSnapshot(plain, next, error);
+    else error(err);
+  });
+  return () => unsub();
+}
+
+/** Request fields written when the selected provider reports the job finished. */
+function providerDoneUpdate(req: ServiceRequest, now: string): Partial<ServiceRequest> & { updatedAt: string } {
+  return {
+    providerDoneAt: now,
+    updatedAt: now,
+    ...(req.status === 'PROVIDER_SELECTED' || req.status === 'ACCEPTED' ? { status: 'IN_PROGRESS' as const } : {}),
+  };
 }
 
 export class FirebaseRepository implements Repository {
@@ -225,7 +290,9 @@ export class FirebaseRepository implements Repository {
     const city = providerData.city?.trim() || 'Қызылорда';
     const cityId = normalizeCityId(providerData.cityId || city) || providerData.cityId || 'kyzylorda';
     const category = providerData.category?.trim() || '';
-    const categoryId = normalizeCategoryId(providerData.categoryId || category);
+    // Catalogue services picked by the provider; the first group is the main category
+    const catalog = cleanCatalogIds(providerData.serviceIds);
+    const categoryId = catalog.categoryIds[0] || normalizeCategoryId(providerData.categoryId || category);
 
     const newProvider: Provider = {
       id,
@@ -238,28 +305,42 @@ export class FirebaseRepository implements Repository {
       district: providerData.district?.trim() || '',
       category,
       categoryId,
+      ...(catalog.serviceIds.length ? { serviceIds: catalog.serviceIds, categoryIds: catalog.categoryIds } : {}),
       services: providerData.services?.trim() || '',
       priceRange: providerData.priceRange?.trim() || '',
       workingHours: providerData.workingHours?.trim() || '09:00 - 20:00',
       description: providerData.description?.trim() || '',
-      ...(providerData.experienceYears !== undefined && providerData.experienceYears > 0
+      ...(typeof providerData.experienceYears === 'number' && providerData.experienceYears >= 0
         ? { experienceYears: providerData.experienceYears }
         : {}),
       availability: providerData.availability || providerData.workingHours || '09:00 - 20:00',
-      // Trust badges are not self-assignable; they stay off until real verification exists
-      verified: false,
-      iinVerified: false,
-      hasCertificate: false,
       ...(providerData.tradeLicense ? { tradeLicense: providerData.tradeLicense } : {}),
-      isDemo: false,
-      createdAt: providerData.createdAt || new Date().toISOString(),
+      ...(typeof providerData.paused === 'boolean' ? { paused: providerData.paused } : {}),
+      ...(Array.isArray(providerData.portfolio)
+        ? { portfolio: providerData.portfolio.filter((x, i, all) => isPortfolioSlot(x) && all.indexOf(x) === i).slice(0, 8) }
+        : {}),
       updatedAt: new Date().toISOString(),
-    };
+    } as Provider;
 
     try {
       const provRef = doc(firestore, 'providers', id);
-      await setDoc(provRef, sanitizeForFirestore(newProvider), { merge: true });
-      return newProvider;
+      const existingSnap = await getDoc(provRef);
+      if (existingSnap.exists()) {
+        // Editing: badges set by the operator and the original creation date stay as they are
+        await setDoc(provRef, sanitizeForFirestore(newProvider), { merge: true });
+        const prev = existingSnap.data() as Provider;
+        return { ...prev, ...newProvider };
+      }
+      // Trust badges are not self-assignable; they stay off until the operator verifies the provider
+      const created: Provider = {
+        ...newProvider,
+        verified: false,
+        iinVerified: false,
+        hasCertificate: false,
+        createdAt: new Date().toISOString(),
+      };
+      await setDoc(provRef, sanitizeForFirestore(created));
+      return created;
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `providers/${id}`);
     }
@@ -279,15 +360,6 @@ export class FirebaseRepository implements Repository {
           categoryId: rawProv.categoryId || normalizeCategoryId(rawProv.category),
         };
       }
-      // Check seeded demo providers fallback
-      const demo = INITIAL_DEMO_PROVIDERS.find((p) => p.id === providerId);
-      if (demo) {
-        return {
-          ...demo,
-          cityId: demo.cityId || normalizeCityId(demo.city),
-          categoryId: demo.categoryId || normalizeCategoryId(demo.category),
-        };
-      }
       return null;
     } catch (err: any) {
       const code = err?.code || '';
@@ -297,14 +369,6 @@ export class FirebaseRepository implements Repository {
         msg.includes('permission') ||
         msg.includes('Missing or insufficient permissions')
       ) {
-        const demo = INITIAL_DEMO_PROVIDERS.find((p) => p.id === providerId);
-        if (demo) {
-          return {
-            ...demo,
-            cityId: demo.cityId || normalizeCityId(demo.city),
-            categoryId: demo.categoryId || normalizeCategoryId(demo.category),
-          };
-        }
         return null;
       }
       handleFirestoreError(err, OperationType.GET, `providers/${providerId}`);
@@ -360,21 +424,7 @@ export class FirebaseRepository implements Repository {
       }
     }
 
-    // Merge with demo providers for rich experience, respecting canonical filter
-    let demoList = INITIAL_DEMO_PROVIDERS.map((p) => ({
-      ...p,
-      cityId: normalizeCityId(p.cityId || p.city) || p.cityId,
-      categoryId: normalizeCategoryId(p.categoryId || p.category),
-    }));
-
-    if (targetCityId) {
-      demoList = demoList.filter((p) => (normalizeCityId(p.cityId || p.city) || p.cityId) === targetCityId);
-    }
-    if (targetCatId) {
-      demoList = demoList.filter((p) => isCategoryMatch(p.categoryId, targetCatId));
-    }
-
-    providers.push(...demoList);
+    // Real data only: the made-up demo providers belong to the offline demo mode
     return providers;
   }
 
@@ -420,20 +470,29 @@ export class FirebaseRepository implements Repository {
       cityId,
       category,
       categoryId,
+      ...(requestData.serviceId ? { serviceId: requestData.serviceId } : {}),
       service,
       date: requestData.date?.trim() || 'Бүгін',
       budget: requestData.budget?.trim() || 'Келісімді',
       urgency: requestData.urgency || 'normal',
       status: firestoreStatus,
       createdAt: requestData.createdAt || new Date().toISOString(),
+      expiresAtMs: Date.now() + REQUEST_OPEN_MS,
     };
 
     // selectedOfferId is never set at creation: it is only written by acceptOffer
     if (requestData.attachments && requestData.attachments.length > 0) {
       newRequest.attachments = requestData.attachments;
     }
-    if (requestData.location) {
-      newRequest.location = requestData.location;
+    // The shared request only carries an approximate point (~1 km); the exact location goes to
+    // the private requestContacts document that only the customer and the selected provider can read.
+    const preciseLocation = requestData.location;
+    if (preciseLocation && typeof preciseLocation.latitude === 'number' && typeof preciseLocation.longitude === 'number') {
+      newRequest.location = {
+        latitude: Math.round(preciseLocation.latitude * 100) / 100,
+        longitude: Math.round(preciseLocation.longitude * 100) / 100,
+        approximate: true,
+      };
     }
     if (requestData.understanding) {
       newRequest.understanding = requestData.understanding;
@@ -443,17 +502,24 @@ export class FirebaseRepository implements Repository {
       const reqRef = doc(firestore, 'requests', id);
       await setDoc(reqRef, sanitizeForFirestore(newRequest));
 
-      // Privacy: Store private customer phone number in restricted requestContacts collection
+      // Privacy: phone number and exact location live in the restricted requestContacts document
       let customerPhone: string | undefined = undefined;
-      if (requestData.customerPhone && requestData.customerPhone.trim()) {
+      // The phone-verified number of the signed-in customer, so the chosen provider can call them
+      const verifiedPhone = auth?.currentUser?.phoneNumber || '';
+      if (verifiedPhone) {
+        customerPhone = verifiedPhone;
+      } else if (requestData.customerPhone && requestData.customerPhone.trim()) {
         customerPhone = requestData.customerPhone.trim();
+      }
+      if (customerPhone || newRequest.location) {
         const contactRef = doc(firestore, 'requestContacts', id);
         await setDoc(
           contactRef,
           sanitizeForFirestore({
             requestId: id,
             customerId: customerId || auth?.currentUser?.uid || id,
-            customerPhone,
+            ...(customerPhone ? { customerPhone } : {}),
+            ...(newRequest.location && preciseLocation ? { location: preciseLocation } : {}),
             createdAt: new Date().toISOString(),
           }),
           { merge: true }
@@ -463,6 +529,7 @@ export class FirebaseRepository implements Repository {
       return {
         ...newRequest,
         ...(customerPhone ? { customerPhone } : {}),
+        ...(newRequest.location && preciseLocation ? { location: preciseLocation } : {}),
         status: normalizeRequestStatus(newRequest.status),
       };
     } catch (err) {
@@ -473,7 +540,8 @@ export class FirebaseRepository implements Repository {
   async uploadRequestAttachment(
     requestId: string,
     file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string },
-    customerId?: string
+    customerId?: string,
+    slot?: number
   ): Promise<RequestAttachment> {
     await ensureFirebaseAuth();
     const cleanId = (requestId || '').trim();
@@ -484,17 +552,14 @@ export class FirebaseRepository implements Repository {
     const authUid = auth?.currentUser?.uid;
     const effectiveCustId = customerId || authUid || getCurrentUserId();
 
-    // If request already exists, verify current caller is the owner
-    try {
-      const existing = await this.getRequest(cleanId);
-      if (existing && authUid && existing.customerId !== authUid) {
-        throw new Error(`Unauthorized: Only the creator of request ${cleanId} can upload attachments`);
-      }
-    } catch (e: any) {
-      if (e?.message?.startsWith('Unauthorized:')) {
-        throw e;
-      }
-      // If request doc does not exist yet, proceed with upload
+    // Files are attached to a request that already exists and belongs to the caller (storage.rules
+    // enforces the same), so the request is created first and the files are added afterwards.
+    const existing = await this.getRequest(cleanId);
+    if (!existing) {
+      throw new Error(`Validation Error: request ${cleanId} must be created before attaching files`);
+    }
+    if (authUid && existing.customerId !== authUid) {
+      throw new Error(`Unauthorized: Only the creator of request ${cleanId} can upload attachments`);
     }
 
     const validation = validateRequestAttachment(file);
@@ -503,8 +568,6 @@ export class FirebaseRepository implements Repository {
     }
 
     const sanitizedName = sanitizeFileName(file.name);
-    const attachmentId = `att_req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const storagePath = `requests/${cleanId}/${attachmentId}_${sanitizedName}`;
 
     if (!storage) {
       throw new Error('Firebase Storage is not configured or unavailable');
@@ -529,10 +592,12 @@ export class FirebaseRepository implements Repository {
     } else {
       throw new Error('Attachment payload data is missing or invalid');
     }
+    if (validation.type === 'image' && blobPayload instanceof Blob) {
+      blobPayload = await cleanImageForUpload(blobPayload);
+    }
 
-    const fileRef = storageRef(storage, storagePath);
     const metadata = {
-      contentType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mp3'),
+      contentType: (blobPayload instanceof Blob && blobPayload.type) || file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mpeg'),
       customMetadata: {
         requestId: cleanId,
         uploadedBy: authUid || effectiveCustId,
@@ -541,16 +606,32 @@ export class FirebaseRepository implements Repository {
     };
 
     try {
-      const uploadResult = await uploadBytes(fileRef, blobPayload, metadata);
-      const downloadUrl = await getDownloadURL(uploadResult.ref);
+      // A request holds at most 15 files, stored under fixed names att0 … att14 (storage.rules).
+      // Start at the next free slot and move on if a slot is already taken.
+      const firstSlot = Math.min(Math.max(slot ?? existing.attachments?.length ?? 0, 0), 14);
+      let uploadResult: Awaited<ReturnType<typeof uploadBytes>> | null = null;
+      let storagePath = '';
+      let lastErr: unknown = null;
+      for (let s = firstSlot; s <= 14 && !uploadResult; s++) {
+        storagePath = `requests/${cleanId}/att${s}`;
+        try {
+          uploadResult = await uploadBytes(storageRef(storage, storagePath), blobPayload, metadata);
+        } catch (e: any) {
+          lastErr = e;
+          if (e?.code !== 'storage/unauthorized') break;
+        }
+      }
+      if (!uploadResult) throw lastErr || new Error('No free attachment slot');
+      const attachmentId = storagePath.split('/').pop() as string;
 
       const attachment: RequestAttachment = {
         id: attachmentId,
         type: validation.type,
         storagePath,
-        downloadUrl,
+        // No stored file link: the viewing address is asked when the file is shown (storageUrls.ts)
+        downloadUrl: '',
         fileName: sanitizedName,
-        mimeType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mp3'),
+        mimeType: file.type || (validation.type === 'image' ? 'image/jpeg' : validation.type === 'video' ? 'video/mp4' : 'audio/mpeg'),
         sizeBytes: file.size,
         createdAt: new Date().toISOString(),
       };
@@ -562,6 +643,42 @@ export class FirebaseRepository implements Repository {
     }
   }
 
+  /** A request document as the app uses it, with the private contact added for those allowed to read it. */
+  private async withContacts(firestore: Firestore, requestId: string, data: ServiceRequest): Promise<ServiceRequest> {
+    const cleanSelectedOfferId =
+      typeof data.selectedOfferId === 'string' && data.selectedOfferId.trim()
+        ? data.selectedOfferId.trim()
+        : undefined;
+
+    let customerPhone = data.customerPhone;
+    let preciseLocation: RequestLocation | undefined;
+    try {
+      // Readable only by the customer and the selected provider; everyone else keeps the approximate point
+      const contactRef = doc(firestore, 'requestContacts', requestId);
+      const contactSnap = await getDoc(contactRef);
+      if (contactSnap.exists()) {
+        const contact = contactSnap.data();
+        customerPhone = customerPhone || contact?.customerPhone;
+        if (contact?.location && typeof contact.location.latitude === 'number') {
+          preciseLocation = contact.location as RequestLocation;
+        }
+      }
+    } catch {
+      // Not authorized or no contact document: proceed with the shared data only
+    }
+
+    return {
+      ...data,
+      id: requestId,
+      ...(customerPhone ? { customerPhone } : {}),
+      ...(preciseLocation ? { location: preciseLocation } : {}),
+      status: normalizeRequestStatus(data.status),
+      selectedOfferId: cleanSelectedOfferId,
+      cityId: data.cityId || normalizeCityId(data.city),
+      categoryId: data.categoryId || normalizeCategoryId(data.category),
+    };
+  }
+
   async getRequest(requestId: string): Promise<ServiceRequest | null> {
     await ensureFirebaseAuth();
     const firestore = this.ensureDb();
@@ -569,33 +686,7 @@ export class FirebaseRepository implements Repository {
       const reqRef = doc(firestore, 'requests', requestId);
       const snap = await getDoc(reqRef);
       if (!snap.exists()) return null;
-      const data = snap.data() as ServiceRequest;
-      const cleanSelectedOfferId =
-        typeof data.selectedOfferId === 'string' && data.selectedOfferId.trim()
-          ? data.selectedOfferId.trim()
-          : undefined;
-
-      let customerPhone = data.customerPhone;
-      if (!customerPhone) {
-        try {
-          const contactRef = doc(firestore, 'requestContacts', requestId);
-          const contactSnap = await getDoc(contactRef);
-          if (contactSnap.exists()) {
-            customerPhone = contactSnap.data()?.customerPhone;
-          }
-        } catch {
-          // If unauthorized or contact not present, ignore and proceed without customerPhone
-        }
-      }
-
-      return {
-        ...data,
-        ...(customerPhone ? { customerPhone } : {}),
-        status: normalizeRequestStatus(data.status),
-        selectedOfferId: cleanSelectedOfferId,
-        cityId: data.cityId || normalizeCityId(data.city),
-        categoryId: data.categoryId || normalizeCategoryId(data.category),
-      };
+      return await this.withContacts(firestore, requestId, snap.data() as ServiceRequest);
     } catch (err: any) {
       const code = err?.code || '';
       const msg = err?.message || String(err);
@@ -619,7 +710,6 @@ export class FirebaseRepository implements Repository {
 
     try {
       const requestsColl = collection(firestore, 'requests');
-      let q = query(requestsColl);
 
       let snap;
       const targetCityId = filter?.cityId
@@ -636,15 +726,19 @@ export class FirebaseRepository implements Repository {
       if (filter?.customerId) {
         // Customer view: align with authenticated customer ID if available
         const effectiveCustomerId = auth?.currentUser?.uid || filter.customerId;
-        const q = query(requestsColl, where('customerId', '==', effectiveCustomerId));
-        snap = await getDocs(q);
+        const byCustomer = where('customerId', '==', effectiveCustomerId);
+        snap = await getDocsNewestFirst(
+          query(requestsColl, byCustomer, orderBy('createdAt', 'desc'), limit(CUSTOMER_REQUESTS_LIMIT)),
+          query(requestsColl, byCustomer, limit(CUSTOMER_REQUESTS_LIMIT))
+        );
       } else if (targetCityId && targetCatId) {
         // Provider view: query by cityId and categoryId conforming to firestore.rules
         try {
           const q = query(
             requestsColl,
             where('cityId', '==', targetCityId),
-            where('categoryId', '==', targetCatId)
+            where('categoryId', '==', targetCatId),
+            where('status', 'in', PROVIDER_VISIBLE_STATUSES)
           );
           snap = await getDocs(q);
 
@@ -654,7 +748,8 @@ export class FirebaseRepository implements Repository {
               const qLegacy = query(
                 requestsColl,
                 where('cityId', '==', targetCityId),
-                where('categoryId', '==', 'appliance_repair')
+                where('categoryId', '==', 'appliance_repair'),
+                where('status', 'in', PROVIDER_VISIBLE_STATUSES)
               );
               const snapLegacy = await getDocs(qLegacy);
               const existingIds = new Set(snap.docs.map((d) => d.id));
@@ -689,7 +784,7 @@ export class FirebaseRepository implements Repository {
             // query current user's customer requests on same session/auth UID so they can be viewed
             const currentUid = auth?.currentUser?.uid;
             if (currentUid) {
-              const qUser = query(requestsColl, where('customerId', '==', currentUid));
+              const qUser = query(requestsColl, where('customerId', '==', currentUid), limit(CUSTOMER_REQUESTS_LIMIT));
               snap = await getDocs(qUser);
             } else {
               throw idErr;
@@ -784,6 +879,93 @@ export class FirebaseRepository implements Repository {
     }
   }
 
+  /**
+   * One request, live. Delivers null when it is gone or this user may no longer read it (another
+   * provider was chosen, the request was closed): no data rather than a guessed state.
+   */
+  subscribeToRequest(
+    requestId: string,
+    onUpdate: (request: ServiceRequest | null) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    const cleanId = (requestId || '').trim();
+    const firestore = db;
+    if (!isFirebaseConfigured() || !firestore || !cleanId) return () => {};
+    let seq = 0;
+    let stopped = false;
+    try {
+      const unsub = onSnapshot(
+        doc(firestore, 'requests', cleanId),
+        (snap) => {
+          const mine = ++seq;
+          if (!snap.exists()) {
+            onUpdate(null);
+            return;
+          }
+          this.withContacts(firestore, cleanId, snap.data() as ServiceRequest).then((req) => {
+            // A newer snapshot may have arrived while the contact was read
+            if (!stopped && mine === seq) onUpdate(req);
+          });
+        },
+        (err: any) => {
+          seq++;
+          if (err?.code === 'permission-denied') onUpdate(null);
+          else console.warn('[FirebaseRepository] subscribeToRequest note:', err?.message || err);
+          if (onError) onError(err);
+        }
+      );
+      return () => {
+        stopped = true;
+        try {
+          unsub();
+        } catch {}
+      };
+    } catch (err) {
+      if (onError) onError(err);
+      return () => {};
+    }
+  }
+
+  /** Offers, live: the customer's offers for one request, or the signed-in provider's own offers. */
+  subscribeToOffers(
+    filter: OfferFilter,
+    onUpdate: (offers: ProviderOffer[]) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    if (!isFirebaseConfigured() || !db || !filter) return () => {};
+    const offersColl = collection(db, 'offers');
+    let newest: Query;
+    let plain: Query;
+    if (filter.requestId) {
+      newest = plain = query(offersColl, where('requestId', '==', filter.requestId));
+    } else {
+      const providerUserId = auth?.currentUser?.uid || filter.providerUserId;
+      if (!providerUserId) return () => {};
+      const byProvider = where('providerUserId', '==', providerUserId);
+      newest = query(offersColl, byProvider, orderBy('createdAt', 'desc'), limit(PROVIDER_OFFERS_LIMIT));
+      plain = query(offersColl, byProvider);
+    }
+    try {
+      const unsub = onSnapshotNewestFirst(
+        newest,
+        plain,
+        (snap) => onUpdate(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProviderOffer))),
+        (err: any) => {
+          console.warn('[FirebaseRepository] subscribeToOffers note:', err?.message || err);
+          if (onError) onError(err);
+        }
+      );
+      return () => {
+        try {
+          unsub();
+        } catch {}
+      };
+    } catch (err) {
+      if (onError) onError(err);
+      return () => {};
+    }
+  }
+
   subscribeToRequests(
     filter: RequestFilter,
     onData: (requests: ServiceRequest[]) => void,
@@ -870,84 +1052,86 @@ export class FirebaseRepository implements Repository {
         onData(formatAndFilter(combined));
       };
 
-      let qPrimary;
+      let qPrimary: Query | undefined;
+      let qPrimaryPlain: Query | undefined;
       if (filter?.customerId) {
         const effectiveCustomerId = auth?.currentUser?.uid || filter.customerId;
-        qPrimary = query(requestsColl, where('customerId', '==', effectiveCustomerId));
-      } else if (targetCityId && targetCatId) {
-        qPrimary = query(
-          requestsColl,
-          where('cityId', '==', targetCityId),
-          where('categoryId', '==', targetCatId)
-        );
-      } else if (targetCityId) {
-        qPrimary = query(requestsColl, where('cityId', '==', targetCityId));
-      } else if (targetCatId) {
-        qPrimary = query(requestsColl, where('categoryId', '==', targetCatId));
-      } else {
-        qPrimary = query(requestsColl);
+        const byCustomer = where('customerId', '==', effectiveCustomerId);
+        qPrimary = query(requestsColl, byCustomer, orderBy('createdAt', 'desc'), limit(CUSTOMER_REQUESTS_LIMIT));
+        qPrimaryPlain = query(requestsColl, byCustomer, limit(CUSTOMER_REQUESTS_LIMIT));
       }
 
-      const unsubPrimary = onSnapshot(
-        qPrimary,
-        (snap) => {
-          primaryMap.clear();
-          snap.forEach((d) => {
-            primaryMap.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
-          });
-          emitCombined();
-        },
-        (err) => {
-          console.warn('[FirebaseRepository] subscribeToRequests error:', err?.message || err);
-          if (onError) onError(err);
-        }
-      );
+      // Provider queries skip finished requests. If the project lacks an index the filtered query
+      // needs, Firestore answers failed-precondition and the listener falls back to the unfiltered query.
+      const isProviderQuery = !filter?.customerId;
+      const listen = (
+        base: ReturnType<typeof where>[],
+        map: Map<string, ServiceRequest>,
+        label: string,
+        reportErrors: boolean
+      ): (() => void) => {
+        let unsub: () => void = () => {};
+        const start = (withStatus: boolean) => {
+          const constraints = withStatus ? [...base, where('status', 'in', PROVIDER_VISIBLE_STATUSES)] : base;
+          const plain = query(requestsColl, ...constraints);
+          unsub = onSnapshotNewestFirst(
+            withStatus ? query(requestsColl, ...constraints, orderBy('createdAt', 'desc'), limit(PROVIDER_FEED_LIMIT)) : plain,
+            plain,
+            (snap) => {
+              map.clear();
+              snap.forEach((d) => {
+                map.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
+              });
+              emitCombined();
+            },
+            (err: any) => {
+              console.warn(`[FirebaseRepository] subscribeToRequests ${label} note:`, err?.message || err);
+              if (reportErrors && onError) onError(err);
+            }
+          );
+        };
+        start(isProviderQuery);
+        return () => unsub();
+      };
+
+      let unsubPrimary: () => void;
+      if (qPrimary && qPrimaryPlain) {
+        unsubPrimary = onSnapshotNewestFirst(
+          qPrimary,
+          qPrimaryPlain,
+          (snap) => {
+            primaryMap.clear();
+            snap.forEach((d) => {
+              primaryMap.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
+            });
+            emitCombined();
+          },
+          (err) => {
+            console.warn('[FirebaseRepository] subscribeToRequests error:', err?.message || err);
+            if (onError) onError(err);
+          }
+        );
+      } else if (targetCityId && targetCatId) {
+        unsubPrimary = listen([where('cityId', '==', targetCityId), where('categoryId', '==', targetCatId)], primaryMap, 'primary', true);
+      } else if (targetCityId) {
+        unsubPrimary = listen([where('cityId', '==', targetCityId)], primaryMap, 'primary', true);
+      } else if (targetCatId) {
+        unsubPrimary = listen([where('categoryId', '==', targetCatId)], primaryMap, 'primary', true);
+      } else {
+        unsubPrimary = listen([], primaryMap, 'primary', true);
+      }
 
       let unsubLegacy: (() => void) | null = null;
       if (targetCatId === 'appliances' && targetCityId) {
         try {
-          const qLegacy = query(
-            requestsColl,
-            where('cityId', '==', targetCityId),
-            where('categoryId', '==', 'appliance_repair')
-          );
-          unsubLegacy = onSnapshot(
-            qLegacy,
-            (snap) => {
-              legacyMap.clear();
-              snap.forEach((d) => {
-                legacyMap.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
-              });
-              emitCombined();
-            },
-            (err) => {
-              console.warn('[FirebaseRepository] subscribeToRequests legacy note:', err?.message || err);
-            }
-          );
+          unsubLegacy = listen([where('cityId', '==', targetCityId), where('categoryId', '==', 'appliance_repair')], legacyMap, 'legacy', false);
         } catch {}
       }
 
       let unsubOther: (() => void) | null = null;
       if (targetCityId && targetCatId && targetCatId !== 'other') {
         try {
-          const qOther = query(
-            requestsColl,
-            where('cityId', '==', targetCityId),
-            where('categoryId', '==', 'other')
-          );
-          unsubOther = onSnapshot(
-            qOther,
-            (snap) => {
-              otherMap.clear();
-              snap.forEach((d) => {
-                otherMap.set(d.id, { ...(d.data() as ServiceRequest), id: d.id });
-              });
-              emitCombined();
-            },
-            (err) => {
-              console.warn('[FirebaseRepository] subscribeToRequests other note:', err?.message || err);
-            }
-          );
+          unsubOther = listen([where('cityId', '==', targetCityId), where('categoryId', '==', 'other')], otherMap, 'other', false);
         } catch {}
       }
 
@@ -970,6 +1154,40 @@ export class FirebaseRepository implements Repository {
       if (onError) onError(err);
       return () => {};
     }
+  }
+
+  watchRequestActivity(requestId: string, onChange: () => void): () => void {
+    if (!db || !requestId) return () => {};
+    const firestore = db;
+    // Several changes often arrive together (offer + request status): report them once
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const changed = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(onChange, 300);
+    };
+    const unsubs: Array<() => void> = [];
+    let first = { offers: true, request: true };
+    const quiet = (err: unknown) => console.warn('[FirebaseRepository] watchRequestActivity note:', (err as any)?.code || err);
+    unsubs.push(
+      onSnapshot(query(collection(firestore, 'offers'), where('requestId', '==', requestId)), () => {
+        if (first.offers) first = { ...first, offers: false };
+        else changed();
+      }, quiet)
+    );
+    unsubs.push(
+      onSnapshot(doc(firestore, 'requests', requestId), () => {
+        if (first.request) first = { ...first, request: false };
+        else changed();
+      }, quiet)
+    );
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubs.forEach((u) => {
+        try {
+          u();
+        } catch {}
+      });
+    };
   }
 
   async updateRequest(
@@ -1027,7 +1245,7 @@ export class FirebaseRepository implements Repository {
           normStatus === 'CANCELLED'
         ) {
           const nonStatusKeys = Object.keys(safeUpdates).filter(
-            (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId'
+            (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId' && k !== 'providerDoneAt' && k !== 'finalPrice'
           );
           if (nonStatusKeys.length > 0) {
             throw new Error(
@@ -1100,7 +1318,8 @@ export class FirebaseRepository implements Repository {
 
     const firestore = this.ensureDb();
     const providerUserId = auth?.currentUser?.uid || getCurrentUserId();
-    const id = offerData.id || generateOfferId(offerData.requestId || 'REQ');
+    // One offer per provider and request: the id is fixed, so a repeated tap can't create a second one
+    const id = providerOfferId(offerData.requestId || '', providerUserId);
 
     const priceType = offerData.priceType || 'fixed';
     let price = (offerData.price || '').trim();
@@ -1120,11 +1339,11 @@ export class FirebaseRepository implements Repository {
       providerName: offerData.providerName || '',
       providerPhone: offerData.providerPhone || '',
       providerWhatsapp: offerData.providerWhatsapp || '',
-      isDemo: offerData.isDemo || false,
       price,
       priceType,
       availability: offerData.availability || 'В течение часа',
       message: offerData.message || '',
+      ...offerExtras(offerData),
       status: 'PENDING',
       createdAt: offerData.createdAt || new Date().toISOString(),
       // Trust badges are not self-assignable; they stay off until real verification exists
@@ -1134,28 +1353,46 @@ export class FirebaseRepository implements Repository {
 
     try {
       const offerRef = doc(firestore, 'offers', id);
-      await setDoc(offerRef, sanitizeForFirestore(newOffer));
-
-      // Upgrade request status to OFFERS_RECEIVED if it was NEW or MATCHING
-      if (newOffer.requestId) {
-        try {
-          const req = await this.getRequest(newOffer.requestId);
-          if (req) {
-            if (req.status === 'MATCHING' || req.status === 'NEW' || req.status === 'OPEN') {
-              await this.updateRequest(req.id, { status: 'OFFERS_RECEIVED', lastOfferId: newOffer.id });
-            }
-            // Trigger customer notification
-            notificationService.notifyNewOffer(req, newOffer).catch(() => {});
-          }
-        } catch (upgradeErr) {
-          console.warn('[FirebaseRepository] Note upgrading request status on offer creation:', upgradeErr);
+      const reqRef = doc(firestore, 'requests', newOffer.requestId);
+      // The offer and the request's offer count are written together (the rules check both), so a
+      // request never takes more than MAX_OFFERS_PER_REQUEST offers, even when masters answer at once
+      let existingOffer: ProviderOffer | null = null;
+      let req: ServiceRequest | null = null;
+      await runTransaction(firestore, async (transaction) => {
+        const already = await transaction.get(offerRef);
+        if (already.exists()) {
+          existingOffer = { id, ...already.data() } as ProviderOffer;
+          return;
         }
-      }
-
+        const reqSnap = await transaction.get(reqRef);
+        if (!reqSnap.exists()) throw new Error('Request not found');
+        const reqData = reqSnap.data() as ServiceRequest;
+        if (isRequestExpired(reqData)) throw new Error('Validation Error: request-expired');
+        if (isRequestFull(reqData)) throw new Error('Validation Error: offer-limit-reached');
+        const offerCount = (reqData.offerCount || 0) + 1;
+        transaction.set(offerRef, sanitizeForFirestore(newOffer));
+        transaction.update(reqRef, {
+          status: 'OFFERS_RECEIVED',
+          lastOfferId: id,
+          offerCount,
+          updatedAt: new Date().toISOString(),
+        });
+        req = { ...reqData, id: reqSnap.id, status: 'OFFERS_RECEIVED', lastOfferId: id, offerCount };
+      });
+      if (existingOffer) return existingOffer;
+      if (req) notificationService.notifyNewOffer(req, newOffer).catch(() => {});
       return newOffer;
     } catch (err) {
+      if (err instanceof Error && /request-expired|offer-limit-reached/.test(err.message)) throw err;
       handleFirestoreError(err, OperationType.WRITE, `offers/${id}`);
     }
+  }
+
+  async countOffers(requestId: string): Promise<number> {
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const snap = await getCountFromServer(query(collection(firestore, 'offers'), where('requestId', '==', requestId)));
+    return snap.data().count;
   }
 
   async getOffers(filter?: OfferFilter): Promise<ProviderOffer[]> {
@@ -1183,8 +1420,11 @@ export class FirebaseRepository implements Repository {
       // Matches Firestore rule: resource.data.providerUserId == request.auth.uid
       const targetProviderUserId = filter.providerUserId || currentUid;
       if (targetProviderUserId) {
-        const q = query(offersColl, where('providerUserId', '==', targetProviderUserId));
-        const snap = await getDocs(q);
+        const byProvider = where('providerUserId', '==', targetProviderUserId);
+        const snap = await getDocsNewestFirst(
+          query(offersColl, byProvider, orderBy('createdAt', 'desc'), limit(PROVIDER_OFFERS_LIMIT)),
+          query(offersColl, byProvider)
+        );
         let offers = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProviderOffer));
 
         if (filter.providerId) {
@@ -1523,7 +1763,6 @@ export class FirebaseRepository implements Repository {
     }
 
     const firestore = this.ensureDb();
-    const currentUid = auth?.currentUser?.uid || getCurrentUserId();
 
     // Check cross-document request state: job must be completed via real completion flow
     const req = await this.getRequest(requestId);
@@ -1645,6 +1884,20 @@ export class FirebaseRepository implements Repository {
     }
   }
 
+  /** Average rating and number of reviews, counted on the server (no review documents downloaded). */
+  async getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }> {
+    const ids = Array.from(new Set(providerIds.map((id) => (id || '').trim()).filter(Boolean))).slice(0, 10);
+    if (ids.length === 0) return { avg: 0, count: 0 };
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const snap = await getAggregateFromServer(query(collection(firestore, 'reviews'), where('providerId', 'in', ids)), {
+      total: count(),
+      avgRating: average('rating'),
+    });
+    const { total, avgRating } = snap.data();
+    return { count: total || 0, avg: total ? Number(avgRating) || 0 : 0 };
+  }
+
   async getReviews(filter?: ReviewFilter): Promise<Review[]> {
     await ensureFirebaseAuth();
     const firestore = this.ensureDb();
@@ -1661,14 +1914,14 @@ export class FirebaseRepository implements Repository {
         return reviews;
       }
 
+      // Never the whole collection: reviews are read per provider, newest first and capped
+      if (!filter?.providerId?.trim()) return reviews;
       const reviewsCol = collection(firestore, 'reviews');
-      let q = query(reviewsCol);
-
-      if (filter?.providerId) {
-        q = query(reviewsCol, where('providerId', '==', filter.providerId.trim()));
-      }
-
-      const querySnapshot = await getDocs(q);
+      const byProvider = where('providerId', '==', filter.providerId.trim());
+      const querySnapshot = await getDocsNewestFirst(
+        query(reviewsCol, byProvider, orderBy('createdAt', 'desc'), limit(PROVIDER_REVIEWS_LIMIT)),
+        query(reviewsCol, byProvider)
+      );
       querySnapshot.forEach((d) => {
         reviews.push(d.data() as Review);
       });
@@ -1893,7 +2146,7 @@ export class FirebaseRepository implements Repository {
       createdAt: now,
     };
 
-    const summaryText = text || (newMsg.attachments?.[0]?.type === 'image' ? '📷 Фото' : '📎 Файл');
+    const summaryText = (text || (newMsg.attachments?.[0]?.type === 'image' ? '📷 Фото' : '📎 Файл')).slice(0, 300);
 
     try {
       const batch = writeBatch(firestore);
@@ -1908,9 +2161,8 @@ export class FirebaseRepository implements Repository {
           lastMessageSenderId: authUid,
           lastMessageAt: now,
           updatedAt: now,
-          ...(isCustomer
-            ? { unreadCountProvider: (conv.unreadCountProvider || 0) + 1 }
-            : { unreadCountCustomer: (conv.unreadCountCustomer || 0) + 1 }),
+          // Counted on the server, so two quick messages can't overwrite each other's count
+          ...(isCustomer ? { unreadCountProvider: increment(1) } : { unreadCountCustomer: increment(1) }),
         })
       );
 
@@ -1996,10 +2248,13 @@ export class FirebaseRepository implements Repository {
     } else {
       throw new Error('Attachment payload data is missing or invalid');
     }
+    if (blobPayload instanceof Blob && blobPayload.type.startsWith('image/')) {
+      blobPayload = await cleanImageForUpload(blobPayload);
+    }
 
     const fileRef = storageRef(storage, storagePath);
     const metadata = {
-      contentType: file.type || (validation.type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
+      contentType: (blobPayload instanceof Blob && blobPayload.type) || file.type || (validation.type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
       customMetadata: {
         conversationId: cleanId,
         uploadedBy: authUid,
@@ -2008,14 +2263,14 @@ export class FirebaseRepository implements Repository {
     };
 
     try {
-      const uploadResult = await uploadBytes(fileRef, blobPayload, metadata);
-      const downloadUrl = await getDownloadURL(uploadResult.ref);
+      await uploadBytes(fileRef, blobPayload, metadata);
 
       const attachment: ChatAttachment = {
         id: attachmentId,
         type: validation.type,
         storagePath,
-        downloadUrl,
+        // No stored file link: the viewing address is asked when the file is shown (storageUrls.ts)
+        downloadUrl: '',
         fileName: sanitizedName,
         mimeType: file.type || (validation.type === 'image' ? 'image/jpeg' : 'application/octet-stream'),
         sizeBytes: file.size,
@@ -2063,13 +2318,14 @@ export class FirebaseRepository implements Repository {
 
       const currentUid = auth?.currentUser?.uid || getCurrentUserId();
       const updates: Record<string, any> = {};
-      if (currentUid === conv.customerId && conv.unreadCountCustomer > 0) {
-        updates.unreadCountCustomer = 0;
-      } else if (
-        (currentUid === conv.providerUserId || currentUid === conv.providerId) &&
-        conv.unreadCountProvider > 0
-      ) {
-        updates.unreadCountProvider = 0;
+      // Read mark: everything up to the newest message (its own time) has been seen
+      const readUpTo = typeof conv.lastMessageAt === 'string' ? conv.lastMessageAt : '';
+      if (currentUid === conv.customerId) {
+        if (conv.unreadCountCustomer > 0) updates.unreadCountCustomer = 0;
+        if (readUpTo && readUpTo !== conv.customerLastReadAt) updates.customerLastReadAt = readUpTo;
+      } else if (currentUid === conv.providerUserId || currentUid === conv.providerId) {
+        if (conv.unreadCountProvider > 0) updates.unreadCountProvider = 0;
+        if (readUpTo && readUpTo !== conv.providerLastReadAt) updates.providerLastReadAt = readUpTo;
       }
 
       if (Object.keys(updates).length > 0) {
@@ -2078,6 +2334,33 @@ export class FirebaseRepository implements Repository {
       }
     } catch (err: any) {
       console.warn('[FirebaseRepository] markMessagesAsRead note:', err?.message || err);
+    }
+  }
+
+  subscribeToConversation(
+    conversationId: string,
+    onUpdate: (conversation: Conversation | null) => void,
+    onError?: (error: any) => void
+  ): () => void {
+    const cleanId = (conversationId || '').trim();
+    if (!isFirebaseConfigured() || !db || !cleanId) return () => {};
+    try {
+      const unsub = onSnapshot(
+        doc(db, 'conversations', cleanId),
+        (snap) => onUpdate(snap.exists() ? (snap.data() as Conversation) : null),
+        (err) => {
+          console.warn('[FirebaseRepository] subscribeToConversation note:', err?.message || err);
+          if (onError) onError(err);
+        }
+      );
+      return () => {
+        try {
+          unsub();
+        } catch {}
+      };
+    } catch (err) {
+      if (onError) onError(err);
+      return () => {};
     }
   }
 
@@ -2096,7 +2379,8 @@ export class FirebaseRepository implements Repository {
 
     try {
       const msgsCol = collection(db, 'conversations', cleanId, 'messages');
-      const q = query(msgsCol, orderBy('createdAt', 'asc'), limit(50));
+      // The newest 50 messages (a listener on the oldest 50 stopped receiving new ones in long chats)
+      const q = query(msgsCol, orderBy('createdAt', 'desc'), limit(50));
 
       const unsubscribe = onSnapshot(
         q,
@@ -2105,6 +2389,8 @@ export class FirebaseRepository implements Repository {
           snapshot.forEach((d) => {
             msgs.push(d.data() as ChatMessage);
           });
+          // Oldest first on screen
+          msgs.reverse();
           onUpdate(msgs);
         },
         (err) => {
@@ -2188,15 +2474,17 @@ export class FirebaseRepository implements Repository {
 
     try {
       const notifsCol = collection(db, 'notifications');
-      const q = query(notifsCol, where('recipientUserId', '==', cleanUid));
-      const snapshot = await getDocs(q);
+      const mine = where('recipientUserId', '==', cleanUid);
+      const snapshot = await getDocsNewestFirst(
+        query(notifsCol, mine, orderBy('createdAt', 'desc'), limit(Math.min(limitCount, NOTIFICATIONS_LIMIT))),
+        query(notifsCol, mine)
+      );
 
       const items: AppNotification[] = [];
       snapshot.forEach((d) => {
         items.push(d.data() as AppNotification);
       });
 
-      // Sort in memory to guarantee ordering without requiring a composite index on Spark
       items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       return items.slice(0, limitCount);
     } catch (error) {
@@ -2234,19 +2522,12 @@ export class FirebaseRepository implements Repository {
       const q = query(notifsCol, where('recipientUserId', '==', cleanUid));
       const snapshot = await getDocs(q);
 
-      const batch = writeBatch(db);
-      let count = 0;
       const now = new Date().toISOString();
-
-      snapshot.forEach((d) => {
-        const data = d.data() as AppNotification;
-        if (!data.isRead) {
-          batch.update(d.ref, { isRead: true, readAt: now });
-          count++;
-        }
-      });
-
-      if (count > 0) {
+      const unread = snapshot.docs.filter((d) => !(d.data() as AppNotification).isRead);
+      // A batch holds at most 500 writes
+      for (let i = 0; i < unread.length; i += 400) {
+        const batch = writeBatch(db);
+        unread.slice(i, i + 400).forEach((d) => batch.update(d.ref, { isRead: true, readAt: now }));
         await batch.commit();
       }
     } catch (error) {
@@ -2270,10 +2551,11 @@ export class FirebaseRepository implements Repository {
 
     try {
       const notifsCol = collection(db, 'notifications');
-      const q = query(notifsCol, where('recipientUserId', '==', cleanUid));
+      const mine = where('recipientUserId', '==', cleanUid);
 
-      const unsubscribe = onSnapshot(
-        q,
+      const unsubscribe = onSnapshotNewestFirst(
+        query(notifsCol, mine, orderBy('createdAt', 'desc'), limit(NOTIFICATIONS_LIMIT)),
+        query(notifsCol, mine),
         (snapshot) => {
           const items: AppNotification[] = [];
           snapshot.forEach((d) => {
@@ -2376,8 +2658,9 @@ export class FirebaseRepository implements Repository {
         createdAt: existing.createdAt,
         updatedAt: new Date().toISOString(),
       };
-      const cleanData = sanitizeForFirestore(updated);
-      await setDoc(doc(db, 'appointments', docId), cleanData, { merge: true });
+      // Only the changed fields are written, so a change the other side made meanwhile is kept
+      const { id: _i, requestId: _r, customerId: _c, providerId: _p, providerUserId: _u, createdAt: _cr, ...changes } = updates;
+      await updateDoc(doc(db, 'appointments', docId), sanitizeForFirestore({ ...changes, updatedAt: updated.updatedAt }));
       return updated;
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `appointments/${docId}`);
@@ -2400,7 +2683,7 @@ export class FirebaseRepository implements Repository {
 
   async confirmAppointment(
     appointmentId: string,
-    confirmedByRole: 'customer' | 'provider'
+    _confirmedByRole: 'customer' | 'provider'
   ): Promise<Appointment> {
     return await this.updateAppointment(appointmentId, {
       status: 'CONFIRMED',
@@ -2458,10 +2741,14 @@ export class FirebaseRepository implements Repository {
       if (reqSnap.exists()) {
         const reqData = reqSnap.data() as ServiceRequest;
         if (reqData.status !== 'COMPLETED') {
-          transaction.update(reqRef, {
-            status: 'COMPLETED',
-            updatedAt: now,
-          });
+          // Only the customer closes the request; the provider reports the job finished
+          const callerUid = auth?.currentUser?.uid;
+          transaction.update(
+            reqRef,
+            callerUid && callerUid === reqData.customerId
+              ? { status: 'COMPLETED', updatedAt: now }
+              : providerDoneUpdate(reqData, now)
+          );
         }
       }
 
@@ -2523,9 +2810,10 @@ export class FirebaseRepository implements Repository {
         }
 
         if (isMatchingOwnerAndRequest) {
-          // Appointment can ONLY transition to COMPLETED if it was in CONFIRMED or COMPLETED status.
-          // Unconfirmed appointments (PROPOSED, RESCHEDULED) cannot be marked COMPLETED per security rules.
-          if (existingAppt.status === 'CONFIRMED' || existingAppt.status === 'COMPLETED') {
+          // Appointment can ONLY transition to COMPLETED from CONFIRMED (an appointment the provider
+          // already completed is left as is). Unconfirmed appointments (PROPOSED, RESCHEDULED) cannot be
+          // marked COMPLETED per security rules.
+          if (existingAppt.status === 'CONFIRMED') {
             const now = new Date().toISOString();
             const apptUpdates: Partial<Appointment> = {
               status: 'COMPLETED',
@@ -2632,11 +2920,9 @@ export class FirebaseRepository implements Repository {
       if (reqSnap.exists()) {
         const reqData = reqSnap.data() as ServiceRequest;
         if (workStatus === 'WORK_COMPLETED') {
-          if (reqData.status !== 'COMPLETED') {
-            transaction.update(reqRef, {
-              status: 'COMPLETED',
-              updatedAt: now,
-            });
+          // The provider reports the job finished; the customer confirms it (COMPLETED)
+          if (reqData.status !== 'COMPLETED' && reqData.status !== 'CANCELLED') {
+            transaction.update(reqRef, providerDoneUpdate(reqData, now));
           }
         } else if (workStatus === 'WORK_STARTED' || workStatus === 'PROVIDER_ARRIVED' || workStatus === 'PROVIDER_ON_THE_WAY') {
           if (reqData.status === 'PROVIDER_SELECTED' || reqData.status === 'ACCEPTED') {

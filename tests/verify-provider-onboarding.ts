@@ -2,7 +2,7 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import { ProviderOnboarding } from '../src/components/ProviderOnboarding';
 import { ProviderProfileModal } from '../src/components/ProviderProfileModal';
-import { Provider, ServiceRequest } from '../src/types';
+import { ServiceRequest } from '../src/types';
 import { LocalRepository, setCurrentUserId } from '../src/services/localRepository';
 import { validateProviderData } from '../src/services/validation';
 import { normalizeCategoryId, normalizeCityId } from '../src/services/taxonomy';

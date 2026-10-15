@@ -265,6 +265,8 @@ async function runAppointmentTests() {
     }
   );
   assert(typeof unsubscribe === 'function', `19. subscribeToAppointment returns unsubscribe function`);
+  await new Promise((r) => setTimeout(r, 50));
+  assert(listenerUpdated, `19b. Listener receives the current appointment`);
   unsubscribe();
   assert(true, `20. Unsubscribe executes cleanly without memory leaks`);
 

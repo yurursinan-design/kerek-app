@@ -2,13 +2,8 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  getConversationId,
-  Conversation,
-  ChatMessage,
-  ChatAttachment,
   validateChatAttachment,
   sanitizeFileName,
-  CHAT_LIMITS,
 } from '../src/types';
 import { localRepository } from '../src/services/localRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
@@ -216,7 +211,7 @@ async function runTests() {
         type: 'application/x-bat',
       },
     });
-  } catch (err) {
+  } catch {
     failedUploadError = true;
   }
   assert.strictEqual(failedUploadError, true);
@@ -226,9 +221,18 @@ async function runTests() {
 
   // Test 10: Notification recipient & type
   console.log('\n[TEST 10] Notification recipient and type for attachments');
-  await notificationService.notifyNewMessage(conv, imageMsg);
-  const notifications = await localRepository.getNotifications(providerUserId);
-  const attNotif = notifications.find((n) => n.id === `notif_msg_${imageMsg.id}`);
+  // With the cloud the notice is made by the server (functions/src/notifications.ts); in device
+  // mode the app keeps it on the device
+  let attNotif: any;
+  if (resilientRepository.isCloudActive()) {
+    const serverNotifications = '../functions/src/notifications';
+    const { forNewMessage } = await import(serverNotifications);
+    attNotif = forNewMessage(conv.id, imageMsg.id, imageMsg, conv)[0];
+  } else {
+    await notificationService.notifyNewMessage(conv, imageMsg);
+    const notifications = await localRepository.getNotifications(providerUserId);
+    attNotif = notifications.find((n) => n.id === `notif_msg_${imageMsg.id}`);
+  }
   assert(attNotif, 'Notification must exist for recipient provider');
   assert.strictEqual(attNotif.type, 'PROVIDER_NEW_ATTACHMENT');
   assert.strictEqual(attNotif.recipientUserId, providerUserId);
@@ -276,7 +280,7 @@ async function runTests() {
   const storageContent = fs.readFileSync(storageRulesPath, 'utf8');
   assert(storageContent.includes('match /chat/{conversationId}/{messageId}/{fileName}'), 'storage.rules must protect chat path');
   assert(storageContent.includes('isConversationParticipant(conversationId)'), 'storage.rules must check conversation participant');
-  assert(storageContent.includes('allow delete: if false;'), 'storage.rules must disallow file deletion');
+  assert(storageContent.includes('allow update, delete: if false;'), 'storage.rules must disallow file deletion');
 
   const firestoreRulesPath = path.resolve('firestore.rules');
   const firestoreContent = fs.readFileSync(firestoreRulesPath, 'utf8');

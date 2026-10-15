@@ -1,7 +1,6 @@
 import {
   ExtractedNeed,
   Language,
-  PendingAttachment,
   RequestLocation,
   RequestUnderstanding,
   UnderstandingUrgency,
@@ -14,6 +13,7 @@ import {
   getCityDisplayName,
   normalizeCategoryId,
   normalizeCityId,
+  detectCatalogService,
 } from './taxonomy';
 
 export interface RequestUnderstandingContext {
@@ -349,6 +349,15 @@ export function analyzeRequestUnderstanding(
     if (detectedCategoryId) break;
   }
 
+  // Full service catalogue (all groups and services) when the primary patterns found nothing
+  if (!detectedCategoryId) {
+    const fromCatalog = detectCatalogService(normalized);
+    if (fromCatalog) {
+      detectedCategoryId = fromCatalog.groupId;
+      detectedCategory = getCategoryDisplayName(fromCatalog.groupId, lang);
+    }
+  }
+
   // Sub-keyword category detection if not caught by primary patterns
   if (!detectedCategoryId) {
     if (
@@ -402,16 +411,16 @@ export function analyzeRequestUnderstanding(
       )
     ) {
       detectedCategoryId = 'electronics';
-      detectedCategory = lang === 'tr' ? 'Электроника и покупка техники' : lang === 'kz' ? 'Электроника және гаджеттер' : 'Электроника и покупка техники';
+      detectedCategory = lang === 'kz' ? 'Электроника және гаджеттер' : 'Электроника и покупка техники';
     } else if (/клининг|уборка|тазалау|пәтер тазалау|кілем жуу|cleaning/i.test(normalized)) {
       detectedCategoryId = 'cleaning';
       detectedCategory = getCategoryDisplayName('cleaning_moving', lang);
     } else if (/эвакуатор|көлік бұзылды|авто|сто|шина|дөңгелек|tow truck|mechanic/i.test(normalized)) {
       detectedCategoryId = 'auto';
-      detectedCategory = lang === 'tr' ? 'Автоуслуги и эвакуатор' : lang === 'kz' ? 'Автокөмек және эвакуатор' : 'Автоуслуги и эвакуатор';
+      detectedCategory = lang === 'kz' ? 'Автокөмек және эвакуатор' : 'Автоуслуги и эвакуатор';
     } else {
       detectedCategoryId = 'other';
-      detectedCategory = lang === 'tr' ? 'Diğer Hizметler' : lang === 'kz' ? 'Басқа қызметтер' : 'Другие услуги';
+      detectedCategory = lang === 'kz' ? 'Басқа қызметтер' : 'Другие услуги';
     }
   }
 
@@ -662,6 +671,7 @@ export function analyzeRequestUnderstanding(
     cityId: effectiveCityId,
     category: detectedCategory,
     categoryId: detectedCategoryId,
+    serviceId: detectCatalogService(normalized, normalizeCategoryId(detectedCategoryId))?.serviceId,
     service,
     description: query,
     urgency,
@@ -748,13 +758,15 @@ export function understandingToExtractedNeed(
     cityId,
     category,
     categoryId,
+    ...(understanding.serviceId ? { serviceId: understanding.serviceId } : {}),
     service: understanding.service || originalQuery || 'Қызмет',
     date: understanding.preferredDate || (lang === 'kz' ? 'Бүгін' : 'Сегодня'),
     budget: lang === 'kz' ? 'Келісімді' : 'Договорная',
     urgency: urgencyMapping,
     originalQuery,
     confidence: understanding.confidence,
-    isAiParsed: true,
+    // Local rules engine; App sets isAiParsed only when the Gemini parser actually answered
+    isAiParsed: false,
     understanding,
   };
 }

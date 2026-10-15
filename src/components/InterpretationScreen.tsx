@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { ExtractedNeed, Language, Urgency, PendingAttachment, RequestLocation } from '../types';
 import { translations } from '../i18n/translations';
-import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
-import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
+import { ALL_CITIES_LIST } from '../services/analyzer';
+import { SERVICE_CATALOG, getGroup, getService, groupName, searchServices } from '../data/serviceCatalog';
+import { isCityOpen, normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { RequestMediaView } from './RequestMediaView';
 import {
-  CheckCircle2,
   ArrowRight,
   ArrowLeft,
   MapPin,
@@ -24,13 +24,23 @@ import {
   HelpCircle,
   Send,
   Check,
+  Loader2,
 } from 'lucide-react';
+import { CategoryIcon, Emoji3D } from './CategoryIcon';
+import { requestVisual } from './RequestIcon';
 
 interface InterpretationScreenProps {
   initialNeed: ExtractedNeed;
   language: Language;
   onContinue: (updatedNeed: ExtractedNeed) => void;
   onBack: () => void;
+  /** The request is being sent: buttons wait */
+  isSubmitting?: boolean;
+}
+
+// Pilot: a city that isn't open yet (e.g. the text mentions Almaty) falls back to Kyzylorda
+function openCityOr(c: string, language: Language): string {
+  return c.trim() && !isCityOpen(c) ? (language === 'kz' ? 'Қызылорда' : 'Кызылорда') : c;
 }
 
 export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
@@ -38,6 +48,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
   language,
   onContinue,
   onBack,
+  isSubmitting = false,
 }) => {
   const t = translations[language];
 
@@ -56,8 +67,15 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
   const [formError, setFormError] = useState<string | null>(null);
 
   // Editable form state
-  const [city, setCity] = useState(initialNeed.city || '');
-  const [category, setCategory] = useState(initialNeed.category || '');
+  // A closed city falls back to Kyzylorda, with a note
+  const [city, setCity] = useState(openCityOr(initialNeed.city || '', language));
+  const [closedCityNotice, setClosedCityNotice] = useState(Boolean((initialNeed.city || '').trim() && !isCityOpen(initialNeed.city)));
+  // Shown with the catalogue's name for the group, so the list below has it selected
+  const [category, setCategory] = useState(() => {
+    const g = getGroup(normalizeCategoryId(initialNeed.categoryId || initialNeed.category || ''));
+    return g ? groupName(g, language) : initialNeed.category || '';
+  });
+  const visual = requestVisual({ serviceId: initialNeed.serviceId, categoryId: initialNeed.categoryId, category: category || initialNeed.category });
   const [service, setService] = useState(initialNeed.service);
   const [date, setDate] = useState(initialNeed.date);
   const [budget, setBudget] = useState(initialNeed.budget);
@@ -76,7 +94,8 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
   // Synchronize state when initialNeed prop changes
   useEffect(() => {
-    setCity(initialNeed.city || '');
+    setCity(openCityOr(initialNeed.city || '', language));
+    setClosedCityNotice(Boolean((initialNeed.city || '').trim() && !isCityOpen(initialNeed.city)));
     setCategory(initialNeed.category || '');
     setService(initialNeed.service);
     setDate(initialNeed.date);
@@ -90,8 +109,10 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
       normalizeCategoryId(initialNeed.category) &&
       normalizeCategoryId(initialNeed.category) !== 'other'
     );
-    setIsEditingManual(!Boolean((initialNeed.confidence ?? 0.95) >= 0.7 && hasCity && hasCat));
+    setIsEditingManual(!((initialNeed.confidence ?? 0.95) >= 0.7 && hasCity && hasCat));
     setFormError(null);
+    // Only a new request resets the form; switching the language must not
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialNeed]);
 
   const handleAddClarification = (e?: React.FormEvent) => {
@@ -106,14 +127,12 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
   // Invokes existing createRequest flow only upon explicit customer confirmation
   const handleProceed = () => {
-    const finalCity = (city || '').trim() || (initialNeed.city || '').trim();
+    const finalCity = (city || '').trim() || openCityOr(initialNeed.city || '', language).trim();
     const resolvedCityId = normalizeCityId(finalCity);
     if (!finalCity || !resolvedCityId) {
       setFormError(
         language === 'kz'
           ? 'Қаланы таңдау міндетті'
-          : language === 'tr'
-          ? 'Şehir seçimi zorunludur'
           : 'Необходимо выбрать город'
       );
       setIsEditingManual(true);
@@ -126,8 +145,6 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
       setFormError(
         language === 'kz'
           ? 'Санатты таңдау міндетті'
-          : language === 'tr'
-          ? 'Kategori seçimi zorunludur'
           : 'Необходимо выбрать категорию'
       );
       setIsEditingManual(true);
@@ -136,16 +153,37 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
     setFormError(null);
 
-    // Merge any user answered clarifications into finalService / description
-    let finalService =
+    // The corrected need is put together in one place: the title stays a short title, added details
+    // go to the full description (nothing is cut off), and catalogue data recognised for another
+    // category or title is not carried over
+    const finalService =
       (service || '').trim() ||
       initialNeed.service ||
       initialNeed.originalQuery ||
       finalCategory;
-
-    if (addedClarifications.length > 0) {
-      finalService = `${finalService} [${addedClarifications.join('; ')}]`;
+    const baseDescription = (initialNeed.description || initialNeed.originalQuery || finalService).trim();
+    const finalDescription = [baseDescription, ...addedClarifications].filter(Boolean).join('\n').slice(0, 5000);
+    const categoryChanged = resolvedCategoryId !== normalizeCategoryId(initialNeed.categoryId || initialNeed.category || '');
+    const serviceEdited = finalService !== (initialNeed.service || '').trim();
+    let serviceId: string | undefined = initialNeed.serviceId;
+    if (serviceId && (serviceEdited || getService(serviceId)?.group.id !== resolvedCategoryId)) serviceId = undefined;
+    if (!serviceId && serviceEdited) {
+      serviceId = searchServices(finalService, 20).find((m) => m.group.id === resolvedCategoryId)?.service.id;
     }
+    const understanding = initialNeed.understanding
+      ? {
+          ...initialNeed.understanding,
+          city: finalCity,
+          cityId: resolvedCityId,
+          category: finalCategory,
+          categoryId: resolvedCategoryId,
+          service: finalService.slice(0, 300),
+          serviceId,
+          description: finalDescription,
+          // Questions were suggested for the category that was recognised, not the chosen one
+          ...(categoryChanged ? { suggestedQuestions: [] } : {}),
+        }
+      : undefined;
 
     onContinue({
       ...initialNeed,
@@ -153,14 +191,16 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
       cityId: resolvedCityId,
       category: finalCategory,
       categoryId: resolvedCategoryId,
+      serviceId,
       service: finalService,
+      description: finalDescription,
       date: (date || '').trim() || initialNeed.date || (language === 'kz' ? 'Бүгін' : 'Сегодня'),
       budget:
         (budget || '').trim() || initialNeed.budget || (language === 'kz' ? 'Келісімді' : 'Договорная'),
       urgency,
       pendingAttachments,
       location,
-      understanding: initialNeed.understanding,
+      understanding,
     });
   };
 
@@ -183,9 +223,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
           <div className="space-y-4 animate-fadeIn">
             {/* Header */}
             <div className="text-center pt-1">
-              <div className="w-12 h-12 rounded-2xl bg-sky-100 text-sky-600 flex items-center justify-center mx-auto mb-2.5 shadow-xs">
-                <Sparkles className="w-6 h-6 stroke-[2.5]" />
-              </div>
+              <Emoji3D code={visual.emoji} size={72} eager className="mx-auto mb-2 animate-popIn" />
               <h2 className="text-2xl font-bold text-slate-900 tracking-tight font-display">
                 {t.aiConfirmTitle}
               </h2>
@@ -195,21 +233,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
             </div>
 
             {/* Structured Card */}
-            <div className="bg-white rounded-2xl border-2 border-sky-100 shadow-sm p-4 space-y-3.5">
-              {/* Badge Bar */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-sky-800">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>{initialNeed.isAiParsed ? 'Gemini AI' : 'КЕРЕК AI'} · {language === 'kz' ? 'Талдау' : 'Анализ'}</span>
-                </div>
-                {initialNeed.confidence !== undefined && (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                    <span>{Math.round(initialNeed.confidence * 100)}% {language === 'kz' ? 'дәлдік' : 'точность'}</span>
-                  </span>
-                )}
-              </div>
-
+            <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm shadow-slate-200/60 p-4 space-y-3.5">
               {/* Items List */}
               <div className="space-y-3">
                 {/* City */}
@@ -224,14 +248,19 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                     <span className="text-base font-bold text-slate-900 font-display">
                       {city}
                     </span>
+                    {closedCityNotice && (
+                      <span className="block text-xs text-amber-700 mt-0.5 leading-snug">
+                        {language === 'kz'
+                          ? 'Tapsyr әзірге тек Қызылордада жұмыс істейді. Басқа қалалар жақында ашылады.'
+                          : 'Tapsyr пока работает только в Кызылорде. Другие города откроются позже.'}
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 {/* Category */}
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 mt-0.5">
-                    <Tag className="w-4 h-4 stroke-[2.5]" />
-                  </div>
+                  <CategoryIcon emoji={visual.emoji} color={visual.color} size="xs" />
                   <div>
                     <span className="text-[11px] font-semibold text-slate-400 block uppercase tracking-wider">
                       {t.fieldCategory}
@@ -477,10 +506,12 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <button
                   type="button"
                   onClick={handleProceed}
-                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/25 active:scale-[0.99] transition-all"
+                  disabled={isSubmitting}
+                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/25 active:scale-[0.99] transition-all"
                 >
+                  {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                   <span>{t.aiConfirmBtn}</span>
-                  <ArrowRight className="w-5 h-5 stroke-[2.5]" />
+                  {!isSubmitting && <ArrowRight className="w-5 h-5 stroke-[2.5]" />}
                 </button>
 
                 {/* Secondary: Edit / Customize manually */}
@@ -510,9 +541,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
           <div className="space-y-4 animate-fadeIn">
             {/* Header */}
             <div className="text-center pt-1">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-2.5">
-                <CheckCircle2 className="w-6 h-6 stroke-[2.5]" />
-              </div>
+              <Emoji3D code="1f4dd" size={64} eager className="mx-auto mb-2 animate-popIn" />
               <h2 className="text-2xl font-bold text-slate-900 tracking-tight font-display">
                 {t.interpretationTitle}
               </h2>
@@ -606,13 +635,14 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                     }`}
                   >
                     <option value="">
-                      {language === 'kz' ? '-- Қаланы таңдаңыз --' : language === 'tr' ? '-- Şehir seçiniz --' : '-- Выберите город --'}
+                      {language === 'kz' ? '-- Қаланы таңдаңыз --' : '-- Выберите город --'}
                     </option>
                     {ALL_CITIES_LIST.map((c) => {
                       const cityName = language === 'kz' ? c.kz : c.ru;
+                      const open = isCityOpen(c.ru);
                       return (
-                        <option key={c.ru} value={cityName}>
-                          {cityName}
+                        <option key={c.ru} value={cityName} disabled={!open}>
+                          {open ? cityName : `${cityName} — ${language === 'kz' ? 'жақында' : 'скоро'}`}
                         </option>
                       );
                     })}
@@ -639,12 +669,12 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                     }`}
                   >
                     <option value="">
-                      {language === 'kz' ? '-- Санатты таңдаңыз --' : language === 'tr' ? '-- Kategori seçiniz --' : '-- Выберите категорию --'}
+                      {language === 'kz' ? '-- Санатты таңдаңыз --' : '-- Выберите категорию --'}
                     </option>
-                    {CATEGORIES_LIST.map((cat) => {
-                      const catName = language === 'tr' ? (cat.tr || cat.ru) : language === 'kz' ? cat.kz : cat.ru;
+                    {SERVICE_CATALOG.map((g) => {
+                      const catName = groupName(g, language);
                       return (
-                        <option key={cat.id} value={catName}>
+                        <option key={g.id} value={catName}>
                           {catName}
                         </option>
                       );
@@ -788,8 +818,10 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
               <div className="pt-2 space-y-2">
                 <button
                   type="submit"
-                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all"
+                  disabled={isSubmitting}
+                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all"
                 >
+                  {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                   <span>{t.continueButton}</span>
                   <ArrowRight className="w-5 h-5 stroke-[2.5]" />
                 </button>

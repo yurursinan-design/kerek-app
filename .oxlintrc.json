@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "import"],
+  "env": { "browser": true, "node": true, "es2022": true },
+  "categories": { "correctness": "error", "suspicious": "warn" },
+  "rules": {
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "warn",
+    "react/react-in-jsx-scope": "off",
+    "react/refs": "off",
+    "react/purity": "off",
+    "react/set-state-in-effect": "off",
+    "react/exhaustive-effect-dependencies": "off",
+    "react/hooks": "off",
+    "preserve-caught-error": "off",
+    "no-underscore-dangle": "off",
+    "import/no-unassigned-import": "off"
+  },
+  "ignorePatterns": ["dist/**", "android/**", "functions/lib/**", "node_modules/**"]
+}

@@ -1,7 +1,7 @@
 import { auth } from './firebase';
 import { firebaseRepository } from './firebaseRepository';
 import { getCurrentUserId, generateUUID } from './localRepository';
-import { WorkStatus, ProviderOffer } from '../types';
+import { ProviderOffer } from '../types';
 
 export type MutationType =
   | 'createRequest'
@@ -86,6 +86,13 @@ export class OfflineQueueService {
   private autoSyncInterval: any = null;
 
   constructor() {
+    // A change that was being sent when the page closed is still waiting: send it again
+    try {
+      const queue = this.getQueue();
+      if (queue.some((m) => m.status === 'SYNCING')) {
+        this.saveQueue(queue.map((m) => (m.status === 'SYNCING' ? { ...m, status: 'PENDING' as MutationStatus } : m)));
+      }
+    } catch {}
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
         console.log('[OfflineQueue] Network re-established (online event). Processing queue...');
@@ -135,7 +142,7 @@ export class OfflineQueueService {
       } else {
         memoryQueueStore = queue;
       }
-    } catch (e) {
+    } catch {
       memoryQueueStore = queue;
     }
     this.notifyListeners();
@@ -149,6 +156,20 @@ export class OfflineQueueService {
     } catch {}
     memoryQueueStore = [];
     this.notifyListeners();
+  }
+
+  /** "Retry" on the warning: failed changes go back to waiting and are sent again. */
+  public async retryFailed(): Promise<void> {
+    const queue = this.getQueue().map((m) =>
+      m.status === 'FAILED_FATAL' ? { ...m, status: 'PENDING' as MutationStatus, nextRetryAt: undefined } : m
+    );
+    this.saveQueue(queue);
+    await this.processQueue();
+  }
+
+  /** "Close" on the warning: changes that can't be sent are dropped. */
+  public dismissFailed(): void {
+    this.saveQueue(this.getQueue().filter((m) => m.status !== 'FAILED_FATAL' && m.status !== 'FAILED_PERMANENT'));
   }
 
   public removeMutation(id: string): void {

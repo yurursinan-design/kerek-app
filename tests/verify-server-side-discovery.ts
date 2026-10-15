@@ -14,7 +14,6 @@
 
 import { localRepository } from '../src/services/localRepository';
 import { firebaseRepository } from '../src/services/firebaseRepository';
-import { resilientRepository } from '../src/services/resilientRepository';
 import { matchProviders } from '../src/services/matchingService';
 import { Provider, ServiceRequest } from '../src/types';
 

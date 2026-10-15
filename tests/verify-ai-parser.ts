@@ -7,8 +7,6 @@ import {
 import {
   CANONICAL_CATEGORIES as FRONTEND_CATEGORIES,
   CANONICAL_CITIES as FRONTEND_CITIES,
-  normalizeCategoryId,
-  normalizeCityId,
 } from '../src/services/taxonomy';
 import { GEMINI_CONFIG } from '../functions/src/config';
 import { parseServiceRequest } from '../src/services/aiRequestParser';
@@ -33,9 +31,9 @@ async function runTests() {
     `Region: ${GEMINI_CONFIG.region}`
   );
   assert(
-    'Secret name is GEMINI_API_KEY',
-    GEMINI_CONFIG.secretName === 'GEMINI_API_KEY',
-    `Secret: ${GEMINI_CONFIG.secretName}`
+    'Model output is capped',
+    GEMINI_CONFIG.maxOutputTokens > 0 && GEMINI_CONFIG.maxOutputTokens <= 2048,
+    `maxOutputTokens: ${GEMINI_CONFIG.maxOutputTokens}`
   );
   assert(
     'Model is not fixed to legacy gemini-1.5-flash',
@@ -111,8 +109,8 @@ async function runTests() {
     validateAndNormalizeCategoryId('home_services') === 'plumbing' || validateAndNormalizeCategoryId('home_services') === 'home_services'
   );
   assert(
-    'cargo_moving canonical ID is valid or normalizes to cleaning_moving',
-    validateAndNormalizeCategoryId('cargo_moving') === 'cleaning_moving' || validateAndNormalizeCategoryId('cargo_moving') === 'cargo_moving'
+    'legacy cargo_moving normalizes to the moving group',
+    validateAndNormalizeCategoryId('cargo_moving') === 'moving'
   );
   assert(
     'Invalid unknown category is rejected (returns null)',
@@ -150,10 +148,10 @@ async function runTests() {
       typeof response.error?.message === 'string'
   );
 
-  console.log('\n=============================================');
-  console.log('ALL AI PARSER TESTS PASSED SUCCESSFULLY');
-  console.log('=============================================\n');
-  process.exit(0);
+  const failed = process.exitCode === 1;
+  console.log(failed ? '\nSOME CHECKS FAILED (see [FAIL] lines above)\n' : '\nALL AI PARSER TESTS PASSED\n');
+  // Exit with the real result: a [FAIL] above must fail the run
+  process.exit(failed ? 1 : 0);
 }
 
 runTests().catch((err) => {

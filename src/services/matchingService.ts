@@ -1,3 +1,4 @@
+import { providerGroupIds } from '../data/serviceCatalog';
 import { Provider, ServiceRequest } from '../types';
 import { normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 
@@ -76,6 +77,8 @@ export function matchProviders(request: ServiceRequest, providers: Provider[]): 
     const pCatId = provider.categoryId
       ? normalizeCategoryId(provider.categoryId)
       : (provider.category ? normalizeCategoryId(provider.category) : undefined);
+    // Every group the provider works in (categoryIds), not only the main one
+    const pGroupIds = [...providerGroupIds(provider).map((g) => normalizeCategoryId(g) || g), ...(pCatId ? [pCatId] : [])];
     const pCity = normalizeText(provider.city);
     const pCat = normalizeText(provider.category);
     const pSrv = normalizeText(provider.services);
@@ -90,7 +93,7 @@ export function matchProviders(request: ServiceRequest, providers: Provider[]): 
 
     // 2. Same Category (Canonical categoryId check - bridges Kazakh and Russian)
     let catMatch = false;
-    if (reqCatId && pCatId && (reqCatId === pCatId || isCategoryMatch(reqCatId, pCatId))) {
+    if (reqCatId && pGroupIds.some((g) => g === reqCatId || isCategoryMatch(reqCatId, g))) {
       score += 30;
       catMatch = true;
     } else if (pCat === normCat || (normCat && (normCat.includes(pCat) || pCat.includes(normCat)))) {
@@ -106,7 +109,7 @@ export function matchProviders(request: ServiceRequest, providers: Provider[]): 
 
     // 3. Matching Service
     let srvMatch = false;
-    if (normSrv && (pSrv.includes(normSrv) || normSrv.includes(pSrv))) {
+    if (normSrv && pSrv && (pSrv.includes(normSrv) || normSrv.includes(pSrv))) {
       score += 20;
       srvMatch = true;
     } else if (normSrv) {

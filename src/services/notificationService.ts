@@ -16,13 +16,33 @@ import { getCurrentUserId } from './localRepository';
  * Plays a subtle, pleasant chime for incoming in-app notifications using Web Audio API.
  * Gracefully silent if user has not interacted with DOM yet or audio context is unavailable.
  */
-export function playNotificationSound(): void {
+let chimeContext: AudioContext | null = null;
+let dombra: HTMLAudioElement | null = null;
+
+/** KEREK's sound for a new job: a short dombra strum (same file as the phone notification). */
+function playDombra(): boolean {
+  try {
+    if (typeof Audio === 'undefined') return false;
+    dombra = dombra || new Audio(`${import.meta.env.BASE_URL}sounds/dombra.wav`);
+    dombra.currentTime = 0;
+    dombra.play().catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function playNotificationSound(type?: NotificationEventType): void {
+  if (type === 'NEW_REQUEST' && playDombra()) return;
   try {
     if (typeof window === 'undefined') return;
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioContextClass) return;
 
-    const ctx = new AudioContextClass();
+    // One audio context for the whole session (browsers limit how many can be open)
+    chimeContext = chimeContext || new AudioContextClass();
+    const ctx = chimeContext;
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     const now = ctx.currentTime;
 
     const osc = ctx.createOscillator();
@@ -268,6 +288,37 @@ export const notificationService = {
   /**
    * 4. Lifecycle: Request completed
    */
+  /**
+   * The selected provider reports the job finished: ask the customer to confirm it.
+   */
+  async notifyProviderReportedDone(request: ServiceRequest): Promise<void> {
+    try {
+      const payload: AppNotification = {
+        id: `notif_done_cust_${request.id}`,
+        recipientUserId: request.customerId,
+        recipientRole: 'customer',
+        type: 'CUSTOMER_WORK_COMPLETED',
+        title: {
+          kz: 'Шебер жұмысты аяқтады',
+          ru: 'Мастер завершил работу',
+        },
+        body: {
+          kz: 'Жұмысты тексеріп, аяқталғанын растаңыз.',
+          ru: 'Проверьте работу и подтвердите завершение.',
+        },
+        requestId: request.id,
+        offerId: request.selectedOfferId,
+        targetScreen: 'request_detail',
+        isRead: false,
+        readAt: null,
+        createdAt: new Date().toISOString(),
+      };
+      await resilientRepository.createNotification(payload);
+    } catch (err) {
+      console.warn('[NotificationService] notifyProviderReportedDone note:', err);
+    }
+  },
+
   async notifyWorkCompleted(request: ServiceRequest, providerUserId?: string): Promise<void> {
     // 4a. Notify Customer that work is completed and review is recommended
     try {
@@ -579,8 +630,8 @@ export const notificationService = {
             ru: 'Работа завершена! ✅',
           };
           body = {
-            kz: 'Шебер жұмысты орындап бітті. Нәтижені тексеріп, баға беріңіз.',
-            ru: 'Мастер завершил работу. Пожалуйста, проверьте результат и оцените работу мастера.',
+            kz: 'Шебер жұмысты орындап бітті. Нәтижені тексеріп, аяқталғанын растаңыз.',
+            ru: 'Мастер завершил работу. Проверьте результат и подтвердите завершение.',
           };
           break;
         case 'CANCELLED':

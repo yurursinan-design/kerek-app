@@ -1,8 +1,9 @@
 import assert from 'node:assert';
-import { db, auth, app, ensureFirebaseAuth, createSecondaryFirebaseApp } from '../src/services/firebase';
+import { db, auth, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { deleteApp } from 'firebase/app';
 import { signInAnonymously } from 'firebase/auth';
-import { doc, getDoc, getDocs, collection, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocs, collection, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { sendOfferCounted } from './helpers/offers';
 
 // Mock minimal localStorage required by Firebase Auth Node.js environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -31,6 +32,7 @@ async function runMessagingSecurityTests() {
   const providerApp = provClient.app;
   const providerAuth = provClient.auth;
   const providerCred = await signInAnonymously(providerAuth);
+  await attachEmulatorTestPhone(providerAuth);
   const providerUid = providerCred.user.uid;
   const providerDb = provClient.db;
   console.log('✓ [Client 2 - Provider] Authenticated. UID:', providerUid);
@@ -40,6 +42,7 @@ async function runMessagingSecurityTests() {
   const unrelatedApp = unrelClient.app;
   const unrelatedAuth = unrelClient.auth;
   const unrelatedCred = await signInAnonymously(unrelatedAuth);
+  await attachEmulatorTestPhone(unrelatedAuth);
   const unrelatedUid = unrelatedCred.user.uid;
   const unrelatedDb = unrelClient.db;
   console.log('✓ [Client 3 - Unrelated User] Authenticated. UID:', unrelatedUid);
@@ -103,6 +106,7 @@ async function runMessagingSecurityTests() {
     customerId: customerUid,
     customerName: 'Test Müşteri',
     city: 'Қызылорда',
+    cityId: 'kyzylorda',
     category: 'Тұрмыстық техника жөндеу',
     service: 'Тест қауіпсіздік тексеру',
     status: 'OPEN',
@@ -110,7 +114,28 @@ async function runMessagingSecurityTests() {
     updatedAt: now,
   });
 
-  // Customer creates deterministic conversation linking customer and provider
+  // The provider sends an offer and the customer selects it: the rules only allow a conversation for a
+  // request that has a selected provider with an accepted offer.
+  const testOfferId = `OFFER-${testReqId}-${providerUid}`;
+  await setDoc(doc(providerDb, 'providers', providerUid), {
+    id: providerUid, userId: providerUid, name: 'Test Шебер', city: 'Қызылорда', cityId: 'kyzylorda', category: 'appliances',
+  });
+  await sendOfferCounted(providerDb, testOfferId, {
+    id: testOfferId,
+    requestId: testReqId,
+    providerId: providerUid,
+    providerUserId: providerUid,
+    providerName: 'Test Шебер',
+    price: '10 000 ₸',
+    status: 'PENDING',
+  });
+  // Selecting the offer and accepting it happen in one write
+  const acceptBatch = writeBatch(db!);
+  acceptBatch.set(reqRef, { status: 'PROVIDER_SELECTED', selectedOfferId: testOfferId, updatedAt: new Date().toISOString() }, { merge: true });
+  acceptBatch.set(doc(db!, 'offers', testOfferId), { status: 'ACCEPTED', updatedAt: new Date().toISOString() }, { merge: true });
+  await acceptBatch.commit();
+
+  // Customer creates the deterministic conversation linking customer and the selected provider
   await setDoc(convRef, {
     id: testConvId,
     requestId: testReqId,
@@ -123,12 +148,6 @@ async function runMessagingSecurityTests() {
     createdAt: now,
     updatedAt: now,
   });
-
-  // Update request to PROVIDER_SELECTED so message exchange is valid
-  await setDoc(reqRef, {
-    status: 'PROVIDER_SELECTED',
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
   console.log('✓ Transient conversation ready:', testConvId);
 
   // -------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Language, normalizeRequestStatus, Review } from '../types';
 import { translations } from '../i18n/translations';
 import { repository, getFriendlyErrorMessage, getCurrentUserId } from '../services';
@@ -44,6 +44,10 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   );
 
   // When modal opens, verify COMPLETED status in Firestore/repository
+  // Latest close handler from the parent (the status check below runs once per opening)
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!isOpen || !requestId) return;
     let isMounted = true;
@@ -59,7 +63,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
                 : 'Оценивать можно только завершенные заказы'
             );
             setTimeout(() => {
-              if (isMounted) onClose();
+              if (isMounted) onCloseRef.current();
             }, 1800);
           }
         }

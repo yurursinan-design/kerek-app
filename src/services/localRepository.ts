@@ -1,3 +1,4 @@
+import { cleanCatalogIds } from '../data/serviceCatalog';
 import {
   Appointment,
   AppNotification,
@@ -6,12 +7,12 @@ import {
   Conversation,
   getAppointmentId,
   getConversationId,
+  offerExtras,
   isValidWorkStatusTransition,
   normalizeRequestStatus,
   Provider,
   ProviderOffer,
   RequestAttachment,
-  RequestLocation,
   RequestStatus,
   Review,
   sanitizeFileName,
@@ -20,6 +21,9 @@ import {
   validateChatAttachment,
   validateRequestAttachment,
   WorkStatus,
+  isRequestExpired,
+  isRequestFull,
+  REQUEST_OPEN_MS,
 } from '../types';
 import {
   OfferFilter,
@@ -28,7 +32,7 @@ import {
   RequestFilter,
   ReviewFilter,
 } from './repository';
-import { INITIAL_DEMO_PROVIDERS } from './storage';
+import { INITIAL_DEMO_PROVIDERS, onPersonalDataCleared } from './storage';
 import { matchProviders } from './matchingService';
 import {
   validateOfferData,
@@ -39,6 +43,9 @@ import {
 import { logTechnicalError } from './errorHandler';
 import { auth, isFirebaseConfigured } from './firebase';
 import { normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
+import { generateOfferId } from './ids';
+import { isPortfolioSlot } from './portfolio';
+import { clearDeviceFiles, dataUrlToBlob, saveDeviceFile } from './deviceFiles';
 
 const STORAGE_KEY_USER_ID = 'kerek_current_user_id_v2';
 const STORAGE_KEY_USERS = 'kerek_users_v2';
@@ -53,24 +60,28 @@ const STORAGE_KEY_NOTIFICATIONS = 'kerek_notifications_v1';
 const STORAGE_KEY_APPOINTMENTS = 'kerek_appointments_v1';
 const STORAGE_KEY_COUNTER = 'kerek_req_counter_v1';
 
+// Fallback for when this browser can't store data (private mode, storage full, no DOM in tests).
+// It only holds what localStorage refused, and is emptied on logout with the stored copy, so the
+// previous user's data can't come back from memory after logout.
 const memoryStore = new Map<string, string>();
+onPersonalDataCleared(() => memoryStore.clear());
 const safeStorage = {
   getItem: (key: string): string | null => {
+    if (memoryStore.has(key)) return memoryStore.get(key) as string;
     try {
-      if (typeof localStorage !== 'undefined') {
-        const val = localStorage.getItem(key);
-        if (val !== null) return val;
-      }
+      if (typeof localStorage !== 'undefined') return localStorage.getItem(key);
     } catch {}
-    return memoryStore.get(key) || null;
+    return null;
   },
   setItem: (key: string, val: string): void => {
-    memoryStore.set(key, val);
     try {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem(key, val);
+        memoryStore.delete(key);
+        return;
       }
     } catch {}
+    memoryStore.set(key, val);
   },
   removeItem: (key: string): void => {
     memoryStore.delete(key);
@@ -81,6 +92,26 @@ const safeStorage = {
     } catch {}
   },
 };
+
+// Device files: kept in IndexedDB under their storage path and opened from there (storageUrls.ts),
+// so they survive a reload; the stored link stays empty. Without IndexedDB (tests, very old
+// browsers) the address of this page session is stored as before.
+onPersonalDataCleared(() => {
+  void clearDeviceFiles();
+});
+async function keepDeviceFile(storagePath: string, data: unknown): Promise<string> {
+  const blob = data instanceof Blob ? data : typeof data === 'string' && data.startsWith('data:') ? dataUrlToBlob(data) : null;
+  if (blob && (await saveDeviceFile(storagePath, blob))) return '';
+  if (data instanceof Blob) {
+    try {
+      return URL.createObjectURL(data);
+    } catch {
+      return `local-blob://${storagePath}`;
+    }
+  }
+  if (typeof data === 'string' && data.startsWith('data:')) return data;
+  return `local-storage://${storagePath}`;
+}
 
 // Generate UUID safely with fallback
 export function generateUUID(): string {
@@ -129,19 +160,6 @@ export function getCurrentUserId(): string {
   }
 }
 
-// Helper: Normalize string for search filtering
-function normalizeText(str: string): string {
-  return (str || '')
-    .toLowerCase()
-    .replace(/қ/g, 'к')
-    .replace(/ө/g, 'о')
-    .replace(/ұ/g, 'у')
-    .replace(/ү/g, 'у')
-    .replace(/і/g, 'и')
-    .replace(/ғ/g, 'г')
-    .replace(/ә/g, 'а')
-    .trim();
-}
 
 export class LocalRepository implements Repository {
   // =================== Users ===================
@@ -205,7 +223,9 @@ export class LocalRepository implements Repository {
       const city = providerData.city?.trim() || 'Қызылорда';
       const cityId = normalizeCityId(providerData.cityId || city) || providerData.cityId || 'kyzylorda';
       const category = providerData.category?.trim() || '';
-      const categoryId = normalizeCategoryId(providerData.categoryId || category);
+      // Catalogue services picked by the provider; the first group is the main category
+    const catalog = cleanCatalogIds(providerData.serviceIds);
+    const categoryId = catalog.categoryIds[0] || normalizeCategoryId(providerData.categoryId || category);
 
       const newProvider: Provider = {
         id,
@@ -218,6 +238,7 @@ export class LocalRepository implements Repository {
         district: providerData.district?.trim() || '',
         category,
         categoryId,
+        ...(catalog.serviceIds.length ? { serviceIds: catalog.serviceIds, categoryIds: catalog.categoryIds } : {}),
         services: providerData.services?.trim() || '',
         priceRange: providerData.priceRange?.trim() || '',
         workingHours: providerData.workingHours?.trim() || '09:00 - 20:00',
@@ -229,6 +250,10 @@ export class LocalRepository implements Repository {
         iinVerified: providerData.iinVerified ?? false,
         hasCertificate: providerData.hasCertificate ?? false,
         ...(providerData.tradeLicense ? { tradeLicense: providerData.tradeLicense } : {}),
+        ...(typeof providerData.paused === 'boolean' ? { paused: providerData.paused } : {}),
+        ...(Array.isArray(providerData.portfolio)
+          ? { portfolio: providerData.portfolio.filter((x, i, all) => isPortfolioSlot(x) && all.indexOf(x) === i).slice(0, 8) }
+          : {}),
         isDemo: false,
       };
 
@@ -374,12 +399,14 @@ export class LocalRepository implements Repository {
         cityId,
         category,
         categoryId,
+      ...(requestData.serviceId ? { serviceId: requestData.serviceId } : {}),
         service,
         date: requestData.date?.trim() || 'Бүгін',
         budget: requestData.budget?.trim() || 'Келісімді',
         urgency: requestData.urgency || 'normal',
         status: requestData.status || 'OPEN',
         createdAt: new Date().toISOString(),
+        expiresAtMs: Date.now() + REQUEST_OPEN_MS,
         ...(requestData.attachments && requestData.attachments.length > 0 ? { attachments: requestData.attachments } : {}),
         ...(requestData.location ? { location: requestData.location } : {}),
         ...(requestData.understanding ? { understanding: requestData.understanding } : {}),
@@ -431,18 +458,7 @@ export class LocalRepository implements Repository {
     const attachmentId = `att_req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const storagePath = `requests/${cleanId}/${attachmentId}_${sanitizedName}`;
 
-    let downloadUrl = '';
-    if (file.data instanceof Blob) {
-      try {
-        downloadUrl = URL.createObjectURL(file.data);
-      } catch {
-        downloadUrl = `local-blob://${storagePath}`;
-      }
-    } else if (typeof file.data === 'string' && file.data.startsWith('data:')) {
-      downloadUrl = file.data;
-    } else {
-      downloadUrl = `local-storage://${storagePath}`;
-    }
+    const downloadUrl = await keepDeviceFile(storagePath, file.data);
 
     const attachment: RequestAttachment = {
       id: attachmentId,
@@ -519,6 +535,16 @@ export class LocalRepository implements Repository {
     }
   }
 
+  watchRequestActivity(_requestId: string, onChange: () => void): () => void {
+    // Local mode: another tab of this browser may change the data
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY_REQUESTS || e.key === STORAGE_KEY_OFFERS) onChange();
+    };
+    if (typeof window === 'undefined') return () => {};
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }
+
   subscribeToRequests(
     filter: RequestFilter,
     onData: (requests: ServiceRequest[]) => void,
@@ -566,7 +592,7 @@ export class LocalRepository implements Repository {
         normStatus === 'CANCELLED'
       ) {
         const nonStatusKeys = Object.keys(updates).filter(
-          (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId'
+          (k) => k !== 'status' && k !== 'updatedAt' && k !== 'selectedOfferId' && k !== 'providerDoneAt' && k !== 'finalPrice'
         );
         if (nonStatusKeys.length > 0) {
           throw new Error(
@@ -600,6 +626,27 @@ export class LocalRepository implements Repository {
     return this.updateRequest(requestId, updates);
   }
 
+  /**
+   * Device copy of documents read from or written to the cloud: stored exactly as they are (same
+   * id, createdAt, selectedOfferId, …), unlike createRequest/createOffer, which make new records.
+   * Many documents are written in one go, so parallel calls can't overwrite each other's work.
+   */
+  async cacheRequests(requests: ServiceRequest[]): Promise<void> {
+    if (!requests.length) return;
+    const all = await this.getAllRequestsRaw();
+    const byId = new Map(all.map((r) => [r.id, r]));
+    for (const r of requests) if (r?.id) byId.set(r.id, { ...byId.get(r.id), ...r });
+    safeStorage.setItem(STORAGE_KEY_REQUESTS, JSON.stringify([...byId.values()]));
+  }
+
+  async cacheOffers(offers: ProviderOffer[]): Promise<void> {
+    if (!offers.length) return;
+    const all = await this.getAllOffersRaw();
+    const byId = new Map(all.map((o) => [o.id, o]));
+    for (const o of offers) if (o?.id) byId.set(o.id, { ...byId.get(o.id), ...o });
+    safeStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify([...byId.values()]));
+  }
+
   private async getAllRequestsRaw(): Promise<ServiceRequest[]> {
     try {
       const data = safeStorage.getItem(STORAGE_KEY_REQUESTS);
@@ -627,7 +674,7 @@ export class LocalRepository implements Repository {
       }
 
       const newOffer: ProviderOffer = {
-        id: offerData.id || `OFFER-${offerData.requestId || 'REQ'}-${Date.now().toString().slice(-4)}`,
+        id: offerData.id || generateOfferId(offerData.requestId || 'REQ'),
         requestId: offerData.requestId || '',
         providerId: offerData.providerId || '',
         providerUserId:
@@ -642,22 +689,30 @@ export class LocalRepository implements Repository {
         priceType,
         availability: offerData.availability || 'В течение часа',
         message: offerData.message || '',
+        ...offerExtras(offerData),
         status: 'PENDING',
         createdAt: new Date().toISOString(),
         iinVerified: offerData.iinVerified ?? false,
         hasCertificate: offerData.hasCertificate ?? false,
       };
 
+      // Same limits as the cloud rules: open requests only until they expire, at most 5 real offers
+      const req = newOffer.requestId ? await this.getRequest(newOffer.requestId) : null;
+      if (req && !newOffer.isDemo) {
+        if (isRequestExpired(req)) throw new Error('Validation Error: request-expired');
+        if (isRequestFull(req)) throw new Error('Validation Error: offer-limit-reached');
+      }
+
       const allOffers = await this.getAllOffersRaw();
       const updated = [newOffer, ...allOffers];
       safeStorage.setItem(STORAGE_KEY_OFFERS, JSON.stringify(updated));
 
-      // Upgrade request status to OFFERS_RECEIVED if it was NEW or MATCHING
-      if (newOffer.requestId) {
-        const req = await this.getRequest(newOffer.requestId);
-        if (req && (req.status === 'MATCHING' || req.status === 'NEW')) {
-          await this.updateRequest(req.id, { status: 'OFFERS_RECEIVED' });
-        }
+      // Count the offer and upgrade the request status to OFFERS_RECEIVED if it was NEW or MATCHING
+      if (req) {
+        const changes: Partial<ServiceRequest> = {};
+        if (!newOffer.isDemo) changes.offerCount = (req.offerCount || 0) + 1;
+        if (req.status === 'MATCHING' || req.status === 'NEW') changes.status = 'OFFERS_RECEIVED';
+        if (Object.keys(changes).length) await this.updateRequest(req.id, changes);
       }
 
       return newOffer;
@@ -665,6 +720,10 @@ export class LocalRepository implements Repository {
       logTechnicalError('LocalRepository.createOffer', e);
       throw e;
     }
+  }
+
+  async countOffers(requestId: string): Promise<number> {
+    return (await this.getOffers({ requestId })).length;
   }
 
   async getOffers(filter?: OfferFilter): Promise<ProviderOffer[]> {
@@ -773,12 +832,22 @@ export class LocalRepository implements Repository {
     requestId: string,
     offerId: string
   ): Promise<{ request: ServiceRequest | null; offer: ProviderOffer | null }> {
+    const cleanReqId = (requestId || '').trim();
+    const cleanOfferId = (offerId || '').trim();
+    // Same preconditions as the cloud accept; nothing is written when one of them fails
+    const allOffers = await this.getAllOffersRaw();
+    const target = allOffers.find((o) => o.id === cleanOfferId);
+    const request = await this.getRequest(cleanReqId);
+    if (!target || !request) throw new Error(`Offer not found: ${cleanOfferId}`);
+    if (target.requestId !== cleanReqId) throw new Error('Validation Error: Offer does not belong to this request.');
+    // Accepting the offer that is already the chosen one changes nothing
+    if (request.selectedOfferId === cleanOfferId && target.status === 'ACCEPTED') return { request, offer: target };
+    if (request.selectedOfferId || !['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'].includes(normalizeRequestStatus(request.status))) {
+      throw new Error('Validation Error: Request has already been accepted.');
+    }
+    if ((target.status || 'PENDING') !== 'PENDING') throw new Error('Validation Error: Offer is no longer pending.');
     try {
-      const cleanReqId = (requestId || '').trim();
-      const cleanOfferId = (offerId || '').trim();
-
       // 1. Update all offers for this request
-      const allOffers = await this.getAllOffersRaw();
       let updatedOffer: ProviderOffer | null = null;
 
       for (let i = 0; i < allOffers.length; i++) {
@@ -1030,6 +1099,13 @@ export class LocalRepository implements Repository {
     }
   }
 
+  async getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }> {
+    const ids = new Set(providerIds.map((id) => (id || '').trim()).filter(Boolean));
+    const reviews = (await this.getAllReviewsRaw()).filter((r) => ids.has((r.providerId || '').trim()));
+    const total = reviews.length;
+    return { count: total, avg: total ? reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / total : 0 };
+  }
+
   private async getAllReviewsRaw(): Promise<Review[]> {
     try {
       const data = safeStorage.getItem(STORAGE_KEY_REVIEWS);
@@ -1127,7 +1203,8 @@ export class LocalRepository implements Repository {
 
   async sendMessage(conversationId: string, messageData: Partial<ChatMessage>): Promise<ChatMessage> {
     const text = (messageData.text || '').trim();
-    if (!text) {
+    const hasAttachment = Array.isArray(messageData.attachments) && messageData.attachments.length > 0;
+    if (!text && !hasAttachment) {
       throw new Error('Validation Error: Message text cannot be empty');
     }
     if (text.length > 2000) {
@@ -1245,19 +1322,7 @@ export class LocalRepository implements Repository {
     const attachmentId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const storagePath = `chat/${cleanId}/pending/${attachmentId}_${sanitizedName}`;
 
-    // For local fallback: create an object URL or data URL if available, or simulate offline storage URL
-    let downloadUrl = '';
-    if (file.data instanceof Blob) {
-      try {
-        downloadUrl = URL.createObjectURL(file.data);
-      } catch {
-        downloadUrl = `local-blob://${storagePath}`;
-      }
-    } else if (typeof file.data === 'string' && file.data.startsWith('data:')) {
-      downloadUrl = file.data;
-    } else {
-      downloadUrl = `local-storage://${storagePath}`;
-    }
+    const downloadUrl = await keepDeviceFile(storagePath, file.data);
 
     const attachment: ChatAttachment = {
       id: attachmentId,
@@ -1390,8 +1455,10 @@ export class LocalRepository implements Repository {
         const c = allConvs[convIdx];
         if (currentUid === c.customerId) {
           c.unreadCountCustomer = 0;
+          if (c.lastMessageAt) c.customerLastReadAt = c.lastMessageAt;
         } else if (currentUid === c.providerUserId || currentUid === c.providerId) {
           c.unreadCountProvider = 0;
+          if (c.lastMessageAt) c.providerLastReadAt = c.lastMessageAt;
         }
         allConvs[convIdx] = c;
         safeStorage.setItem(STORAGE_KEY_CONVERSATIONS, JSON.stringify(allConvs));
@@ -1399,6 +1466,50 @@ export class LocalRepository implements Repository {
     } catch (e) {
       logTechnicalError('LocalRepository.markMessagesAsRead', e);
     }
+  }
+
+  // Device mode has one person on one device: the current state is delivered once and screens
+  // update their own copy after each action
+  subscribeToRequest(
+    requestId: string,
+    onUpdate: (request: ServiceRequest | null) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    let active = true;
+    this.getRequest(requestId).then((req) => {
+      if (active) onUpdate(req);
+    });
+    return () => {
+      active = false;
+    };
+  }
+
+  subscribeToOffers(
+    filter: OfferFilter,
+    onUpdate: (offers: ProviderOffer[]) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    let active = true;
+    this.getOffers(filter).then((offers) => {
+      if (active) onUpdate(offers);
+    });
+    return () => {
+      active = false;
+    };
+  }
+
+  subscribeToConversation(
+    conversationId: string,
+    onUpdate: (conversation: Conversation | null) => void,
+    _onError?: (error: any) => void
+  ): () => void {
+    let active = true;
+    this.getConversation(conversationId).then((conv) => {
+      if (active) onUpdate(conv);
+    });
+    return () => {
+      active = false;
+    };
   }
 
   subscribeToMessages(
@@ -1438,8 +1549,8 @@ export class LocalRepository implements Repository {
 
       const notif: AppNotification = {
         ...notificationData,
-        isRead: false,
-        readAt: null,
+        isRead: notificationData.isRead === true,
+        readAt: notificationData.readAt ?? null,
         createdAt: notificationData.createdAt || new Date().toISOString(),
       };
 
@@ -1760,7 +1871,7 @@ export class LocalRepository implements Repository {
 
   async confirmAppointment(
     appointmentId: string,
-    confirmedByRole: 'customer' | 'provider'
+    _confirmedByRole: 'customer' | 'provider'
   ): Promise<Appointment> {
     const existing = await this.getAppointment(appointmentId);
     if (!existing) {
@@ -1812,11 +1923,23 @@ export class LocalRepository implements Repository {
     try {
       const req = await this.getRequest(existing.requestId);
       if (req && req.status !== 'COMPLETED') {
-        await this.updateRequestStatus(existing.requestId, 'COMPLETED');
+        // Only the customer closes the request; the provider reports the job finished
+        if (req.customerId === getCurrentUserId()) {
+          await this.updateRequestStatus(existing.requestId, 'COMPLETED');
+        } else {
+          await this.markProviderDone(req);
+        }
       }
     } catch {}
 
     return updatedAppt;
+  }
+
+  private async markProviderDone(req: ServiceRequest): Promise<void> {
+    await this.updateRequest(req.id, {
+      providerDoneAt: new Date().toISOString(),
+      ...(req.status === 'PROVIDER_SELECTED' || req.status === 'ACCEPTED' ? { status: 'IN_PROGRESS' as const } : {}),
+    });
   }
 
   async confirmCustomerCompletion(
@@ -1839,7 +1962,7 @@ export class LocalRepository implements Repository {
         throw new Error('Unauthorized: Appointment does not belong to this request or customer');
       }
       if (isMatching) {
-        if (existingAppt.status === 'CONFIRMED' || existingAppt.status === 'COMPLETED') {
+        if (existingAppt.status === 'CONFIRMED') {
           updatedAppt = await this.updateAppointment(existingAppt.id, {
             status: 'COMPLETED',
             workStatus: 'WORK_COMPLETED',
@@ -1906,8 +2029,8 @@ export class LocalRepository implements Repository {
     try {
       const req = await this.getRequest(existing.requestId);
       if (req) {
-        if (workStatus === 'WORK_COMPLETED' && req.status !== 'COMPLETED') {
-          await this.updateRequestStatus(existing.requestId, 'COMPLETED');
+        if (workStatus === 'WORK_COMPLETED' && req.status !== 'COMPLETED' && req.status !== 'CANCELLED') {
+          await this.markProviderDone(req);
         } else if (
           ['WORK_STARTED', 'PROVIDER_ARRIVED', 'PROVIDER_ON_THE_WAY'].includes(workStatus) &&
           ['PROVIDER_SELECTED', 'ACCEPTED'].includes(req.status)
@@ -1953,4 +2076,4 @@ export class LocalRepository implements Repository {
 }
 
 // Export singleton instance conforming to the Repository interface
-export const localRepository: Repository = new LocalRepository();
+export const localRepository = new LocalRepository();

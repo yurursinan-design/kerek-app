@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ReportButton } from './ReportButton';
 import {
-  ChatAttachment,
   ChatMessage,
   Conversation,
   Language,
@@ -9,16 +9,15 @@ import {
   validateChatAttachment,
 } from '../types';
 import { translations } from '../i18n/translations';
+import { getRequestTitle } from '../services/requestTitle';
 import { repository, getCurrentUserId, getFriendlyErrorMessage } from '../services';
+import { chatRisk, chatRiskWarning } from '../services/chatSafety';
 import { auth } from '../services/firebase';
 import {
   ChevronLeft,
   Send,
-  User,
-  Wrench,
   Check,
   CheckCheck,
-  Clock,
   AlertCircle,
   MessageSquare,
   Paperclip,
@@ -26,8 +25,25 @@ import {
   FileText,
   Download,
   X,
-  ExternalLink,
+  ShieldAlert,
 } from 'lucide-react';
+import { useMediaUrls } from '../services/storageUrls';
+
+// One tap fills the message box with a common phrase; the sender can still edit it before sending
+const QUICK_REPLIES: Record<'customer' | 'provider', { kz: string; ru: string }[]> = {
+  customer: [
+    { kz: 'Сәлеметсіз бе! Қашан келе аласыз?', ru: 'Здравствуйте! Когда сможете приехать?' },
+    { kz: 'Бұл соңғы баға ма?', ru: 'Это окончательная цена?' },
+    { kz: 'Келер алдында қоңырау шалыңызшы', ru: 'Позвоните, пожалуйста, перед приездом' },
+    { kz: 'Рақмет!', ru: 'Спасибо!' },
+  ],
+  provider: [
+    { kz: 'Сәлеметсіз бе! Ақаудың фотосын жібере аласыз ба?', ru: 'Здравствуйте! Можете прислать фото поломки?' },
+    { kz: 'Мекенжайыңызды жіберіңізші', ru: 'Пришлите, пожалуйста, адрес' },
+    { kz: 'Жолдамын, 15 минутта жетемін', ru: 'Я в пути, буду через 15 минут' },
+    { kz: 'Жұмыс дайын, тексеріп көріңізші', ru: 'Работа готова, проверьте, пожалуйста' },
+  ],
+};
 
 interface ChatScreenProps {
   requestId: string;
@@ -56,10 +72,18 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [request, setRequest] = useState<ServiceRequest | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Viewing addresses of the files in the conversation (asked from Cloud Storage when shown)
+  const chatMediaUrls = useMediaUrls(
+    messages.flatMap((m) =>
+      (Array.isArray(m.attachments) ? m.attachments : [])
+        .filter((att) => att && typeof att === 'object')
+        .map((att) => ({ ...att, id: `${m.id}/${att.id}` }))
+    )
+  );
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const [, setUploadProgress] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Attachment state
@@ -71,12 +95,11 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const photoInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Scrolls only the message list: scrollIntoView would also scroll the page and push the chat
+  // header (who you are talking to) under the app's sticky header
   const scrollToBottom = (smooth = true) => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({
-        behavior: smooth ? 'smooth' : 'auto',
-      });
-    }
+    const list = messagesEndRef.current?.parentElement;
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
   };
 
   // Load conversation, request, and subscribe to messages
@@ -138,7 +161,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
         setIsLoading(false);
         setErrorMessage(
           err?.message?.includes('OPEN requests')
-            ? t.chatOpenWarning
+            ? translations[language].chatOpenWarning
             : getFriendlyErrorMessage(err, language)
         );
       }
@@ -153,13 +176,29 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
           unsubscribe();
         } catch {}
       }
-      if (pendingAttachment?.previewUrl) {
+    };
+  }, [requestId, language]);
+
+  // A photo picked but not sent is freed when it is replaced (below) or the chat closes
+  useEffect(() => {
+    const url = pendingAttachment?.previewUrl || null;
+    return () => {
+      if (url) {
         try {
-          URL.revokeObjectURL(pendingAttachment.previewUrl);
+          URL.revokeObjectURL(url);
         } catch {}
       }
     };
-  }, [requestId, language]);
+  }, [pendingAttachment]);
+
+  // Live conversation: the other side's read mark turns sent ticks into double ticks
+  const conversationId = conversation?.id;
+  useEffect(() => {
+    if (!conversationId) return;
+    return repository.subscribeToConversation(conversationId, (conv) => {
+      if (conv) setConversation(conv);
+    });
+  }, [conversationId]);
 
   const handleFileSelected = (file: File, forcedType?: 'image' | 'file') => {
     setIsAttachmentMenuOpen(false);
@@ -210,6 +249,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
+  const viewerIsCustomer = userRole
+    ? userRole === 'customer'
+    : conversation
+    ? currentUid === conversation.customerId || (Boolean(auth?.currentUser?.uid) && auth?.currentUser?.uid === conversation.customerId)
+    : true;
+
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const clean = inputText.trim();
@@ -224,11 +269,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     setUploadProgress(pendingAttachment ? t.chatUploading : null);
     setErrorMessage(null);
 
-    const isCustomerParticipant = userRole
-      ? userRole === 'customer'
-      : conversation
-      ? currentUid === conversation.customerId || (Boolean(auth?.currentUser?.uid) && auth?.currentUser?.uid === conversation.customerId)
-      : true;
+    const isCustomerParticipant = viewerIsCustomer;
 
     const senderRole: 'customer' | 'provider' = isCustomerParticipant ? 'customer' : 'provider';
     const authUid = auth?.currentUser?.uid;
@@ -291,6 +332,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
     : conversation
     ? currentUid === conversation.customerId || (Boolean(auth?.currentUser?.uid) && auth?.currentUser?.uid === conversation.customerId)
     : true;
+  const otherLastReadAt = isCustomer ? conversation?.providerLastReadAt : conversation?.customerLastReadAt;
   const otherPartyName = conversation
     ? isCustomer
       ? conversation.providerName || t.chatParticipantMaster
@@ -333,7 +375,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-70px)] sm:h-[650px] max-w-xl mx-auto bg-slate-50 border border-slate-200/90 rounded-none sm:rounded-3xl shadow-sm overflow-hidden animate-fadeIn relative">
+    <div className="flex flex-col h-[calc(100vh-139px)] supports-[height:100dvh]:h-[calc(100dvh-139px)] sm:h-[650px] max-w-xl mx-auto bg-slate-50 border border-slate-200/90 rounded-none sm:rounded-3xl shadow-sm overflow-hidden animate-fadeIn relative">
       {/* Hidden File Pickers */}
       <input
         ref={photoInputRef}
@@ -381,8 +423,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       )}
 
       {/* Chat Top Header */}
-      <header className="p-3.5 sm:p-4 bg-white border-b border-slate-200/90 flex items-center justify-between shrink-0 shadow-2xs">
-        <div className="flex items-center gap-3">
+      <header className="p-3.5 sm:p-4 bg-white border-b border-slate-200/90 flex items-center justify-between gap-2 shrink-0 shadow-2xs">
+        <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"
             onClick={onBack}
@@ -392,12 +434,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             <ChevronLeft className="w-5 h-5 stroke-[2.5]" />
           </button>
 
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-sky-600 text-white font-extrabold text-base flex items-center justify-center font-display shadow-xs">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-10 h-10 shrink-0 rounded-2xl bg-sky-600 text-white font-extrabold text-base flex items-center justify-center font-display shadow-xs">
               {otherPartyName.charAt(0).toUpperCase() || 'K'}
             </div>
 
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-sm font-bold text-slate-900 leading-tight">
                   {otherPartyName}
@@ -410,11 +452,20 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               </div>
 
               <p className="text-[11px] text-slate-500 truncate max-w-[200px] sm:max-w-xs font-medium">
-                {request?.service || request?.requestText || requestId} · <span className="font-mono text-slate-400">{requestId}</span>
+                {(request && getRequestTitle(request, language)) || request?.requestText || requestId} · <span className="font-mono text-slate-400">{requestId}</span>
               </p>
             </div>
           </div>
         </div>
+        {conversation?.id && (
+          <ReportButton
+            language={language}
+            targetType="conversation"
+            targetId={conversation.id}
+            requestId={requestId}
+            className="inline-flex shrink-0 items-center gap-1.5 min-h-[40px] px-2 text-xs font-semibold text-slate-500 hover:text-rose-600"
+          />
+        )}
       </header>
 
       {/* Error Banner */}
@@ -435,14 +486,22 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       )}
 
       {/* Messages Scroll Area */}
-      <main className="flex-1 overflow-y-auto p-4 space-y-3">
+      <main className="flex-1 overflow-y-auto p-4 space-y-3 flex flex-col">
+        <div className="shrink-0 flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] leading-relaxed text-amber-900">
+          <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600 mt-px" />
+          <span>
+            {language === 'kz'
+              ? 'Қауіпсіздік: жұмыс басталмай тұрып алдын ала ақша аудармаңыз, SMS-кодтарды ешкімге айтпаңыз. Күдікті хабарлама болса, шағым жіберіңіз.'
+              : 'Безопасность: не переводите предоплату до начала работы и никому не сообщайте коды из SMS. Если сообщение подозрительное, отправьте жалобу.'}
+          </span>
+        </div>
         {isLoading ? (
-          <div className="h-full flex items-center justify-center text-slate-400 text-xs gap-2">
+          <div className="flex-1 flex items-center justify-center text-slate-400 text-xs gap-2">
             <span className="w-5 h-5 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
             <span>{language === 'kz' ? 'Жүктелуде...' : 'Загрузка сообщений...'}</span>
           </div>
         ) : messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-2.5 text-slate-400">
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-2.5 text-slate-400">
             <div className="w-12 h-12 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-slate-400 shadow-2xs">
               <MessageSquare className="w-6 h-6 stroke-1" />
             </div>
@@ -465,6 +524,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               (Boolean(msg.senderRole) && msg.senderRole === (isCustomer ? 'customer' : 'provider'));
 
             const hasAttachments = Boolean(msg.attachments && msg.attachments.length > 0);
+            const risk = isMe ? null : chatRisk(msg.text);
 
             return (
               <div
@@ -481,15 +541,15 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                   {/* Attachments rendering */}
                   {hasAttachments && (
                     <div className="space-y-2 mb-2">
-                      {msg.attachments!.map((att) => {
+                      {msg.attachments!.filter((att) => att && typeof att === 'object').map((att) => {
                         if (att.type === 'image') {
                           return (
                             <div key={att.id} className="relative group overflow-hidden rounded-xl bg-slate-900/10">
                               <img
-                                src={att.downloadUrl}
+                                src={chatMediaUrls[`${msg.id}/${att.id}`] || undefined}
                                 alt={att.fileName}
                                 className="w-full max-h-60 object-cover cursor-pointer hover:opacity-95 transition-opacity rounded-xl"
-                                onClick={() => setFullImageViewUrl(att.downloadUrl)}
+                                onClick={() => setFullImageViewUrl(chatMediaUrls[`${msg.id}/${att.id}`] || '')}
                                 loading="lazy"
                               />
                               <div className="flex items-center justify-between text-[10px] mt-1 px-1 opacity-80">
@@ -528,7 +588,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                             </div>
 
                             <a
-                              href={att.downloadUrl}
+                              href={chatMediaUrls[`${msg.id}/${att.id}`] || undefined}
                               target="_blank"
                               rel="noopener noreferrer"
                               download={att.fileName}
@@ -561,7 +621,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                   >
                     <span>{formatMessageTime(msg.createdAt)}</span>
                     {isMe && (
-                      msg.isRead ? (
+                      msg.isRead || Boolean(otherLastReadAt && msg.createdAt <= otherLastReadAt) ? (
                         <CheckCheck className="w-3.5 h-3.5 text-emerald-300" />
                       ) : (
                         <Check className="w-3.5 h-3.5 text-sky-200" />
@@ -569,6 +629,12 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                     )}
                   </div>
                 </div>
+                {!isMe && risk && (
+                  <div className="max-w-[85%] flex items-start gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] leading-snug text-amber-900">
+                    <ShieldAlert className="w-3.5 h-3.5 shrink-0 text-amber-600 mt-px" />
+                    <span>{chatRiskWarning(risk, language === 'kz' ? 'kz' : 'ru')}</span>
+                  </div>
+                )}
               </div>
             );
           })
@@ -646,6 +712,21 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             {t.chatCannotSendCancelled}
           </div>
         ) : (
+          <>
+          {!inputText && !pendingAttachment && !isLoading && conversation && (
+            <div className="flex gap-1.5 overflow-x-auto pb-2 -mx-1 px-1" aria-label={language === 'kz' ? 'Дайын жауаптар' : 'Быстрые ответы'}>
+              {QUICK_REPLIES[viewerIsCustomer ? 'customer' : 'provider'].map((q) => (
+                <button
+                  key={q.ru}
+                  type="button"
+                  onClick={() => setInputText(language === 'kz' ? q.kz : q.ru)}
+                  className="shrink-0 px-3 py-1.5 rounded-full bg-sky-50 border border-sky-200 text-sky-800 text-xs font-semibold hover:bg-sky-100 active:scale-95 transition-all"
+                >
+                  {language === 'kz' ? q.kz : q.ru}
+                </button>
+              ))}
+            </div>
+          )}
           <form onSubmit={handleSendMessage} className="flex items-center gap-2">
             {/* Attachment Button */}
             <button
@@ -670,7 +751,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               maxLength={2000}
               onChange={(e) => setInputText(e.target.value)}
               placeholder={pendingAttachment ? t.chatSendAttachment : t.chatPlaceholder}
-              className="flex-1 h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white transition-colors disabled:opacity-50"
+              aria-label={t.chatPlaceholder}
+              className="flex-1 h-12 px-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white transition-colors disabled:opacity-50"
             />
 
             <button
@@ -686,6 +768,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               )}
             </button>
           </form>
+          </>
         )}
       </footer>
     </div>

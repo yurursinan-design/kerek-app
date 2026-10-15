@@ -7,7 +7,6 @@ import {
   Provider,
   ProviderOffer,
   RequestAttachment,
-  RequestLocation,
   RequestStatus,
   Review,
   ServiceRequest,
@@ -55,11 +54,25 @@ export interface Repository {
   createRequest(requestData: Partial<ServiceRequest>): Promise<ServiceRequest>;
   getRequest(requestId: string): Promise<ServiceRequest | null>;
   getRequests(filter?: RequestFilter): Promise<ServiceRequest[]>;
+  /** One request, live; null when it is gone or no longer readable by this user */
+  subscribeToRequest(
+    requestId: string,
+    onUpdate: (request: ServiceRequest | null) => void,
+    onError?: (error: any) => void
+  ): () => void;
+  /** Offers, live: by requestId (customer) or the signed-in provider's own */
+  subscribeToOffers(
+    filter: OfferFilter,
+    onUpdate: (offers: ProviderOffer[]) => void,
+    onError?: (error: any) => void
+  ): () => void;
   subscribeToRequests(
     filter: RequestFilter,
     onData: (requests: ServiceRequest[]) => void,
     onError?: (error: any) => void
   ): () => void;
+  /** Calls onChange whenever the request or one of its offers changes (live updates on its screen). */
+  watchRequestActivity(requestId: string, onChange: () => void): () => void;
   updateRequest(requestId: string, updates: Partial<ServiceRequest>): Promise<ServiceRequest | null>;
   updateRequestStatus(
     requestId: string,
@@ -69,18 +82,23 @@ export interface Repository {
   uploadRequestAttachment(
     requestId: string,
     file: { name: string; size: number; type: string; data?: Blob | ArrayBuffer | Uint8Array | string },
-    customerId?: string
+    customerId?: string,
+    slot?: number
   ): Promise<RequestAttachment>;
 
   // Offers
   createOffer(offerData: Partial<ProviderOffer>): Promise<ProviderOffer>;
   getOffers(filter?: OfferFilter): Promise<ProviderOffer[]>;
+  /** Number of offers on a request, without downloading them */
+  countOffers(requestId: string): Promise<number>;
   updateOffer(offerId: string, updates: Partial<ProviderOffer>): Promise<ProviderOffer | null>;
   acceptOffer(requestId: string, offerId: string): Promise<{ request: ServiceRequest | null; offer: ProviderOffer | null }>;
 
   // Reviews
   createReview(reviewData: Partial<Review>): Promise<Review>;
   getReviews(filter?: ReviewFilter): Promise<Review[]>;
+  /** Average rating and review count for a provider (ids: provider id and, for old profiles, user id) */
+  getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }>;
 
   // Matching
   matchProviders(request: ServiceRequest): Promise<Provider[]>;
@@ -104,6 +122,12 @@ export interface Repository {
     }
   ): Promise<ChatMessage>;
   markMessagesAsRead(conversationId: string): Promise<void>;
+  /** Live conversation (read marks, last message); device mode delivers the current state once */
+  subscribeToConversation(
+    conversationId: string,
+    onUpdate: (conversation: Conversation | null) => void,
+    onError?: (error: any) => void
+  ): () => void;
   subscribeToMessages(
     conversationId: string,
     onUpdate: (messages: ChatMessage[]) => void,

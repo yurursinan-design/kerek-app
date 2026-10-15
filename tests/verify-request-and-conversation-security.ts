@@ -1,8 +1,9 @@
 import assert from 'node:assert';
-import { db, auth, app, ensureFirebaseAuth, createSecondaryFirebaseApp } from '../src/services/firebase';
+import { db, auth, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { deleteApp } from 'firebase/app';
 import { signInAnonymously } from 'firebase/auth';
-import { doc, getDoc, getDocs, collection, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { doc, getDocs, collection, setDoc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { sendOfferCounted } from './helpers/offers';
 
 // Mock minimal localStorage for Node environment
 if (typeof globalThis.localStorage === 'undefined') {
@@ -22,13 +23,14 @@ async function runSecurityAudit() {
 
   // Authenticate 3 distinct users
   await ensureFirebaseAuth();
-  const customerUid = auth?.currentUser?.uid!;
+  const customerUid = auth!.currentUser!.uid;
   console.log('✓ [Client 1 - Customer] UID:', customerUid);
 
   const selectedProvClient = createSecondaryFirebaseApp(`prov-selected-${Date.now()}`)!;
   const selectedProvApp = selectedProvClient.app;
   const selectedProvAuth = selectedProvClient.auth;
   const selectedProvCred = await signInAnonymously(selectedProvAuth);
+  await attachEmulatorTestPhone(selectedProvAuth);
   const selectedProvUid = selectedProvCred.user.uid;
   const selectedProvDb = selectedProvClient.db;
   console.log('✓ [Client 2 - Selected Provider] UID:', selectedProvUid);
@@ -37,6 +39,7 @@ async function runSecurityAudit() {
   const attackerProvApp = attackerProvClient.app;
   const attackerProvAuth = attackerProvClient.auth;
   const attackerProvCred = await signInAnonymously(attackerProvAuth);
+  await attachEmulatorTestPhone(attackerProvAuth);
   const attackerProvUid = attackerProvCred.user.uid;
   const attackerProvDb = attackerProvClient.db;
   console.log('✓ [Client 3 - Unselected / Attacker Provider] UID:', attackerProvUid);
@@ -46,8 +49,9 @@ async function runSecurityAudit() {
   const otherReqId = `REQ-OTHER-${Date.now().toString().slice(-6)}`;
   const testConvId = `conv_${testReqId}`;
 
-  const validOfferId = `OFFER-VALID-${Date.now().toString().slice(-6)}`;
-  const foreignOfferId = `OFFER-FOREIGN-${Date.now().toString().slice(-6)}`;
+  // One offer per provider and request: the id is fixed by the rules
+  const validOfferId = `OFFER-${testReqId}-${selectedProvUid}`;
+  const foreignOfferId = `OFFER-${otherReqId}-${selectedProvUid}`;
 
   // References
   const reqRef = doc(db!, 'requests', testReqId);
@@ -66,6 +70,7 @@ async function runSecurityAudit() {
       customerId: customerUid,
       customerName: 'Test Müşteri',
       city: 'Қызылорда',
+      cityId: 'kyzylorda',
       category: 'Тұрмыстық техника жөндеу',
       service: 'Тест қызметі',
       status: 'OPEN',
@@ -79,6 +84,7 @@ async function runSecurityAudit() {
       customerId: customerUid,
       customerName: 'Test Müşteri',
       city: 'Қызылорда',
+      cityId: 'kyzylorda',
       category: 'Тұрмыстық техника жөндеу',
       service: 'Бөлек қызмет',
       status: 'OPEN',
@@ -86,8 +92,13 @@ async function runSecurityAudit() {
       updatedAt: now,
     });
 
+    // Offers come from a provider profile in the request's city
+    await setDoc(doc(selectedProvDb, 'providers', selectedProvUid), {
+      id: selectedProvUid, userId: selectedProvUid, name: 'Шебер Самат', city: 'Қызылорда', cityId: 'kyzylorda', category: 'appliances',
+    });
+
     // Provider creates valid offer for testReqId
-    await setDoc(validOfferRef, {
+    await sendOfferCounted(selectedProvDb, validOfferId, {
       id: validOfferId,
       requestId: testReqId,
       providerId: selectedProvUid,
@@ -101,7 +112,7 @@ async function runSecurityAudit() {
     console.log('✓ Created legitimate offer:', validOfferId);
 
     // Provider creates foreign offer for otherReqId
-    await setDoc(foreignOfferRef, {
+    await sendOfferCounted(selectedProvDb, foreignOfferId, {
       id: foreignOfferId,
       requestId: otherReqId,
       providerId: selectedProvUid,
@@ -234,11 +245,11 @@ async function runSecurityAudit() {
     // ------------------------------------------------------------------------
     console.log('\n--- LEGITIMATE 2: Customer accepts legitimate offer (PROVIDER_SELECTED) ---');
     try {
-      await updateDoc(reqRef, {
-        status: 'PROVIDER_SELECTED',
-        selectedOfferId: validOfferId,
-        updatedAt: new Date().toISOString(),
-      });
+      // Selecting the offer and accepting it happen in one write
+      const batch = writeBatch(db!);
+      batch.update(reqRef, { status: 'PROVIDER_SELECTED', selectedOfferId: validOfferId, updatedAt: new Date().toISOString() });
+      batch.update(doc(db!, 'offers', validOfferId), { status: 'ACCEPTED', updatedAt: new Date().toISOString() });
+      await batch.commit();
       console.log('✅ PASS: Customer successfully accepted legitimate offer');
     } catch (err: any) {
       console.error('❌ FAIL: Customer offer acceptance failed:', err.message);
@@ -306,18 +317,19 @@ async function runSecurityAudit() {
     }
 
     // ------------------------------------------------------------------------
-    // LEGITIMATE FLOW 5: Selected provider marks work completed
+    // LEGITIMATE FLOW 5: Selected provider reports the job finished; only the customer closes it
     // ------------------------------------------------------------------------
-    console.log('\n--- LEGITIMATE 5: Selected provider marks work completed (COMPLETED) ---');
+    console.log('\n--- LEGITIMATE 5: Selected provider reports the job finished (providerDoneAt) ---');
+    let providerCompleteDenied = false;
     try {
-      await updateDoc(doc(selectedProvDb, 'requests', testReqId), {
-        status: 'COMPLETED',
-        updatedAt: new Date().toISOString(),
-      });
-      console.log('✅ PASS: Selected provider successfully updated request status to COMPLETED');
+      await updateDoc(doc(selectedProvDb, 'requests', testReqId), { status: 'COMPLETED' });
     } catch (err: any) {
-      console.error('❌ FAIL: Selected provider status update failed:', err.message);
+      providerCompleteDenied = err?.code === 'permission-denied' || String(err).includes('PERMISSION_DENIED');
     }
+    if (!providerCompleteDenied) throw new Error('Selected provider must not be able to mark the request COMPLETED');
+    console.log('✅ PASS: Selected provider cannot close the request alone');
+    await updateDoc(doc(selectedProvDb, 'requests', testReqId), { providerDoneAt: new Date().toISOString() });
+    console.log('✅ PASS: Selected provider reported the job finished (providerDoneAt)');
 
   } finally {
     // Cleanup

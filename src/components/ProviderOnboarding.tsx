@@ -1,8 +1,12 @@
-import React, { useState, useMemo } from 'react';
+import { getFriendlyErrorMessage } from '../services';
+import { auth } from '../services/firebase';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Language, Provider } from '../types';
 import { translations } from '../i18n/translations';
-import { ALL_CITIES_LIST, CATEGORIES_LIST } from '../services/analyzer';
-import { normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
+import { ALL_CITIES_LIST } from '../services/analyzer';
+import { getService, groupName, serviceName } from '../data/serviceCatalog';
+import { ServicePicker } from './ServicePicker';
+import { isCityOpen, normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import {
   User,
@@ -22,6 +26,10 @@ import {
   FileText,
   Award,
 } from 'lucide-react';
+import { Emoji3D } from './CategoryIcon';
+
+/** 3D icon next to each onboarding step's title */
+const STEP_EMOJI: Record<number, string> = { 1: '1f9d1-200d-1f527', 2: '1f6e0-fe0f', 3: '1f4bc', 4: '1f680' };
 
 export interface ProviderOnboardingProps {
   language: Language;
@@ -46,38 +54,39 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
 
   // Form Fields State
   const [name, setName] = useState(initialProvider?.name || '');
-  const [phone, setPhone] = useState(initialProvider?.phone || '');
+  const [phone, setPhone] = useState(initialProvider?.phone || auth?.currentUser?.phoneNumber || '');
   const [whatsapp, setWhatsapp] = useState(initialProvider?.whatsapp || '');
 
+  // Pilot: masters register in an open city only (Kyzylorda); the others are listed as "soon"
   const [city, setCity] = useState(
-    initialProvider?.city || (language === 'kz' ? 'Қызылорда' : 'Кызылорда')
+    initialProvider?.city && isCityOpen(initialProvider.city)
+      ? initialProvider.city
+      : language === 'kz' ? 'Қызылорда' : 'Кызылорда'
   );
-  const [district, setDistrict] = useState(initialProvider?.district || 'Орталық');
+  // Profile fields start empty (placeholders show examples): pre-filled text would publish claims the provider never made
+  const [district, setDistrict] = useState(initialProvider?.district || '');
   const [category, setCategory] = useState(
     initialProvider?.category ||
       (language === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники')
   );
-  const [services, setServices] = useState(
-    initialProvider?.services || (language === 'kz' ? 'Кір жуғыш машина, бойлер жөндеу' : 'Ремонт стиральных машин, бойлеров')
-  );
+  const [services, setServices] = useState(initialProvider?.services || '');
+  // Catalogue services the provider offers (the main category follows the first one picked)
+  const [serviceIds, setServiceIds] = useState<string[]>(initialProvider?.serviceIds || []);
+  useEffect(() => {
+    const first = getService(serviceIds[0]);
+    if (first) setCategory(groupName(first.group, language));
+  }, [serviceIds, language]);
 
   const [experienceYears, setExperienceYears] = useState(
     initialProvider?.experienceYears !== undefined && initialProvider.experienceYears !== null
       ? String(initialProvider.experienceYears)
-      : '5'
+      : ''
   );
   const [workingHours, setWorkingHours] = useState(
     initialProvider?.workingHours || '09:00 - 20:00'
   );
-  const [priceRange, setPriceRange] = useState(
-    initialProvider?.priceRange || (language === 'kz' ? '8 000 ₸ бастап' : 'от 8 000 ₸')
-  );
-  const [description, setDescription] = useState(
-    initialProvider?.description ||
-      (language === 'kz'
-        ? 'Тәжірибелі маманмын. Сапалы әрі жылдам жөндеп беремін, кепілдік бар.'
-        : 'Опытный мастер. Качественно и оперативно выполню работу, предоставлю гарантию.')
-  );
+  const [priceRange, setPriceRange] = useState(initialProvider?.priceRange || '');
+  const [description, setDescription] = useState(initialProvider?.description || '');
   const [tradeLicense, setTradeLicense] = useState(initialProvider?.tradeLicense || '');
 
   // Constructed Preview Provider
@@ -151,8 +160,8 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
       setStepError(t.cityRequiredError);
       return false;
     }
-    if (!category.trim()) {
-      setStepError(t.categoryRequiredError);
+    if (serviceIds.length === 0) {
+      setStepError(language === 'kz' ? 'Кем дегенде бір қызметті таңдаңыз' : 'Выберите хотя бы одну услугу');
       return false;
     }
     setStepError(null);
@@ -213,7 +222,16 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
         city: city.trim(),
         district: district.trim(),
         category: category.trim(),
-        services: services.trim(),
+        serviceIds,
+        // Free-text summary (the service ids are the real data); capped at the 1000-character limit
+        services: (
+          services.trim() ||
+          serviceIds
+            .map((id) => getService(id))
+            .filter(Boolean)
+            .map((x) => serviceName(x!.service, language))
+            .join(', ')
+        ).slice(0, 1000),
         priceRange: priceRange.trim(),
         workingHours: workingHours.trim() || '09:00 - 20:00',
         experienceYears: expYears,
@@ -221,7 +239,7 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
         tradeLicense: tradeLicense.trim() || initialProvider?.tradeLicense || '',
       });
     } catch (err: any) {
-      setStepError(err?.message || (language === 'kz' ? 'Қате орын алды' : 'Произошла ошибка при сохранении'));
+      setStepError(getFriendlyErrorMessage(err, language));
     } finally {
       setIsSubmitting(false);
     }
@@ -240,8 +258,7 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
       {/* Header & Step Indicator */}
       <div className="bg-white p-5 rounded-3xl border border-slate-200/90 shadow-2xs space-y-3">
         <div className="flex items-center justify-between">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-sky-50 text-sky-800 rounded-full text-xs font-bold font-mono">
-            <Sparkles className="w-3.5 h-3.5 text-sky-600" />
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 rounded-full text-xs font-bold">
             <span>
               {`${t.onboardingStepIndicator} ${currentStep} ${t.onboardingStepOf} 4`}
             </span>
@@ -274,9 +291,9 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
                 }}
                 className={`h-2 rounded-full transition-all duration-300 ${
                   isCurrent
-                    ? 'bg-sky-600 shadow-xs'
+                    ? 'bg-emerald-500 shadow-xs'
                     : isCompleted
-                    ? 'bg-emerald-500 cursor-pointer'
+                    ? 'bg-emerald-300 cursor-pointer'
                     : 'bg-slate-200'
                 }`}
                 title={`Step ${stepNum}`}
@@ -286,13 +303,18 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
         </div>
 
         {/* Title and Subtitle */}
-        <div className="pt-1">
-          <h2 className="text-lg font-extrabold text-slate-900 tracking-tight font-display">
-            {stepTitles[currentStep].title}
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
-            {stepTitles[currentStep].subtitle}
-          </p>
+        <div key={currentStep} className="pt-1 flex items-center gap-3.5 animate-stepIn">
+          <span className="w-14 h-14 rounded-2xl bg-linear-to-br from-emerald-50 to-teal-100 flex items-center justify-center shrink-0">
+            <Emoji3D code={STEP_EMOJI[currentStep]} size={38} eager className="animate-popIn" />
+          </span>
+          <div className="min-w-0">
+            <h2 className="text-lg font-extrabold text-slate-900 tracking-tight font-display leading-tight">
+              {stepTitles[currentStep].title}
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+              {stepTitles[currentStep].subtitle}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -406,9 +428,10 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
               >
                 {ALL_CITIES_LIST.map((c) => {
                   const cName = language === 'kz' ? c.kz : c.ru;
+                  const open = isCityOpen(c.ru);
                   return (
-                    <option key={c.ru} value={cName}>
-                      {cName}
+                    <option key={c.ru} value={cName} disabled={!open}>
+                      {open ? cName : `${cName} — ${language === 'kz' ? 'жақында' : 'скоро'}`}
                     </option>
                   );
                 })}
@@ -430,32 +453,31 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
             </div>
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
               <Briefcase className="w-3.5 h-3.5 text-sky-600" />
-              <span>{t.fieldCategory}</span>
+              <span>{language === 'kz' ? 'Қандай қызметтер көрсетесіз?' : 'Какие услуги вы оказываете?'}</span>
               <span className="text-rose-500">*</span>
             </label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              className="w-full h-12 px-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white transition-colors"
-            >
-              {CATEGORIES_LIST.map((cat) => {
-                const catName = language === 'tr' ? (cat.tr || cat.ru) : language === 'kz' ? cat.kz : cat.ru;
-                return (
-                  <option key={cat.id} value={catName}>
-                    {catName}
-                  </option>
-                );
-              })}
-            </select>
+            <p className="text-[11px] text-slate-500">
+              {language === 'kz'
+                ? 'Бірнеше қызметті таңдай аласыз. Тек таңдалған қызметтер бойынша өтініштер келеді.'
+                : 'Можно выбрать несколько. Заявки будут приходить только по выбранным услугам.'}
+            </p>
+            <ServicePicker
+              language={language}
+              selected={serviceIds}
+              onChange={(ids) => {
+                setServiceIds(ids);
+                if (stepError) setStepError(null);
+              }}
+            />
           </div>
 
           <div className="space-y-1">
             <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
               <Wrench className="w-3.5 h-3.5 text-sky-600" />
-              <span>{t.providerServicesField}</span>
+              <span>{language === 'kz' ? 'Қосымша (міндетті емес)' : 'Дополнительно (необязательно)'}</span>
             </label>
             <input
               type="text"

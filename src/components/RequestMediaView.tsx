@@ -9,8 +9,9 @@ import {
   ExternalLink,
   X,
   Maximize2,
-  FileText,
 } from 'lucide-react';
+import { safeCoords, safeText } from '../services/safeData';
+import { useMediaUrls } from '../services/storageUrls';
 
 interface RequestMediaViewProps {
   attachments?: (RequestAttachment | PendingAttachment)[];
@@ -32,8 +33,14 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
   const t = translations[language];
   const [activePreviewImage, setActivePreviewImage] = useState<string | null>(null);
 
+  // Values come from other people's documents: keep only well-formed items
+  attachments = Array.isArray(attachments) ? attachments.filter((a) => a && typeof a === 'object') : undefined;
+  const coords = safeCoords(location);
+  location = coords ? { ...(location as RequestLocation), ...coords } : undefined;
   const hasAttachments = Boolean(attachments && attachments.length > 0);
-  const hasLocation = Boolean(location && location.latitude && location.longitude);
+  const hasLocation = Boolean(coords);
+  // Hooks run on every render, before the early return below
+  const mediaUrls = useMediaUrls((attachments || []) as Array<RequestAttachment & { previewUrl?: string }>);
 
   if (!hasAttachments && !hasLocation) {
     return null;
@@ -56,22 +63,15 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
     (a) => a.type === 'audio' || (a as PendingAttachment).mediaType === 'audio'
   );
 
-  const getMediaUrl = (item: RequestAttachment | PendingAttachment): string => {
-    if ('downloadUrl' in item && item.downloadUrl) return item.downloadUrl;
-    if ('previewUrl' in item && item.previewUrl) return item.previewUrl;
-    return '';
-  };
+  const getMediaUrl = (item: RequestAttachment | PendingAttachment): string => mediaUrls[item.id] || '';
 
   const getMediaName = (item: RequestAttachment | PendingAttachment): string => {
-    if ('fileName' in item && item.fileName) return item.fileName;
-    if ('name' in item && item.name) return item.name;
-    return 'Media';
+    return safeText((item as any).fileName) || safeText((item as any).name) || 'Media';
   };
 
   const getMediaSize = (item: RequestAttachment | PendingAttachment): number => {
-    if ('sizeBytes' in item && item.sizeBytes) return item.sizeBytes;
-    if ('size' in item && item.size) return item.size;
-    return 0;
+    const n = Number((item as any).sizeBytes ?? (item as any).size ?? 0);
+    return Number.isFinite(n) ? n : 0;
   };
 
   return (
@@ -86,14 +86,20 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
             <div className="min-w-0">
               <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                 <span>{language === 'kz' ? 'Орналасқан жер' : 'Геолокация'}</span>
-                {location.accuracy !== undefined && (
+                {location.approximate ? (
                   <span className="text-[10px] font-semibold text-sky-700 bg-sky-100/80 px-1.5 py-0.2 rounded">
-                    ±{Math.round(location.accuracy)} m
+                    {language === 'kz' ? '≈1 км, шамамен' : '≈1 км, примерно'}
                   </span>
+                ) : (
+                  location.accuracy !== undefined && (
+                    <span className="text-[10px] font-semibold text-sky-700 bg-sky-100/80 px-1.5 py-0.2 rounded">
+                      ±{Math.round(location.accuracy)} m
+                    </span>
+                  )
                 )}
               </div>
               <div className="text-[11px] text-slate-500 font-mono truncate">
-                {location.latitude.toFixed(5)}, {location.longitude.toFixed(5)}
+                {location.latitude.toFixed(location.approximate ? 2 : 5)}, {location.longitude.toFixed(location.approximate ? 2 : 5)}
                 {location.address ? ` · ${location.address}` : ''}
               </div>
             </div>
@@ -145,7 +151,7 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
                   className="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-square shadow-2xs flex flex-col justify-end"
                 >
                   <img
-                    src={url}
+                    src={url || undefined}
                     alt={name}
                     className="absolute inset-0 w-full h-full object-cover cursor-pointer hover:scale-105 transition-transform duration-200"
                     onClick={() => setActivePreviewImage(url)}
@@ -230,7 +236,7 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
                   </div>
 
                   <video
-                    src={url}
+                    src={url || undefined}
                     controls
                     preload="metadata"
                     className="w-full max-h-56 rounded-lg bg-black object-contain"
@@ -286,7 +292,7 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
                     </div>
                   </div>
 
-                  <audio src={url} controls className="w-full h-9" />
+                  <audio src={url || undefined} controls className="w-full h-9" />
                 </div>
               );
             })}

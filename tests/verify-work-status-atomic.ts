@@ -4,9 +4,8 @@
  * authorization validation for assigned providers, and status transition enforcement.
  */
 
-import { localRepository } from '../src/services/localRepository';
+import { localRepository, setCurrentUserId } from '../src/services/localRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
-import { WorkStatus } from '../src/types';
 
 async function runPhase3Verification() {
   console.log('====================================================');
@@ -128,12 +127,14 @@ async function runPhase3Verification() {
     );
     const reqCompleted = await resilientRepository.getRequest(reqId);
 
+    // The provider reports the job finished; only the customer closes the request
     assert(
       apptCompleted.workStatus === 'WORK_COMPLETED' &&
         apptCompleted.status === 'COMPLETED' &&
-        reqCompleted?.status === 'COMPLETED',
-      'Test 4: WORK_COMPLETED atomically sets appointment status and request status to COMPLETED',
-      `appt status: ${apptCompleted.status}, req status: ${reqCompleted?.status}`
+        reqCompleted?.status === 'IN_PROGRESS' &&
+        Boolean(reqCompleted?.providerDoneAt),
+      'Test 4: WORK_COMPLETED completes the appointment and marks the request finished by the provider (awaiting customer)',
+      `appt status: ${apptCompleted.status}, req status: ${reqCompleted?.status}, providerDoneAt: ${reqCompleted?.providerDoneAt}`
     );
 
     // TEST 5: completeAppointment() on confirmed appointment sets all statuses to COMPLETED
@@ -181,9 +182,19 @@ async function runPhase3Verification() {
     assert(
       appt2Completed.status === 'COMPLETED' &&
         appt2Completed.workStatus === 'WORK_COMPLETED' &&
-        req2Completed?.status === 'COMPLETED',
-      'Test 5: completeAppointment() atomically sets appointment status, workStatus, and request status to COMPLETED',
-      `appt2 status: ${appt2Completed.status}, req2 status: ${req2Completed?.status}`
+        req2Completed?.status !== 'COMPLETED' &&
+        Boolean(req2Completed?.providerDoneAt),
+      'Test 5: completeAppointment() by the provider completes the appointment; the request waits for the customer',
+      `appt2 status: ${appt2Completed.status}, req2 status: ${req2Completed?.status}, providerDoneAt: ${req2Completed?.providerDoneAt}`
+    );
+
+    // TEST 6: the customer confirms and the request becomes COMPLETED
+    setCurrentUserId('cust_user_phase3');
+    const confirmed = await localRepository.confirmCustomerCompletion(reqId2, appt2.id);
+    assert(
+      confirmed.request.status === 'COMPLETED',
+      'Test 6: Customer confirmation closes the request (COMPLETED)',
+      `req2 status: ${confirmed.request.status}`
     );
 
   } catch (err: any) {

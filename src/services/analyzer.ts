@@ -1,5 +1,5 @@
 import { ExtractedNeed, Language, Urgency } from '../types';
-import { normalizeCategoryId, normalizeCityId } from './taxonomy';
+import { CANONICAL_CITIES, normalizeCategoryId, normalizeCityId } from './taxonomy';
 
 interface CityPattern {
   nameKz: string;
@@ -90,34 +90,18 @@ const CITIES: CityPattern[] = [
   },
 ];
 
-export const ALL_CITIES_LIST = [
-  { kz: 'Алматы', ru: 'Алматы' },
-  { kz: 'Астана', ru: 'Астана' },
-  { kz: 'Шымкент', ru: 'Шымкент' },
-  { kz: 'Қызылорда', ru: 'Кызылорда' },
-  { kz: 'Ақтөбе', ru: 'Актобе' },
-  { kz: 'Қарағанды', ru: 'Караганда' },
-  { kz: 'Тараз', ru: 'Тараз' },
-  { kz: 'Павлодар', ru: 'Павлодар' },
-  { kz: 'Өскемен', ru: 'Усть-Каменогорск' },
-  { kz: 'Семей', ru: 'Семей' },
-  { kz: 'Атырау', ru: 'Атырау' },
-  { kz: 'Ақтау', ru: 'Актау' },
-  { kz: 'Қостанай', ru: 'Костанай' },
-  { kz: 'Орал', ru: 'Уральск' },
-  { kz: 'Түркістан', ru: 'Туркестан' },
-  { kz: 'Көкшетау', ru: 'Кокшетау' },
-];
+// Same list as the request wizard, so customers and providers pick from identical cities
+export const ALL_CITIES_LIST = CANONICAL_CITIES.map((c) => ({ kz: c.nameKz, ru: c.nameRu }));
 
 export const CATEGORIES_LIST = [
-  { id: 'plumbing', kz: 'Сантехника және құбырлар', ru: 'Сантехника и канализация', tr: 'Su Tesisatı & Kanalizasyon' },
-  { id: 'electrician', kz: 'Электрик және тоқ желісі', ru: 'Электрика и монтаж', tr: 'Elektrik Tesisatı & Arıza' },
-  { id: 'heating_boiler', kz: 'Жылыту және қазандықтар', ru: 'Отопление и котлы', tr: 'Kombi, Şofben & Isıtma' },
-  { id: 'ac_ventilation', kz: 'Кондиционерлер мен желдету', ru: 'Кондиционеры и вентиляция', tr: 'Klima & Havalandırma' },
-  { id: 'appliances', kz: 'Тұрмыстық техника жөндеу', ru: 'Ремонт бытовой техники', tr: 'Beyaz Eşya Tamiri' },
-  { id: 'furniture_carpentry', kz: 'Жиһаз құрастыру', ru: 'Сборка мебели', tr: 'Mobilya Montajı & Marangozluk' },
-  { id: 'painting_finishing', kz: 'Бояу және жөндеу', ru: 'Малярные работы и ремонт', tr: 'Boya, Badana & Tadilat' },
-  { id: 'cleaning_moving', kz: 'Тазалау және көшу', ru: 'Уборка и переезд', tr: 'Temizlik & Taşıma' },
+  { id: 'plumbing', kz: 'Сантехника және құбырлар', ru: 'Сантехника и канализация' },
+  { id: 'electrician', kz: 'Электрик және тоқ желісі', ru: 'Электрика и монтаж' },
+  { id: 'heating_boiler', kz: 'Жылыту және қазандықтар', ru: 'Отопление и котлы' },
+  { id: 'ac_ventilation', kz: 'Кондиционерлер мен желдету', ru: 'Кондиционеры и вентиляция' },
+  { id: 'appliances', kz: 'Тұрмыстық техника жөндеу', ru: 'Ремонт бытовой техники' },
+  { id: 'furniture_carpentry', kz: 'Жиһаз құрастыру', ru: 'Сборка мебели' },
+  { id: 'painting_finishing', kz: 'Бояу және жөндеу', ru: 'Малярные работы и ремонт' },
+  { id: 'cleaning_moving', kz: 'Тазалау және көшу', ru: 'Уборка и переезд' },
 ];
 
 export function analyzeRequestLocally(query: string, lang: Language): ExtractedNeed {
@@ -209,15 +193,11 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
     const isKombiWord = /kombi/i.test(normalized);
     const isKombiOrSimilar = /kombi|комби|колонка|газовая колонка|су жылытқыш/i.test(normalized);
     detectedCategory =
-      lang === 'tr'
-        ? 'Kombi, Şofben & Isıtma'
-        : lang === 'kz'
+      lang === 'kz'
         ? 'Жылыту және қазандықтар'
         : 'Отопление и котлы';
     detectedService =
-      isKombiWord || lang === 'tr'
-        ? 'Kombi tamiri'
-        : isKombiOrSimilar
+      isKombiWord || isKombiOrSimilar
         ? (lang === 'kz' ? 'Комби жөндеу' : 'Ремонт комби / колонок')
         : lang === 'kz'
         ? 'Қазандық пен жылыту жүйесін жөндеу'
@@ -228,15 +208,11 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
     )
   ) {
     detectedCategory =
-      lang === 'tr'
-        ? 'Klima & Havalandırma'
-        : lang === 'kz'
+      lang === 'kz'
         ? 'Кондиционерлер мен желдету'
         : 'Кондиционеры и вентиляция';
     detectedService =
-      lang === 'tr'
-        ? 'Klima bakımı ve gaz dolumu'
-        : lang === 'kz'
+      lang === 'kz'
         ? 'Кондиционер орнату және фреон құю'
         : 'Чистка и заправка кондиционера';
   } else if (
@@ -245,15 +221,11 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
     )
   ) {
     detectedCategory =
-      lang === 'tr'
-        ? 'Su Tesisatı & Kanalizasyon'
-        : lang === 'kz'
+      lang === 'kz'
         ? 'Сантехника және құбырлар'
         : 'Сантехника и канализация';
     detectedService =
-      lang === 'tr'
-        ? 'Su tesisatı tamiri'
-        : lang === 'kz'
+      lang === 'kz'
         ? 'Сантехник қызметі'
         : 'Услуги сантехника';
   } else if (
@@ -262,15 +234,11 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
     )
   ) {
     detectedCategory =
-      lang === 'tr'
-        ? 'Elektrik Tesisatı & Arıza'
-        : lang === 'kz'
+      lang === 'kz'
         ? 'Электрик және тоқ желісі'
         : 'Электрика и монтаж';
     detectedService =
-      lang === 'tr'
-        ? 'Elektrik arıza tamiri'
-        : lang === 'kz'
+      lang === 'kz'
         ? 'Электрик шебері'
         : 'Услуги электрика';
   } else if (
@@ -279,9 +247,7 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
     )
   ) {
     detectedCategory =
-      lang === 'tr'
-        ? 'Beyaz Eşya Tamiri'
-        : lang === 'kz'
+      lang === 'kz'
         ? 'Тұрмыстық техника жөндеу'
         : 'Ремонт бытовой техники';
     if (/кір жуғыш|стирал|çamaşır|camasir/i.test(normalized)) {
@@ -290,17 +256,15 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
       const isBosch = /bosch/i.test(normalized);
       const brand = isSamsung ? 'Samsung ' : isLg ? 'LG ' : isBosch ? 'Bosch ' : '';
       detectedService =
-        lang === 'tr'
-          ? `${brand}Çamaşır makinesi tamiri`.trim()
-          : lang === 'kz'
+        lang === 'kz'
           ? (brand ? `${brand}кір жуғыш машинасын жөндеу` : 'Кір жуғыш машина жөндеу')
           : (brand ? `Ремонт стиральной машины ${brand}`.trim() : 'Ремонт стиральных машин');
     } else if (/тоңазытқыш|холодильник|buzdolabı/i.test(normalized)) {
       detectedService =
-        lang === 'tr' ? 'Buzdolabı tamiri' : lang === 'kz' ? 'Тоңазытқыш жөндеу' : 'Ремонт холодильника';
+        lang === 'kz' ? 'Тоңазытқыш жөндеу' : 'Ремонт холодильника';
     } else {
       detectedService =
-        lang === 'tr' ? 'Beyaz eşya servisi' : lang === 'kz' ? 'Тұрмыстық техника шебері' : 'Мастер по ремонту техники';
+        lang === 'kz' ? 'Тұрмыстық техника шебері' : 'Мастер по ремонту техники';
     }
   } else if (
     /жиһаз|мебель|шкаф|стол|кровать|диван|сборка мебели|жиһаз құрастыру|плотник/i.test(
@@ -308,31 +272,31 @@ export function analyzeRequestLocally(query: string, lang: Language): ExtractedN
     )
   ) {
     detectedCategory =
-      lang === 'tr' ? 'Mobilya Montajı & Marangozluk' : lang === 'kz' ? 'Жиһаз құрастыру' : 'Сборка мебели';
+      lang === 'kz' ? 'Жиһаз құрастыру' : 'Сборка мебели';
     detectedService =
-      lang === 'tr' ? 'Mobilya montajı' : lang === 'kz' ? 'Жиһаз құрастыру' : 'Сборка и ремонт мебели';
+      lang === 'kz' ? 'Жиһаз құрастыру' : 'Сборка и ремонт мебели';
   } else if (
     /маляр|покраска|бояу|штукатурк|шпатлевк|обои|пәтер жөндеу|ремонт квартир|кафель/i.test(
       normalized
     )
   ) {
     detectedCategory =
-      lang === 'tr' ? 'Boya, Badana & Tadilat' : lang === 'kz' ? 'Бояу және жөндеу' : 'Малярные работы и ремонт';
+      lang === 'kz' ? 'Бояу және жөндеу' : 'Малярные работы и ремонт';
     detectedService =
-      lang === 'tr' ? 'Boya badana ve tadilat' : lang === 'kz' ? 'Пәтер жөндеу жұмыстары' : 'Ремонт квартир и отделка';
+      lang === 'kz' ? 'Пәтер жөндеу жұмыстары' : 'Ремонт квартир и отделка';
   } else if (
     /переезд|көшу|көшіру|клининг|уборка|тазалау|газель|жүк тасу|грузоперевозк|грузчик/i.test(
       normalized
     )
   ) {
     detectedCategory =
-      lang === 'tr' ? 'Temizlik & Taşıma' : lang === 'kz' ? 'Тазалау және көшу' : 'Уборка и переезд';
+      lang === 'kz' ? 'Тазалау және көшу' : 'Уборка и переезд';
     detectedService =
-      lang === 'tr' ? 'Ev taşıma ve temizlik' : lang === 'kz' ? 'Көшу және тазалау қызметі' : 'Переезд и клининг';
+      lang === 'kz' ? 'Көшу және тазалау қызметі' : 'Переезд и клининг';
   } else {
     // Generic fallback
     detectedCategory =
-      lang === 'tr' ? 'Diğer Hizmetler' : lang === 'kz' ? 'Қызметтер мен тауарлар' : 'Услуги и товары';
+      lang === 'kz' ? 'Қызметтер мен тауарлар' : 'Услуги и товары';
     detectedService =
       query.length > 40 ? query.slice(0, 37) + '...' : query;
   }

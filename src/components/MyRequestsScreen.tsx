@@ -1,26 +1,48 @@
 import React, { useState, useEffect } from 'react';
 import {
   Language,
+  Provider,
   ServiceRequest,
   formatDynamicBudget,
   formatDynamicDate,
+  isRequestExpired,
+  normalizeRequestStatus,
 } from '../types';
 import { translations } from '../i18n/translations';
+import { getRequestDescription, getRequestTitle } from '../services/requestTitle';
+import { formatShortDate } from '../services/dateFormat';
 import { repository } from '../services';
-import { getCityDisplayName, getCategoryDisplayName } from '../services/taxonomy';
-import {
-  ClipboardList,
-  MapPin,
-  Calendar,
-  Wallet,
-  ChevronRight,
-  PlusCircle,
-  Inbox,
-  Info,
-} from 'lucide-react';
+import { getCityDisplayName } from '../services/taxonomy';
+import { MapPin, Calendar, Wallet, ChevronRight, Plus, Phone, MessageCircle, Heart } from 'lucide-react';
+import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
+import { FavoriteMaster, getFavorites, onFavoritesChange } from '../services/favorites';
+import { ProviderProfileModal } from './ProviderProfileModal';
+import { Emoji3D } from './CategoryIcon';
+import { RequestIcon } from './RequestIcon';
+
+/** Russian noun form after a number: 1 заявка, 2 заявки, 5 заявок */
+function ruPlural(n: number, one: string, few: string, many: string): string {
+  const d10 = n % 10;
+  const d100 = n % 100;
+  if (d10 === 1 && d100 !== 11) return one;
+  if (d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14)) return few;
+  return many;
+}
+
+/** A master the customer already hired: shown so they can call the same person again */
+interface PastMaster {
+  key: string;
+  name: string;
+  phone?: string;
+  whatsapp?: string;
+  lastJob: string;
+  jobs: number;
+}
 
 interface MyRequestsScreenProps {
   requests: ServiceRequest[];
+  /** True until the requests were loaded the first time */
+  loading?: boolean;
   language: Language;
   onSelectRequest: (request: ServiceRequest) => void;
   onCreateNewRequest: () => void;
@@ -28,6 +50,7 @@ interface MyRequestsScreenProps {
 
 export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
   requests,
+  loading = false,
   language,
   onSelectRequest,
   onCreateNewRequest,
@@ -35,116 +58,161 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
   const t = translations[language];
   const [offersCountMap, setOffersCountMap] = useState<Record<string, number>>({});
 
+  // Offer counts, read in parallel, and only again when the list of requests really changes
+  const requestIdsKey = requests.map((r) => r.id).join(',');
   useEffect(() => {
     let isMounted = true;
     const fetchCounts = async () => {
-      const counts: Record<string, number> = {};
-      for (const req of requests) {
-        const offers = await repository.getOffers({ requestId: req.id });
-        counts[req.id] = offers.length;
-      }
+      const entries = await Promise.all(
+        requests.map(async (req) => {
+          try {
+            // A count query: the offers themselves are not downloaded
+            return [req.id, await repository.countOffers(req.id)] as const;
+          } catch {
+            return [req.id, 0] as const;
+          }
+        })
+      );
       if (isMounted) {
-        setOffersCountMap(counts);
+        setOffersCountMap(Object.fromEntries(entries));
       }
     };
     fetchCounts();
     return () => {
       isMounted = false;
     };
-  }, [requests]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestIdsKey]);
+
+  // Masters from finished jobs (newest first, at most 10 jobs read), so a good master is one tap away next time
+  const [pastMasters, setPastMasters] = useState<PastMaster[]>([]);
+  const completedIdsKey = requests
+    .filter((r) => normalizeRequestStatus(r.status) === 'COMPLETED')
+    .map((r) => r.id)
+    .join(',');
+  useEffect(() => {
+    let isMounted = true;
+    const done = requests
+      .filter((r) => normalizeRequestStatus(r.status) === 'COMPLETED')
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+      .slice(0, 10);
+    if (done.length === 0) {
+      setPastMasters([]);
+      return;
+    }
+    Promise.all(
+      done.map(async (req) => {
+        try {
+          const offers = await repository.getOffers({ requestId: req.id });
+          const hired = offers.find((o) => o.id === req.selectedOfferId) || offers.find((o) => o.status === 'ACCEPTED');
+          return hired && !hired.isDemo ? { req, hired } : null;
+        } catch {
+          return null;
+        }
+      })
+    ).then((rows) => {
+      if (!isMounted) return;
+      const byMaster = new Map<string, PastMaster>();
+      for (const row of rows) {
+        if (!row) continue;
+        const key = row.hired.providerUserId || row.hired.providerId;
+        const seen = byMaster.get(key);
+        if (seen) {
+          seen.jobs += 1;
+        } else {
+          byMaster.set(key, {
+            key,
+            name: row.hired.providerName,
+            phone: row.hired.providerPhone,
+            whatsapp: row.hired.providerWhatsapp,
+            lastJob: getRequestTitle(row.req, language),
+            jobs: 1,
+          });
+        }
+      }
+      setPastMasters(Array.from(byMaster.values()));
+    });
+    return () => {
+      isMounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completedIdsKey, language]);
+
+  // Masters saved with the heart button (on this phone)
+  const [favorites, setFavorites] = useState<FavoriteMaster[]>(() => getFavorites());
+  useEffect(() => onFavoritesChange(() => setFavorites(getFavorites())), []);
+  const [profile, setProfile] = useState<Provider | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const openProfile = async (id: string) => {
+    setProfileError(null);
+    try {
+      const prov = await repository.getProvider(id);
+      if (prov) setProfile(prov);
+      else setProfileError(language === 'kz' ? 'Шебер профилі табылмады' : 'Профиль мастера не найден');
+    } catch {
+      setProfileError(language === 'kz' ? 'Шебер профилі табылмады' : 'Профиль мастера не найден');
+    }
+  };
 
   return (
     <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col justify-between space-y-5">
       <div className="space-y-4">
         {/* Title */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center">
-              <ClipboardList className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-xl font-extrabold text-slate-900 tracking-tight font-display">
-                {t.myRequestsTitle}
-              </h2>
-              <p className="text-xs text-slate-500">
-                {requests.length}{' '}
-                {language === 'kz'
-                  ? 'өтініш тіркелген'
-                  : language === 'tr'
-                  ? 'talep geçmişte'
-                  : 'заявок в истории'}
-              </p>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <Emoji3D code="1f4cb" size={40} eager />
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold text-slate-900 tracking-tight font-display leading-tight">{t.myRequestsTitle}</h2>
+              {requests.length > 0 && (
+                <p className="text-xs text-slate-500">
+                  {requests.length} {language === 'kz' ? 'өтініш' : ruPlural(requests.length, 'заявка', 'заявки', 'заявок')}
+                </p>
+              )}
             </div>
           </div>
 
           <button
             type="button"
             onClick={onCreateNewRequest}
-            className="min-h-[40px] px-3 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors"
+            aria-label={language === 'kz' ? 'Жаңа өтініш' : 'Новая заявка'}
+            title={language === 'kz' ? 'Жаңа өтініш' : 'Новая заявка'}
+            className="press w-12 h-12 rounded-2xl bg-linear-to-br from-sky-500 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-sky-600/25 shrink-0"
           >
-            <PlusCircle className="w-4 h-4" />
-            <span>
-              {language === 'kz'
-                ? 'Жаңа өтініш'
-                : language === 'tr'
-                ? 'Yeni Talep'
-                : 'Новая заявка'}
-            </span>
+            <Plus className="w-6 h-6" strokeWidth={3} />
           </button>
         </div>
 
-        {/* Anonymous Session Notice Banner */}
-        <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-start gap-2.5 text-xs text-slate-600 shadow-2xs">
-          <Info className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" />
-          <div className="space-y-0.5">
-            <p className="font-bold text-slate-800 text-[11px] leading-tight">
-              {t.sessionNoticeTitle}
-            </p>
-            <p className="text-[11px] text-slate-500 leading-relaxed">
-              {t.sessionNoticeDesc}
-            </p>
-          </div>
-        </div>
-
         {/* Requests List */}
-        {requests.length === 0 ? (
-          <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center space-y-4 mt-6">
-            <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
-              <ClipboardList className="w-6 h-6" />
-            </div>
+        {loading && requests.length === 0 ? (
+          <div className="flex items-center justify-center py-16" role="status">
+            <span className="w-6 h-6 border-2 border-sky-600 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : requests.length === 0 ? (
+          <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-4 mt-4 animate-fadeUp">
+            <Emoji3D code="1f4ed" size={96} eager className="mx-auto animate-float" />
             <div>
-              <h3 className="text-base font-bold text-slate-800">
-                {t.myRequestsEmpty}
-              </h3>
-              <p className="text-xs text-slate-500 max-w-xs mx-auto mt-1">
+              <h3 className="text-lg font-bold text-slate-900">{t.myRequestsEmpty}</h3>
+              <p className="text-[13px] text-slate-500 max-w-xs mx-auto mt-1 leading-relaxed">
                 {language === 'kz'
-                  ? 'Өз қажеттілігіңізді жазыңыз, біз орындаушыларды тауып береміз.'
-                  : language === 'tr'
-                  ? 'İhtiyacınızı kendi kelimelerinizle yazın, en iyi ustaları bulalım.'
-                  : 'Опишите своими словами, что вам нужно — мы найдем лучших исполнителей.'}
+                  ? 'Қызметті таңдап, өтініш қалдырыңыз — шеберлер өз бағасын ұсынады.'
+                  : 'Выберите услугу и оставьте заявку — мастера предложат свою цену.'}
               </p>
             </div>
             <button
               type="button"
               onClick={onCreateNewRequest}
-              className="min-h-[44px] px-5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs inline-flex items-center gap-2 shadow-xs transition-colors"
+              className="press min-h-[48px] px-6 rounded-2xl bg-linear-to-r from-sky-600 to-indigo-600 text-white font-bold text-sm inline-flex items-center gap-2 shadow-lg shadow-sky-600/20"
             >
+              <Plus className="w-4 h-4" strokeWidth={3} />
               <span>{t.createNewRequestBtn}</span>
             </button>
           </div>
         ) : (
-          <div className="space-y-3">
-            {requests.map((req) => {
+          <div className="space-y-3 stagger">
+            {requests.map((req, i) => {
               const offerCount = offersCountMap[req.id] || 0;
               const formattedDate = req.createdAt
-                ? new Date(req.createdAt).toLocaleDateString(
-                    language === 'kz'
-                      ? 'kk-KZ'
-                      : language === 'tr'
-                      ? 'tr-TR'
-                      : 'ru-RU',
-                    { day: 'numeric', month: 'short' }
-                  )
+                ? formatShortDate(req.createdAt, language)
                 : req.date;
 
               return (
@@ -152,16 +220,15 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
                   key={req.id}
                   type="button"
                   onClick={() => onSelectRequest(req)}
-                  className="w-full text-left p-4 bg-white hover:bg-sky-50/40 active:bg-sky-100/50 border border-slate-200 rounded-2xl transition-all shadow-2xs hover:shadow-xs group flex items-start justify-between gap-3"
+                  style={{ ['--i' as string]: i }}
+                  className="press w-full text-left p-4 bg-white border border-slate-200/80 rounded-3xl shadow-sm shadow-slate-200/60 group flex items-start gap-3"
                 >
-                  <div className="space-y-2 flex-1">
-                    {/* Request ID + Status */}
+                  <RequestIcon request={req} size="lg" />
+                  <div className="space-y-1.5 flex-1 min-w-0">
+                    {/* Status */}
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-mono font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200/60">
-                        {req.id}
-                      </span>
                       <span
-                        className={`text-[11px] font-bold px-2 py-0.5 rounded ${
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
                           req.status === 'PROVIDER_SELECTED' || req.status === 'ACCEPTED'
                             ? 'bg-purple-100 text-purple-800 border border-purple-200'
                             : req.status === 'IN_PROGRESS'
@@ -183,16 +250,21 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
                           ? t.status_CANCELLED
                           : t.status_OPEN}
                       </span>
+                      {normalizeRequestStatus(req.status) === 'OPEN' && !req.selectedOfferId && isRequestExpired(req) && (
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                          {language === 'kz' ? 'Мерзімі бітті' : 'Срок истёк'}
+                        </span>
+                      )}
                     </div>
 
                     {/* Service & Text */}
                     <div>
                       <h4 className="text-sm font-bold text-slate-900 leading-snug group-hover:text-sky-800 transition-colors">
-                        {req.service}
+                        {getRequestTitle(req, language)}
                       </h4>
-                      <p className="text-xs text-slate-500 line-clamp-1 italic mt-0.5">
-                        «{req.requestText}»
-                      </p>
+                      {getRequestDescription(req) && (
+                        <p className="text-xs text-slate-500 line-clamp-1 mt-0.5">{getRequestDescription(req)}</p>
+                      )}
                     </div>
 
                     {/* Meta: Created Date, City, Budget, Offers Count */}
@@ -211,25 +283,98 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
                           {formatDynamicBudget(req.budget, language)}
                         </span>
                       )}
-                      <span className="flex items-center gap-1 text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded">
-                        <Inbox className="w-3 h-3" />
-                        {offerCount}{' '}
-                        {language === 'kz'
-                          ? 'ұсыныс'
-                          : language === 'tr'
-                          ? 'teklif'
-                          : 'предл.'}
-                      </span>
+                      {offerCount > 0 && (
+                        <span className="flex items-center gap-1 text-emerald-800 font-bold bg-emerald-100 px-2 py-0.5 rounded-full">
+                          {offerCount} {language === 'kz' ? 'ұсыныс' : 'предл.'}
+                        </span>
+                      )}
                     </div>
                   </div>
 
-                  <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-sky-600 transition-colors shrink-0 mt-3" />
+                  <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-sky-600 transition-colors shrink-0 self-center" />
                 </button>
               );
             })}
           </div>
         )}
+
+        {pastMasters.length > 0 && (
+          <section className="space-y-2 pt-2">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">
+                {language === 'kz' ? 'Сіз жұмыс істеген шеберлер' : 'Мастера, с которыми вы работали'}
+              </h3>
+              <p className="text-xs text-slate-500">
+                {language === 'kz' ? 'Тағы керек болса, тікелей хабарласыңыз.' : 'Нужен снова — свяжитесь напрямую.'}
+              </p>
+            </div>
+            {pastMasters.map((m) => {
+              const tel = toTelHref(m.phone);
+              const wa = toWhatsAppHref(m.whatsapp || m.phone);
+              return (
+                <div key={m.key} className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs">
+                  <button type="button" onClick={() => openProfile(m.key)} className="min-w-0 flex-1 text-left">
+                    <span className="block text-sm font-bold text-slate-900 truncate">{m.name}</span>
+                    <span className="block text-xs text-slate-500 truncate">
+                      {m.lastJob}
+                      {m.jobs > 1 ? ` · ${m.jobs} ${language === 'kz' ? 'жұмыс' : ruPlural(m.jobs, 'заказ', 'заказа', 'заказов')}` : ''}
+                    </span>
+                  </button>
+                  {tel && (
+                    <a
+                      href={tel}
+                      aria-label={language === 'kz' ? 'Қоңырау шалу' : 'Позвонить'}
+                      className="press w-10 h-10 rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center shrink-0"
+                    >
+                      <Phone className="w-4.5 h-4.5" />
+                    </a>
+                  )}
+                  {wa && (
+                    <a
+                      href={wa}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="WhatsApp"
+                      className="press w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0"
+                    >
+                      <MessageCircle className="w-4.5 h-4.5" />
+                    </a>
+                  )}
+                </div>
+              );
+            })}
+          </section>
+        )}
+
+        {favorites.length > 0 && (
+          <section className="space-y-2 pt-2">
+            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              <Heart className="w-4 h-4 fill-rose-500 text-rose-500" />
+              {language === 'kz' ? 'Таңдаулы шеберлер' : 'Избранные мастера'}
+            </h3>
+            {favorites.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => openProfile(f.id)}
+                className="press w-full flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs text-left"
+              >
+                <span className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 font-bold flex items-center justify-center shrink-0">
+                  {(f.name || '?').trim().charAt(0).toUpperCase()}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-bold text-slate-900 truncate">{f.name}</span>
+                  {f.category && <span className="block text-xs text-slate-500 truncate">{f.category}</span>}
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+              </button>
+            ))}
+          </section>
+        )}
+        {profileError && <p className="text-xs text-rose-600">{profileError}</p>}
       </div>
+
+      <ProviderProfileModal provider={profile} isOpen={!!profile} onClose={() => setProfile(null)} language={language} showContacts />
     </div>
   );
 };

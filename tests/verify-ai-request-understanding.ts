@@ -1,27 +1,12 @@
 import {
   analyzeRequestUnderstanding,
   understandingToExtractedNeed,
-  validateAndSanitizeRequestUnderstanding,
-  LocalRequestUnderstandingProvider,
-  GeminiRequestUnderstandingProvider,
-  defaultRequestUnderstandingProvider,
   RequestUnderstandingContext,
 } from '../src/services/requestUnderstanding';
-import {
-  normalizeCategoryId,
-  normalizeCityId,
-  getCategoryDisplayName,
-  getCityDisplayName,
-} from '../src/services/taxonomy';
 import { LocalRepository, setCurrentUserId } from '../src/services/localRepository';
 import { matchProviders } from '../src/services/matchingService';
 import {
-  ExtractedNeed,
-  PendingAttachment,
   RequestAttachment,
-  RequestLocation,
-  RequestUnderstanding,
-  ServiceRequest,
 } from '../src/types';
 
 // Mock localStorage for node test runner
@@ -130,8 +115,8 @@ async function runAllTests() {
     { text: 'сантехник нужен кран течет', expected: 'plumbing', legacyAlias: 'home_services' },
     { text: 'труба бітеліп қалды сантехника', expected: 'plumbing', legacyAlias: 'home_services' },
     { text: 'plumber to fix leaking pipe', expected: 'plumbing', legacyAlias: 'home_services' },
-    { text: 'газель жүк тасу переезд', expected: 'cleaning_moving', legacyAlias: 'cargo_moving' },
-    { text: 'көшіру қызметі грузчик', expected: 'cleaning_moving', legacyAlias: 'cargo_moving' },
+    { text: 'газель жүк тасу переезд', expected: 'moving', legacyAlias: 'cargo_moving' },
+    { text: 'көшіру қызметі грузчик', expected: 'moving', legacyAlias: 'cargo_moving' },
     { text: 'iPhone 15 экран сынды дисплей', expected: 'appliances', legacyAlias: 'electronics' },
     { text: 'телефон жөндеу смартфон', expected: 'appliances', legacyAlias: 'electronics' },
     { text: 'пәтер тазалау клининг уборка', expected: 'cleaning_moving', legacyAlias: 'cleaning' },
@@ -292,7 +277,8 @@ async function runAllTests() {
   assert('ExtractedNeed has city', Boolean(need.city));
   assert('ExtractedNeed has cityId kyzylorda', need.cityId === 'kyzylorda');
   assert('ExtractedNeed has categoryId appliance_repair or appliances', need.categoryId === 'appliance_repair' || need.categoryId === 'appliances');
-  assert('ExtractedNeed has isAiParsed true', need.isAiParsed === true);
+  // The local rules engine must not claim to be Gemini; App sets isAiParsed only when the AI answered
+  assert('Local ExtractedNeed is not labelled as AI-parsed', need.isAiParsed === false);
   assert('ExtractedNeed preserves original query', need.originalQuery === kzQuery);
   assert('ExtractedNeed contains understanding object', Boolean(need.understanding));
 
@@ -441,7 +427,7 @@ async function runAllTests() {
   if (failCount > 0) {
     process.exit(1);
   } else {
-    process.exit(0);
+    process.exit(process.exitCode === 1 ? 1 : 0);
   }
 }
 

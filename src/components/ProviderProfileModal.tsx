@@ -1,9 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Language, Provider, Review } from '../types';
+import { ReportButton } from './ReportButton';
+import { isTopMaster, Language, Provider, Review } from '../types';
 import { translations } from '../i18n/translations';
-import { repository } from '../services';
+import { formatShortDate } from '../services/dateFormat';
+import { repository, getCurrentUserId } from '../services';
+import { isFavorite, masterProfileLink, onFavoritesChange, toggleFavorite } from '../services/favorites';
+import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
+import { PortfolioGallery } from './PortfolioPhotos';
+import { getProviderStats, ProviderStats, responseTimeLabel } from '../services/publicStats';
 import {
   X,
+  Heart,
+  Share2,
+  Phone,
+  MessageCircle,
+  ShieldCheck,
   CheckCircle,
   MapPin,
   Clock,
@@ -19,6 +30,8 @@ interface ProviderProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   language: Language;
+  /** Show call / WhatsApp buttons (a master the customer saved, worked with or got a link to) */
+  showContacts?: boolean;
 }
 
 export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
@@ -26,9 +39,35 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
   isOpen,
   onClose,
   language,
+  showContacts = false,
 }) => {
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [favorite, setFavorite] = useState(false);
+  const [stats, setStats] = useState<ProviderStats | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setStats(null);
+    const uid = provider && !provider.isDemo ? provider.userId || provider.id : '';
+    if (isOpen && uid) {
+      getProviderStats(uid).then((st) => alive && setStats(st));
+    }
+    return () => {
+      alive = false;
+    };
+    // The stats belong to the master's account, so only its id matters
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, provider?.id, provider?.userId, provider?.isDemo]);
+  const [shareNote, setShareNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!provider?.id) return;
+    setFavorite(isFavorite(provider.id));
+    return onFavoritesChange(() => setFavorite(isFavorite(provider.id)));
+  }, [provider?.id]);
   const [isLoadingReviews, setIsLoadingReviews] = useState<boolean>(false);
+  // Counted on the server over all reviews (the list below shows the newest ones)
+  const [ratingSummary, setRatingSummary] = useState<{ avg: number; count: number } | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -38,6 +77,12 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
       const uId = provider.userId?.trim();
 
       const fetchReviewList = async () => {
+        repository
+          .getRatingSummary([pId, uId || ''])
+          .then((summary) => {
+            if (isMounted) setRatingSummary(summary);
+          })
+          .catch(() => {});
         try {
           const promises = [repository.getReviews({ providerId: pId })];
           if (uId && uId !== pId) {
@@ -62,6 +107,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
       fetchReviewList();
     } else {
       setReviews([]);
+      setRatingSummary(null);
     }
     return () => {
       isMounted = false;
@@ -72,12 +118,14 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
 
   const t = translations[language];
 
-  // Dynamic rating aggregation (strictly computed from verified review docs)
-  const reviewsCount = reviews.length;
-  const averageRating =
-    reviewsCount > 0
-      ? (reviews.reduce((acc, r) => acc + (Number(r.rating) || 0), 0) / reviewsCount).toFixed(1)
-      : null;
+  // Rating from real reviews: the server count over all of them, or the loaded list until it arrives
+  const reviewsCount = ratingSummary ? ratingSummary.count : reviews.length;
+  const ratingAvg = ratingSummary
+    ? ratingSummary.avg
+    : reviews.length > 0
+    ? reviews.reduce((acc, r) => acc + (Number(r.rating) || 0), 0) / reviews.length
+    : 0;
+  const averageRating = reviewsCount > 0 ? ratingAvg.toFixed(1) : null;
 
   // First letter of provider name for clean typography-based avatar
   const initialLetter = (provider.name || '').trim().charAt(0).toUpperCase() || 'M';
@@ -106,6 +154,28 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
   };
 
   const experienceText = formatExperience(provider.experienceYears);
+
+  const me = getCurrentUserId();
+  const isOwnProfile = Boolean(me && (provider.userId === me || provider.id === me));
+  const telHref = showContacts && !isOwnProfile ? toTelHref(provider.phone) : null;
+  const waHref = showContacts && !isOwnProfile ? toWhatsAppHref(provider.whatsapp || provider.phone) : null;
+
+  const shareProfile = async () => {
+    const link = masterProfileLink(provider.id);
+    const text = language === 'kz' ? `${provider.name} — Tapsyr-дағы шебер` : `${provider.name} — мастер в Tapsyr`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: provider.name, text, url: link });
+        return;
+      }
+      await navigator.clipboard.writeText(link);
+      setShareNote(language === 'kz' ? 'Сілтеме көшірілді' : 'Ссылка скопирована');
+    } catch {
+      // closed share sheet or no clipboard access: show the link to copy by hand
+      setShareNote(link);
+    }
+    window.setTimeout(() => setShareNote(null), 4000);
+  };
 
   return (
     <div
@@ -144,6 +214,12 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                     <span>{t.verifiedProviderBadge}</span>
                   </span>
                 )}
+                {provider.iinVerified && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
+                    <ShieldCheck className="w-3 h-3 text-sky-600 stroke-[2.5]" />
+                    <span>{language === 'kz' ? 'Жеке басы тексерілген' : 'Личность проверена'}</span>
+                  </span>
+                )}
                 {averageRating ? (
                   <span
                     className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded-full"
@@ -158,6 +234,11 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                   <span className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
                     <Star className="w-3 h-3 text-slate-400" />
                     <span>{language === 'kz' ? 'Баға жоқ' : 'Нет оценок'}</span>
+                  </span>
+                )}
+                {isTopMaster({ avg: ratingAvg, count: reviewsCount }) && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                    🏆 {language === 'kz' ? 'Үздік шебер' : 'Лучший мастер'}
                   </span>
                 )}
                 {provider.isDemo && (
@@ -186,6 +267,53 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
           </button>
         </div>
 
+        {/* Save, share, contact */}
+        <div className="px-5 pt-3 pb-1 flex flex-wrap gap-2">
+          {!isOwnProfile && !provider.isDemo && (
+            <button
+              type="button"
+              aria-pressed={favorite}
+              onClick={() => setFavorite(toggleFavorite({ id: provider.id, name: provider.name, category: provider.category }))}
+              className={`h-9 px-3 rounded-full border text-xs font-bold inline-flex items-center gap-1.5 transition-colors ${
+                favorite ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-700'
+              }`}
+            >
+              <Heart className={`w-4 h-4 ${favorite ? 'fill-rose-500 text-rose-500' : ''}`} />
+              {favorite ? (language === 'kz' ? 'Таңдаулыда' : 'В избранном') : language === 'kz' ? 'Таңдаулыға' : 'В избранное'}
+            </button>
+          )}
+          {!provider.isDemo && (
+            <button
+              type="button"
+              onClick={shareProfile}
+              className="h-9 px-3 rounded-full border border-slate-200 bg-white text-slate-700 text-xs font-bold inline-flex items-center gap-1.5"
+            >
+              <Share2 className="w-4 h-4" />
+              {isOwnProfile
+                ? language === 'kz' ? 'Профильмен бөлісу' : 'Поделиться профилем'
+                : language === 'kz' ? 'Бөлісу' : 'Поделиться'}
+            </button>
+          )}
+          {telHref && (
+            <a href={telHref} className="h-9 px-3 rounded-full bg-sky-600 text-white text-xs font-bold inline-flex items-center gap-1.5">
+              <Phone className="w-4 h-4" />
+              {language === 'kz' ? 'Қоңырау' : 'Позвонить'}
+            </a>
+          )}
+          {waHref && (
+            <a
+              href={waHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="h-9 px-3 rounded-full bg-emerald-600 text-white text-xs font-bold inline-flex items-center gap-1.5"
+            >
+              <MessageCircle className="w-4 h-4" />
+              WhatsApp
+            </a>
+          )}
+          {shareNote && <p className="w-full text-[11px] text-slate-500 break-all">{shareNote}</p>}
+        </div>
+
         {/* Content Body */}
         <div className="p-5 overflow-y-auto space-y-4 text-xs">
           {/* Experience Badge (if provided) */}
@@ -204,6 +332,25 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
               </div>
             </div>
           )}
+
+          {stats && (stats.completedJobs > 0 || stats.avgResponseMinutes !== null) && (
+            <div className="flex flex-wrap gap-1.5">
+              {stats.completedJobs > 0 && (
+                <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800">
+                  ✅ {language === 'kz'
+                    ? `${stats.completedJobs} тапсырыс орындады`
+                    : `${stats.completedJobs} ${stats.completedJobs % 10 === 1 && stats.completedJobs % 100 !== 11 ? 'выполненный заказ' : stats.completedJobs % 10 >= 2 && stats.completedJobs % 10 <= 4 && (stats.completedJobs % 100 < 10 || stats.completedJobs % 100 >= 20) ? 'выполненных заказа' : 'выполненных заказов'}`}
+                </span>
+              )}
+              {stats.avgResponseMinutes !== null && (
+                <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full bg-sky-50 border border-sky-200 text-[11px] font-bold text-sky-800">
+                  ⚡ {language === 'kz' ? 'Әдетте жауап береді:' : 'Обычно отвечает'} {responseTimeLabel(stats.avgResponseMinutes, language === 'kz' ? 'kz' : 'ru')}
+                </span>
+              )}
+            </div>
+          )}
+
+          <PortfolioGallery provider={provider} language={language} />
 
           {/* Category */}
           {provider.category && (
@@ -333,7 +480,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                 <span>{language === 'kz' ? 'Пікірлер жүктелуде...' : 'Загрузка отзывов...'}</span>
               </div>
             ) : reviewsCount === 0 ? (
-              /* Empty State (Boş durum) */
+              /* Empty State */
               <div className="p-6 bg-slate-50/80 rounded-2xl border border-dashed border-slate-200 text-center space-y-1.5 animate-fadeIn">
                 <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
                   <Star className="w-4 h-4 stroke-1" />
@@ -366,11 +513,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                           </span>
                           {rev.createdAt && (
                             <span className="text-[10px] text-slate-400">
-                              {new Date(rev.createdAt).toLocaleDateString(language === 'kz' ? 'kk-KZ' : 'ru-RU', {
-                                year: 'numeric',
-                                month: 'short',
-                                day: 'numeric',
-                              })}
+                              {formatShortDate(rev.createdAt, language, { year: true })}
                             </span>
                           )}
                         </div>
@@ -396,6 +539,9 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
 
         {/* Footer */}
         <div className="p-4 pt-2 border-t border-slate-100 bg-white">
+          <div className="flex justify-center">
+            <ReportButton language={language} targetType="provider" targetId={provider.userId || provider.id} />
+          </div>
           <button
             type="button"
             onClick={onClose}

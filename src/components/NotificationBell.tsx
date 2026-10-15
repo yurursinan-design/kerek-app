@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { formatShortDate } from '../services/dateFormat';
 import { AppNotification, Language } from '../types';
 import {
   Bell,
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react';
 import { repository } from '../services';
 import { auth } from '../services/firebase';
+import { localizedText } from '../services/safeData';
 
 interface NotificationBellProps {
   notifications: AppNotification[];
@@ -82,10 +84,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
       if (diffHours < 24) {
         return language === 'kz' ? `${diffHours} сағ бұрын` : `${diffHours} ч назад`;
       }
-      return date.toLocaleDateString(language === 'kz' ? 'kk-KZ' : 'ru-RU', {
-        month: 'short',
-        day: 'numeric',
-      });
+      return formatShortDate(date, language);
     } catch {
       return '';
     }
@@ -164,6 +163,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
               <button
                 type="button"
                 onClick={() => setIsOpen(false)}
+                data-dialog-close
                 className="p-1 text-slate-400 hover:text-slate-700 rounded transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -189,8 +189,8 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
               </div>
             ) : (
               notifications.map((notif) => {
-                const titleText = notif.title[language] || notif.title.ru || notif.title.kz;
-                const bodyText = notif.body[language] || notif.body.ru || notif.body.kz;
+                const titleText = localizedText(notif.title, language);
+                const bodyText = localizedText(notif.body, language);
 
                 return (
                   <button

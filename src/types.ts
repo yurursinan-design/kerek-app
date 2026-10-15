@@ -1,4 +1,4 @@
-export type Language = 'kz' | 'ru' | 'tr';
+export type Language = 'kz' | 'ru';
 
 export type Urgency = 'high' | 'normal' | 'low';
 
@@ -72,6 +72,8 @@ export interface RequestUnderstanding {
   categoryId?: string;
 
   service?: string;
+  /** Service from the catalogue (src/data/serviceCatalog.ts), when recognised */
+  serviceId?: string;
 
   description: string;
 
@@ -109,7 +111,10 @@ export interface ExtractedNeed {
   cityId?: string;
   category: string;
   categoryId?: string;
+  serviceId?: string;
   service: string;
+  /** Full description: the customer's words plus the details added on the confirmation screen */
+  description?: string;
   date: string;
   budget: string;
   urgency: Urgency;
@@ -142,6 +147,8 @@ export interface RequestLocation {
   longitude: number;
   accuracy?: number;
   address?: string;
+  /** True on the shared request: coordinates are rounded (~1 km); the exact point is in requestContacts */
+  approximate?: boolean;
 }
 
 export interface ServiceRequest {
@@ -162,6 +169,10 @@ export interface ServiceRequest {
   status: RequestStatus;
   createdAt: string;
   selectedOfferId?: string;
+  // Set when the selected provider reports the job finished; the customer then confirms (COMPLETED)
+  providerDoneAt?: string;
+  /** Service from the catalogue, when the customer picked or the app recognised one */
+  serviceId?: string;
   lastOfferId?: string;
   offerId?: string;
   attachments?: RequestAttachment[];
@@ -169,9 +180,45 @@ export interface ServiceRequest {
   understanding?: RequestUnderstanding;
   paymentStatus?: 'pending' | 'held_in_escrow' | 'released' | 'refunded';
   escrowAmount?: number;
+  /** Offers received so far (counted by the server rules, at most MAX_OFFERS_PER_REQUEST) */
+  offerCount?: number;
+  /** Until when masters can send offers (milliseconds since 1970); the customer can extend it */
+  expiresAtMs?: number;
+  /** The price the master says was agreed in the end, reported with "job finished" */
+  finalPrice?: string;
+}
+
+/** Like Armut: a request takes a few offers, so the customer isn't flooded and masters don't write in vain */
+export const MAX_OFFERS_PER_REQUEST = 5;
+/** Days a request stays open for offers; one tap extends it by the same time */
+export const REQUEST_OPEN_DAYS = 3;
+export const REQUEST_OPEN_MS = REQUEST_OPEN_DAYS * 24 * 60 * 60 * 1000;
+
+export function isRequestExpired(r: Pick<ServiceRequest, 'expiresAtMs'>, now = Date.now()): boolean {
+  return typeof r.expiresAtMs === 'number' && now >= r.expiresAtMs;
+}
+
+export function isRequestFull(r: Pick<ServiceRequest, 'offerCount'>): boolean {
+  return (r.offerCount || 0) >= MAX_OFFERS_PER_REQUEST;
 }
 
 export type OfferPriceType = 'fixed' | 'from' | 'inspection';
+
+/** How the master accepts payment (always directly, outside the app) */
+export type OfferPaymentMethod = 'cash' | 'kaspi';
+export const OFFER_PAYMENT_METHODS: OfferPaymentMethod[] = ['cash', 'kaspi'];
+
+export function paymentMethodLabel(m: OfferPaymentMethod, lang: Language): string {
+  if (m === 'cash') return lang === 'kz' ? 'Қолма-қол' : 'Наличные';
+  return lang === 'kz' ? 'Kaspi (аударым / QR)' : 'Kaspi (перевод / QR)';
+}
+
+/** "Top master": a strong average over enough real reviews */
+export const TOP_MASTER_MIN_RATING = 4.8;
+export const TOP_MASTER_MIN_REVIEWS = 5;
+export function isTopMaster(summary?: { avg: number; count: number } | null): boolean {
+  return !!summary && summary.count >= TOP_MASTER_MIN_REVIEWS && summary.avg >= TOP_MASTER_MIN_RATING;
+}
 
 export interface ProviderOffer {
   id: string;
@@ -186,11 +233,28 @@ export interface ProviderOffer {
   priceType?: OfferPriceType;
   availability: string;
   message: string;
+  /** Payment the master accepts (cash, Kaspi); paid to the master directly */
+  paymentMethods?: OfferPaymentMethod[];
+  /** The master promises to fix a problem with this job for free within 14 days */
+  fixPledge?: boolean;
+  /** With "price after inspection": what the visit costs if there's no deal (e.g. "2 000 ₸", "Бесплатно") */
+  inspectionFee?: string;
   status: 'PENDING' | 'ACCEPTED' | 'REJECTED';
   createdAt: string;
   iinVerified?: boolean;
   hasCertificate?: boolean;
   paymentStatus?: 'pending' | 'held_in_escrow' | 'released' | 'refunded';
+}
+
+/** The optional extras of a new offer: known payment methods only (no repeats), the pledge only when given */
+export function offerExtras(o: Partial<ProviderOffer>): Pick<ProviderOffer, 'paymentMethods' | 'fixPledge' | 'inspectionFee'> {
+  const methods = (o.paymentMethods || []).filter((m, i, all) => OFFER_PAYMENT_METHODS.includes(m) && all.indexOf(m) === i);
+  const fee = o.priceType === 'inspection' ? (o.inspectionFee || '').trim().slice(0, 50) : '';
+  return {
+    ...(methods.length ? { paymentMethods: methods } : {}),
+    ...(o.fixPledge === true ? { fixPledge: true } : {}),
+    ...(fee ? { inspectionFee: fee } : {}),
+  };
 }
 
 export interface Review {
@@ -232,7 +296,6 @@ export function formatOfferDisplayPrice(
     rawPrice.toLowerCase().includes('kesif')
   ) {
     if (language === 'kz') return 'Қарап көрген соң';
-    if (language === 'tr') return 'Keşif sonrası';
     return 'После осмотра';
   }
 
@@ -257,8 +320,6 @@ export function formatOfferDisplayPrice(
     const amount = extractFormattedAmount(rawPrice);
     if (language === 'kz') {
       return `${amount} бастап`;
-    } else if (language === 'tr') {
-      return `${amount}'den başlayan`;
     } else {
       return `от ${amount}`;
     }
@@ -275,8 +336,8 @@ export function formatOfferDisplayPrice(
 
 /**
  * Localizes common dynamic date and availability strings across KZ, RU, and TR:
- * - 'Бүгін' / 'Сегодня' / 'Bugün' -> 'Bugün' (TR), 'Бүгін' (KZ), 'Сегодня' (RU)
- * - 'Ертең' / 'Завтра' / 'Yarın' -> 'Yarın' (TR), 'Ертең' (KZ), 'Завтра' (RU)
+ * - 'Бүгін' / 'Сегодня' (older records may say 'Bugün') -> 'Бүгін' (KZ), 'Сегодня' (RU)
+ * - 'Ертең' / 'Завтра' (older records may say 'Yarın') -> 'Ертең' (KZ), 'Завтра' (RU)
  * - 'Осы аптада' / 'На этой неделе' / 'Bu hafta' -> 'Bu hafta' (TR), 'Осы аптада' (KZ), 'На этой неделе' (RU)
  * - If unmatched, returns the original string or formatted date.
  */
@@ -291,7 +352,6 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
     lower === 'bugün' ||
     lower === 'bugun'
   ) {
-    if (lang === 'tr') return 'Bugün';
     if (lang === 'kz') return 'Бүгін';
     return 'Сегодня';
   }
@@ -303,7 +363,6 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
     lower.startsWith('bugun')
   ) {
     const suffix = clean.replace(/^(бүгін|сегодня|bugün|bugun)[,\s]*/i, '');
-    if (lang === 'tr') return suffix ? `Bugün, ${suffix}` : 'Bugün';
     if (lang === 'kz') return suffix ? `Бүгін, ${suffix}` : 'Бүгін';
     return suffix ? `Сегодня, ${suffix}` : 'Сегодня';
   }
@@ -315,7 +374,6 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
     lower === 'yarın' ||
     lower === 'yarin'
   ) {
-    if (lang === 'tr') return 'Yarın';
     if (lang === 'kz') return 'Ертең';
     return 'Завтра';
   }
@@ -328,7 +386,6 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
     lower.startsWith('yarin')
   ) {
     const suffix = clean.replace(/^(ертең|завтра|ертен|yarın|yarin)[,\s]*/i, '');
-    if (lang === 'tr') return suffix ? `Yarın, ${suffix}` : 'Yarın';
     if (lang === 'kz') return suffix ? `Ертең, ${suffix}` : 'Ертең';
     return suffix ? `Завтра, ${suffix}` : 'Завтра';
   }
@@ -338,7 +395,6 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
     lower.includes('на этой недел') ||
     lower.includes('bu hafta')
   ) {
-    if (lang === 'tr') return 'Bu hafta';
     if (lang === 'kz') return 'Осы аптада';
     return 'На этой неделе';
   }
@@ -348,8 +404,8 @@ export function formatDynamicDate(dateStr?: string, lang: Language = 'ru'): stri
 
 /**
  * Localizes dynamic budget strings:
- * - Negotiable: 'Келісімді' / 'Договорная' / 'Anlaşmalı' -> 'Anlaşmalı / Belirsiz' (TR), 'Келісімді' (KZ), 'Договорная' (RU)
- * - Inspection: 'После осмотра' / 'Қарап көрген соң' / 'Keşif sonrası' -> 'Keşif sonrası' (TR), 'Қарап көрген соң' (KZ), 'После осмотра' (RU)
+ * - Negotiable: 'Келісімді' / 'Договорная' / 'Anlaşmalı' -> 'Келісімді' (KZ), 'Договорная' (RU)
+ * - Inspection: 'После осмотра' / 'Қарап көрген соң' / 'Keşif sonrası' -> 'Қарап көрген соң' (KZ), 'После осмотра' (RU)
  * - Preserves numeric values (e.g. '15 000 ₸', 'от 10 000 ₸', '10 000 ₸ бастап').
  */
 export function formatDynamicBudget(budgetStr?: string, lang: Language = 'ru'): string {
@@ -366,7 +422,6 @@ export function formatDynamicBudget(budgetStr?: string, lang: Language = 'ru'): 
     lower.includes('anlasma') ||
     lower.includes('belirsiz')
   ) {
-    if (lang === 'tr') return 'Anlaşmalı / Belirsiz';
     if (lang === 'kz') return 'Келісімді';
     return 'Договорная';
   }
@@ -379,7 +434,6 @@ export function formatDynamicBudget(budgetStr?: string, lang: Language = 'ru'): 
     lower.includes('keşif') ||
     lower.includes('kesif')
   ) {
-    if (lang === 'tr') return 'Keşif sonrası';
     if (lang === 'kz') return 'Қарап көрген соң';
     return 'После осмотра';
   }
@@ -394,7 +448,6 @@ export function formatDynamicBudget(budgetStr?: string, lang: Language = 'ru'): 
     const digitsOnly = clean.replace(/[^\d]/g, '');
     if (digitsOnly.length > 0) {
       const spaced = digitsOnly.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-      if (lang === 'tr') return `${spaced} ₸ başlayan`;
       if (lang === 'kz') return `${spaced} ₸ бастап`;
       return `от ${spaced} ₸`;
     }
@@ -414,6 +467,10 @@ export interface Provider {
   district: string;
   category: string;
   categoryId?: string;
+  /** All catalogue groups the provider works in (categoryId is the first one) */
+  categoryIds?: string[];
+  /** Catalogue services the provider offers */
+  serviceIds?: string[];
   services: string;
   priceRange: string;
   workingHours: string;
@@ -426,31 +483,16 @@ export interface Provider {
   tradeLicense?: string;
   isActive?: boolean;
   isDemo?: boolean;
+  /** "Not taking orders now": new-request alerts stop until the master switches it off */
+  paused?: boolean;
+  /** Work photos: filled slots (p0 … p7), the files are in Storage under the master's folder */
+  portfolio?: string[];
   createdAt?: string;
   updatedAt?: string;
 }
 
-export interface DemoProvider {
-  id: string;
-  name: string;
-  cityId?: string;
-  category: string;
-  categoryId?: string;
-  service: string;
-  approxPrice: string;
-  distance: string;
-  responseTime: string;
-  city: string;
-  rating: number;
-  reviewsCount: number;
-  phone: string;
-  whatsapp: string;
-  verified: boolean;
-  iinVerified?: boolean;
-  hasCertificate?: boolean;
-  addressSnippet: string;
-  district?: string;
-}
+export const PORTFOLIO_SLOTS = ['p0', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7'] as const;
+
 
 // =================== In-App Chat Models ===================
 
@@ -473,6 +515,10 @@ export interface Conversation {
 
   unreadCountCustomer: number;
   unreadCountProvider: number;
+
+  /** Time of the newest message each side has seen (the message's own time, so clocks don't matter) */
+  customerLastReadAt?: string;
+  providerLastReadAt?: string;
 
   createdAt: string;
   updatedAt: string;
@@ -523,6 +569,8 @@ export const CHAT_LIMITS = {
   MAX_IMAGE_SIZE_BYTES: 10 * 1024 * 1024, // 10 MB
   MAX_FILE_SIZE_BYTES: 20 * 1024 * 1024,  // 20 MB
   ALLOWED_IMAGE_MIMES: ['image/jpeg', 'image/png', 'image/webp'] as const,
+  // Non-image files are limited to PDF (estimates, invoices); storage.rules enforces the same list
+  ALLOWED_FILE_MIMES: ['application/pdf'] as const,
   DISALLOWED_FILE_EXTENSIONS: [
     'exe', 'bat', 'cmd', 'sh', 'php', 'py', 'pl', 'jar', 'vbs', 'msi', 'com', 'scr', 'bin', 'ps1', 'apk'
   ] as const,
@@ -558,7 +606,8 @@ export function validateRequestAttachment(
   file: { name: string; size: number; type: string },
   forcedType?: 'image' | 'video' | 'audio'
 ): { isValid: boolean; errorKey?: string; type: 'image' | 'video' | 'audio' } {
-  const mime = (file.type || '').toLowerCase();
+  // Recorders report codec parameters ("audio/webm;codecs=opus"); only the base type matters here
+  const mime = (file.type || '').toLowerCase().split(';')[0].trim();
   const ext = (file.name.split('.').pop() || '').toLowerCase();
 
   // Guard against executable or dangerous extensions
@@ -646,6 +695,9 @@ export function validateChatAttachment(
     }
     const ext = (file.name.split('.').pop() || '').toLowerCase();
     if ((CHAT_LIMITS.DISALLOWED_FILE_EXTENSIONS as readonly string[]).includes(ext)) {
+      return { isValid: false, errorKey: 'chatUnsupportedFileType', type };
+    }
+    if (!(CHAT_LIMITS.ALLOWED_FILE_MIMES as readonly string[]).includes(file.type.toLowerCase())) {
       return { isValid: false, errorKey: 'chatUnsupportedFileType', type };
     }
   }
@@ -803,13 +855,11 @@ export interface AppNotification {
   title: {
     kz: string;
     ru: string;
-    tr?: string;
   };
 
   body: {
     kz: string;
     ru: string;
-    tr?: string;
   };
 
   requestId?: string;

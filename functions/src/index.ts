@@ -1,53 +1,61 @@
-import * as functions from 'firebase-functions';
 import * as crypto from 'crypto';
-import { getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-import { onRequest, onCall, HttpsError } from 'firebase-functions/v2/https';
+import { getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import { GEMINI_CONFIG } from './config';
 import { parseTextWithGemini, ParsedServiceRequest } from './geminiParser';
+import { allowCall, clientIp, DAY_MS } from './limits';
 
-// Initialize Firebase Admin SDK safely (singleton pattern)
-if (!getApps().length) {
-  initializeApp();
-}
+// Phone login with a one-time code sent to WhatsApp; see whatsappLogin.ts
+export { requestLoginCode, verifyLoginCode } from './whatsappLogin';
+// In-app notices from real events, and push messages to phones; see notifications.ts
+export {
+  notifyOnOfferCreated,
+  notifyOnOfferUpdated,
+  notifyOnMessageCreated,
+  notifyOnRequestUpdated,
+  notifyOnAppointmentWritten,
+  pushOnNotificationCreated,
+} from './notifications';
+// Jobs done, answer speed and typical prices, counted from real events; see stats.ts
+export { statsOnOfferCreated, statsOnRequestCompleted } from './stats';
+// Copy of all personal data in Kazakhstan (Law 94-V art. 12 p. 2); see kzMirror.ts
+export {
+  kzMirrorUsers,
+  kzMirrorProviders,
+  kzMirrorRequests,
+  kzMirrorRequestContacts,
+  kzMirrorOffers,
+  kzMirrorReviews,
+  kzMirrorConversations,
+  kzMirrorMessages,
+  kzMirrorAppointments,
+  kzMirrorNotifications,
+  kzMirrorReports,
+  kzMirrorPushTokens,
+} from './kzMirror';
+// kzMirrorFileSaved / kzMirrorFileDeleted (copies of uploaded files) are exported once Cloud
+// Storage has its default bucket: until then the deploy can't find the bucket's region
 
 const db = getFirestore();
 
 // Access secrets securely from Google Secret Manager
-const kaspiWebhookSecret = defineSecret('KASPI_WEBHOOK_SECRET');
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
 
-/**
- * Kaspi.kz Escrow Webhook
- *
- * SECURITY AUDIT NOTICE:
- * Official Kaspi.kz / Kaspi Pay webhook integration specifications (HMAC algorithm, signature header format,
- * timestamp headers, and replay protection) are neither documented nor present in this repository.
- * Per security guidelines:
- * 1. Do NOT invent a synthetic HMAC algorithm or signature scheme.
- * 2. Prevent the endpoint from modifying real payment status in the database without verified credentials.
- * 3. Safely reject requests with 501 Not Implemented until official Kaspi merchant integration specifications are provided.
- */
-export const kaspiEscrowWebhook = onRequest(
-  {
-    secrets: [kaspiWebhookSecret],
-  },
-  async (req, res) => {
-    console.warn(
-      '[kaspiEscrowWebhook] Security notice: Official Kaspi payment webhook protocol is unverified in this repository. ' +
-      'Escrow status mutation is safely disabled until official Kaspi merchant integration specifications are provided.'
-    );
+// Payments are made directly between customer and provider for now. The Kaspi escrow webhook stub
+// (and its KASPI_WEBHOOK_SECRET, which blocked deploying functions while undefined) was removed;
+// add a real integration once the Kaspi merchant specifications are available.
 
-    res.status(501).json({
-      success: false,
-      error:
-        'Official Kaspi payment webhook protocol is unverified in this repository. ' +
-        'Escrow status mutation is disabled to prevent unauthorized payment state changes.',
-    });
-  }
-);
+/** Request text shown to other people: no links or phone numbers, short. */
+function cleanForNotification(text: unknown): string {
+  return String(typeof text === 'string' ? text : '')
+    .replace(/https?:\/\/\S+|www\.\S+/gi, '')
+    .replace(/\+?\d[\d\s()-]{6,}\d/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
 
 /**
  * Cloud Function v2: parseServiceRequest
@@ -69,6 +77,9 @@ export const parseServiceRequest = onCall<
   {
     region: GEMINI_CONFIG.region,
     secrets: [geminiApiKey],
+    // Hard ceiling on parallel instances and run time, so abuse can't scale the bill
+    maxInstances: 5,
+    timeoutSeconds: 20,
   },
   async (request) => {
     // 1. Authentication check: Caller must be signed in (anonymous or permanent UID)
@@ -80,50 +91,20 @@ export const parseServiceRequest = onCall<
     }
 
     const uid = request.auth.uid;
+    const isAnonymous = (request.auth.token as any)?.firebase?.sign_in_provider === 'anonymous';
 
-    // 2. Server-side Rate Limit check (rateLimits/{uid})
+    // 2. Server-side rate limits: per account (stricter for anonymous visitors), per day, per
+    // network address (so new anonymous accounts don't get around the account limit), and one
+    // overall daily ceiling for the whole app.
     const now = Date.now();
-    const rateLimitRef = db.collection('rateLimits').doc(uid);
-    const rateLimitDoc = await rateLimitRef.get();
-
-    if (rateLimitDoc.exists) {
-      const rateLimitData = rateLimitDoc.data() || {};
-      const lastCallAt = typeof rateLimitData.lastCallAt === 'number' ? rateLimitData.lastCallAt : 0;
-      const callCount = typeof rateLimitData.callCount === 'number' ? rateLimitData.callCount : 0;
-
-      if (now - lastCallAt < 60000 && callCount >= 10) {
-        throw new HttpsError(
-          'resource-exhausted',
-          'Too many requests. Please wait a moment before trying again.'
-        );
-      }
-
-      if (now - lastCallAt >= 60000) {
-        await rateLimitRef.set(
-          {
-            callCount: 1,
-            lastCallAt: now,
-          },
-          { merge: true }
-        );
-      } else {
-        await rateLimitRef.set(
-          {
-            callCount: callCount + 1,
-            lastCallAt: now,
-          },
-          { merge: true }
-        );
-      }
-    } else {
-      await rateLimitRef.set(
-        {
-          callCount: 1,
-          lastCallAt: now,
-        },
-        { merge: true }
-      );
+    const tooMany = () => new HttpsError('resource-exhausted', 'Too many requests. Please wait a moment before trying again.');
+    if (!(await allowCall(`uid_${uid}`, isAnonymous ? 5 : 10, now))) throw tooMany();
+    if (!(await allowCall(`uid_day_${uid}`, isAnonymous ? 30 : 100, now, DAY_MS))) throw tooMany();
+    const ip = clientIp(request.rawRequest);
+    if (ip && !(await allowCall(`ip_${crypto.createHash('sha256').update(ip).digest('hex').slice(0, 32)}`, 30, now))) {
+      throw tooMany();
     }
+    if (!(await allowCall('global_day', 5000, now, DAY_MS))) throw tooMany();
 
     // 3. Input validation: text must be non-empty string <= 500 characters
     const text = request.data?.text;
@@ -153,10 +134,7 @@ export const parseServiceRequest = onCall<
     const apiKey = geminiApiKey.value() || process.env.GEMINI_API_KEY;
     if (!apiKey) {
       console.error('[parseServiceRequest] GEMINI_API_KEY secret is not configured.');
-      throw new HttpsError(
-        'failed-precondition',
-        'Gemini API key is not configured in Secret Manager.'
-      );
+      throw new HttpsError('unavailable', 'The AI parser is not available right now.');
     }
 
     // 4. Parse request with Gemini & validate server-side
@@ -165,11 +143,9 @@ export const parseServiceRequest = onCall<
       // Ensure function NEVER writes to Firestore directly (pure parser)
       return parsed;
     } catch (err: any) {
-      console.error('[parseServiceRequest] Error during AI parsing:', err);
-      throw new HttpsError(
-        'internal',
-        err?.message || 'Failed to parse request with Gemini.'
-      );
+      console.error('[parseServiceRequest] Error during AI parsing:', err?.message || err);
+      // Details stay in the server log; the app falls back to its own analysis
+      throw new HttpsError('internal', 'The AI parser could not read this request.');
     }
   }
 );
@@ -179,7 +155,8 @@ export const parseServiceRequest = onCall<
  * Automatically notifies providers matching the same cityId and categoryId.
  */
 export const onNewRequestNotifyProviders = onDocumentCreated(
-  'requests/{id}',
+  // Firestore triggers run where the database is (asia-south1)
+  { document: 'requests/{id}', region: 'asia-south1', maxInstances: 5 },
   async (event) => {
     const snap = event.data;
     if (!snap) return;
@@ -189,34 +166,60 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
     const cityId = requestData?.cityId;
     const categoryId = requestData?.categoryId;
     const customerId = requestData?.customerId;
-    const serviceTitle = requestData?.service || requestData?.category || 'Жаңа тапсырыс';
+    const serviceTitle = cleanForNotification(requestData?.service) || cleanForNotification(requestData?.category) || 'Жаңа тапсырыс';
 
-    if (!cityId || !categoryId) {
-      console.log(`[onNewRequestNotifyProviders] Request ${requestId} missing cityId or categoryId`);
+    if (!cityId || !categoryId || typeof customerId !== 'string') {
+      console.log(`[onNewRequestNotifyProviders] Request ${requestId} missing cityId, categoryId or customerId`);
+      return;
+    }
+    if (!['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'].includes(requestData?.status)) return;
+
+    // One customer can alert providers for at most 5 new requests an hour (protects providers
+    // from spam and the project from write costs)
+    if (!(await allowCall(`newreq_${customerId}`, 5, Date.now(), 3600 * 1000))) {
+      console.warn(`[onNewRequestNotifyProviders] Skipped alerts for ${requestId}: customer over the hourly limit`);
       return;
     }
 
     try {
       // Find matching providers with same cityId and categoryId
-      const queryRef = db
-        .collection('providers')
-        .where('cityId', '==', cityId)
-        .where('categoryId', '==', categoryId);
-      const providersSnap = await queryRef.get();
+      // Providers list every group they work in (categoryIds); older profiles have only categoryId
+      const [byList, byMain] = await Promise.all([
+        db.collection('providers').where('cityId', '==', cityId).where('categoryIds', 'array-contains', categoryId).limit(300).get(),
+        db.collection('providers').where('cityId', '==', cityId).where('categoryId', '==', categoryId).limit(300).get(),
+      ]);
+      const seen = new Set<string>();
+      const providersSnap = { docs: [...byList.docs, ...byMain.docs].filter((d) => !seen.has(d.id) && (seen.add(d.id), true)) };
 
-      const batch = db.batch();
+      // Events can be delivered more than once: notices that already exist are left as they are
+      // (a provider may have read them)
+      const candidateRefs = providersSnap.docs.map((d) => db.collection('notifications').doc(`notif_new_request_${requestId}_${d.id}`));
+      const existing = new Set<string>();
+      for (let i = 0; i < candidateRefs.length; i += 100) {
+        const snaps = await db.getAll(...candidateRefs.slice(i, i + 100));
+        snaps.forEach((s) => s.exists && existing.add(s.id));
+      }
+
+      // A Firestore batch holds at most 500 writes, so notifications are written in chunks
+      const BATCH_LIMIT = 450;
+      let batch = db.batch();
+      let inBatch = 0;
       let count = 0;
       const now = new Date().toISOString();
 
-      providersSnap.forEach((doc) => {
+      for (const doc of providersSnap.docs) {
         const providerData = doc.data();
         const providerId = doc.id;
         const providerUserId = providerData.userId || providerId;
 
-        // Skip if provider is the customer themselves
-        if (providerUserId === customerId) return;
+        // Skip the customer themselves, providers the operator blocked or hid, and paused masters
+        if (providerUserId === customerId) continue;
+        if (providerData.blocked === true || providerData.hidden === true) continue;
+        // A master on a break ("not taking orders now") gets no new-request alerts
+        if (providerData.paused === true) continue;
 
         const notifId = `notif_new_request_${requestId}_${providerId}`;
+        if (existing.has(notifId)) continue;
         const notifRef = db.collection('notifications').doc(notifId);
 
         batch.set(
@@ -229,26 +232,34 @@ export const onNewRequestNotifyProviders = onDocumentCreated(
             title: {
               kz: 'Жаңа сұраныс табылды',
               ru: 'Новая подходящая заявка',
-              tr: 'Yeni uygun talep',
             },
             body: {
               kz: `Сіздің бағытыңыз бойынша жаңа тапсырыс: ${serviceTitle}`,
               ru: `Новый запрос по вашему профилю: ${serviceTitle}`,
-              tr: `Profilinize uygun yeni talep: ${serviceTitle}`,
             },
             requestId,
             targetScreen: 'request_details',
             isRead: false,
             readAt: null,
             createdAt: now,
-          },
-          { merge: true }
+            // Kept 60 days (Firestore TTL on expireAt)
+            expireAt: Timestamp.fromMillis(Date.now() + 60 * DAY_MS),
+          }
         );
         count++;
-      });
+        inBatch++;
 
-      if (count > 0) {
+        if (inBatch >= BATCH_LIMIT) {
+          await batch.commit();
+          batch = db.batch();
+          inBatch = 0;
+        }
+      }
+
+      if (inBatch > 0) {
         await batch.commit();
+      }
+      if (count > 0) {
         console.log(`[onNewRequestNotifyProviders] Dispatched ${count} notifications for request ${requestId}`);
       }
     } catch (err) {

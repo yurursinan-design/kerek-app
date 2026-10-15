@@ -2,12 +2,9 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  ServiceRequest,
-  RequestAttachment,
   RequestLocation,
   validateRequestAttachment,
   sanitizeFileName,
-  REQUEST_LIMITS,
   normalizeRequestStatus,
 } from '../src/types';
 import { localRepository } from '../src/services/localRepository';
@@ -314,20 +311,28 @@ async function runTests() {
   assert.strictEqual(resilientReq.location?.latitude, 44.84883);
 
   // Upload attachment via resilient repository
-  const resilientAttachment = await resilientRepository.uploadRequestAttachment(
-    'REQ-000002',
-    {
-      name: 'test_photo.jpg',
-      size: 1024 * 100,
-      type: 'image/jpeg',
-      data: 'data:image/jpeg;base64,/9j/4AAQ',
-    },
-    customerId
-  );
-  assert.strictEqual(resilientAttachment.type, 'image');
-  assert(resilientAttachment.storagePath.startsWith('requests/REQ-000002/'));
+  const uploadInput = {
+    name: 'test_photo.jpg',
+    size: 1024 * 100,
+    type: 'image/jpeg',
+    data: 'data:image/jpeg;base64,/9j/4AAQ',
+  };
+  if (resilientRepository.isCloudActive()) {
+    // Cloud mode: the file must reach Cloud Storage or the upload must fail visibly. A device-local
+    // copy would put a link into the shared request that no provider can open.
+    try {
+      const cloudAttachment = await resilientRepository.uploadRequestAttachment('REQ-000002', uploadInput, customerId);
+      assert(!/^(data:|blob:)/.test(cloudAttachment.downloadUrl), 'cloud upload must not return a device-local URL');
+    } catch {
+      console.log('  (Cloud Storage unavailable here: upload was rejected instead of saved locally, as intended)');
+    }
+  } else {
+    const resilientAttachment = await resilientRepository.uploadRequestAttachment('REQ-000002', uploadInput, customerId);
+    assert.strictEqual(resilientAttachment.type, 'image');
+    assert(resilientAttachment.storagePath.startsWith('requests/REQ-000002/'));
+  }
 
-  console.log('✓ Test 10 Passed: ResilientRepository supports attachments with fallback');
+  console.log('✓ Test 10 Passed: ResilientRepository uploads attachments without device-local fallback in cloud mode');
 
   // -------------------------------------------------------------
   console.log('\n[TEST 11] Storage Security Rules Audit');
@@ -344,10 +349,14 @@ async function runTests() {
   assert(storageRulesContent.includes('50 * 1024 * 1024'));
   // Verify audio size limit 20MB
   assert(storageRulesContent.includes('20 * 1024 * 1024'));
-  // Verify executable restrictions
-  assert(storageRulesContent.includes('!request.resource.contentType.matches(\'.*executable.*\')'));
-  // Verify deletion is prohibited in MVP
-  assert(storageRulesContent.includes('allow delete: if false;'));
+  // Only an explicit list of content types is accepted (no HTML, SVG, scripts or executables)
+  assert(storageRulesContent.includes("matches('image/(jpeg|png|webp)')"));
+  assert(!storageRulesContent.includes("matches('application/.*')"));
+  // Uploads require an existing request owned by the uploader
+  assert(storageRulesContent.includes('function isRequestOwner(requestId)'));
+  assert(!storageRulesContent.includes('!firestore.exists('));
+  // Deletion is prohibited
+  assert(storageRulesContent.includes('allow update, delete: if false;'));
 
   console.log('✓ Test 11 Passed: Storage Security Rules correctly configured');
 

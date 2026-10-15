@@ -1,0 +1,99 @@
+# Builds the Android test app (APK) from the same web build and publishes it as the
+# "android-test" pre-release, so it can be downloaded and installed straight on a phone.
+# Test builds are signed with the committed test key (android/app/kerek-debug.keystore);
+# store releases are signed with the private upload key (see play.yml).
+name: Android
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Firebase web ayarları herkese açıktır (derlenen uygulamanın içinde zaten görünür).
+  VITE_FIREBASE_API_KEY: AIzaSyA2tm7w5In7uV6qEPbfCjSOKZ6Sj2fRoHI
+  VITE_FIREBASE_AUTH_DOMAIN: kerek-9d153.firebaseapp.com
+  VITE_FIREBASE_PROJECT_ID: kerek-9d153
+  VITE_FIREBASE_STORAGE_BUCKET: kerek-9d153.firebasestorage.app
+  VITE_FIREBASE_MESSAGING_SENDER_ID: "24155315039"
+  VITE_FIREBASE_APP_ID: 1:24155315039:web:203f5b6fb4aa78d62574ea
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # The native Firebase SDK (SMS login) needs the app's Firebase file; an APK without it would
+      # close on start, so the previous test APK stays published until the file is added.
+      - name: Firebase dosyası var mı
+        id: cfg
+        run: |
+          if [ -f android/app/google-services.json ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::android/app/google-services.json yok: yeni APK oluşturulmadı"
+          fi
+
+      - uses: oven-sh/setup-bun@v2
+        if: steps.cfg.outputs.ok == 'true'
+        with:
+          bun-version: 1.4.2
+
+      - uses: actions/setup-node@v4
+        if: steps.cfg.outputs.ok == 'true'
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        if: steps.cfg.outputs.ok == 'true'
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Bağımlılıkları kur
+        if: steps.cfg.outputs.ok == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Web uygulamasını derle
+        if: steps.cfg.outputs.ok == 'true'
+        run: bun run build
+
+      - name: Android projesine kopyala
+        if: steps.cfg.outputs.ok == 'true'
+        run: npx cap sync android
+
+      - name: APK oluştur
+        if: steps.cfg.outputs.ok == 'true'
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Dosyayı adlandır
+        if: steps.cfg.outputs.ok == 'true'
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk Tapsyr-test.apk
+
+      - uses: actions/upload-artifact@v4
+        if: steps.cfg.outputs.ok == 'true'
+        with:
+          name: Tapsyr-android-test
+          path: Tapsyr-test.apk
+          retention-days: 7
+
+      - name: Telefona indirme bağlantısını güncelle
+        if: steps.cfg.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-test --yes --cleanup-tag || true
+          gh release create android-test Tapsyr-test.apk \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Tapsyr Android test sürümü" \
+            --notes "Telefona kurmak için Tapsyr-test.apk dosyasını indirip açın. Kaynak: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"

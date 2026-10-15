@@ -35,7 +35,12 @@ env:
   FIREBASE_PROJECT_ID: kerek-9d153
 
 jobs:
+  # Same tests as on Pull Requests; nothing is deployed unless they all pass
+  test:
+    uses: ./.github/workflows/tests.yml
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,7 +77,7 @@ jobs:
           DEPLOY_STORAGE: ${{ vars.DEPLOY_STORAGE }}
           DEPLOY_FUNCTIONS: ${{ vars.DEPLOY_FUNCTIONS }}
         run: |
-          targets="hosting,firestore:rules"
+          targets="hosting,firestore:rules,firestore:indexes"
           [ "$DEPLOY_STORAGE" = "true" ] && targets="$targets,storage"
           [ "$DEPLOY_FUNCTIONS" = "true" ] && targets="$targets,functions"
           echo "Yüklenenler: $targets → $FIREBASE_PROJECT_ID"
