@@ -38,9 +38,10 @@ export {
   kzMirrorPushTokens,
   kzMirrorCustomerReviews,
   kzMirrorBans,
-  kzMirrorFileSaved,
-  kzMirrorFileDeleted,
 } from './kzMirror';
+// kzMirrorFileSaved / kzMirrorFileDeleted (copies of uploaded files) are exported once the deploy
+// account may read the storage bucket's settings (its region) and the Cloud Storage service agent
+// may publish events; without that the whole release stops at "Can't find the storage bucket region"
 
 const db = getFirestore();
 
