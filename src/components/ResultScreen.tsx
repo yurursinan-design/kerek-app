@@ -57,6 +57,8 @@ interface ResultScreenProps {
   language: Language;
   onNewSearch: () => void;
   onEditSearch: () => void;
+  /** Starts a new request filled in from this one ("repeat") */
+  onRepeatRequest?: (request: ServiceRequest) => void;
 }
 
 
@@ -64,6 +66,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   request: initialRequest,
   language,
   onNewSearch,
+  onRepeatRequest,
 }) => {
   const t = translations[language];
 
@@ -863,6 +866,23 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 ? `${MAX_OFFERS_PER_REQUEST} ұсыныс түсті, жаңалары қабылданбайды. Ең ыңғайлысын таңдаңыз.`
                 : `Получено ${MAX_OFFERS_PER_REQUEST} предложений, новые не принимаются. Выберите подходящее.`}
             </div>
+          ) : typeof request.expiresAtMs === 'number' && request.expiresAtMs - Date.now() < 12 * 3600000 ? (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3">
+              <span className="text-lg" aria-hidden="true">⏳</span>
+              <span className="flex-1 text-xs text-amber-900 leading-snug">
+                {language === 'kz'
+                  ? `Өтінімнің мерзімі ${Math.max(1, Math.ceil((request.expiresAtMs - Date.now()) / 3600000))} сағаттан кейін бітеді.`
+                  : `Срок заявки истекает через ${Math.max(1, Math.ceil((request.expiresAtMs - Date.now()) / 3600000))} ч.`}
+              </span>
+              <button
+                type="button"
+                onClick={handleRenew}
+                disabled={renewing}
+                className="shrink-0 h-9 px-3 rounded-xl bg-amber-500 text-white text-xs font-bold disabled:opacity-60"
+              >
+                {language === 'kz' ? 'Ұзарту' : 'Продлить'}
+              </button>
+            </div>
           ) : typeof request.expiresAtMs === 'number' ? (
             <p className="text-[11px] text-slate-500 px-1">
               {(() => {
@@ -1077,8 +1097,18 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
 
       </div>
 
-      {/* Bottom Action: New Request */}
-      <div className="pt-4 pb-2">
+      {/* Bottom Action: New Request (or the same one again) */}
+      <div className="pt-4 pb-2 space-y-2">
+        {request && onRepeatRequest && (reqStatus === 'COMPLETED' || reqStatus === 'CANCELLED' || (reqStatus === 'OPEN' && isRequestExpired(request))) && (
+          <button
+            type="button"
+            onClick={() => onRepeatRequest(request)}
+            className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xs active:scale-[0.99] transition-all"
+          >
+            <RotateCcw className="w-4 h-4" />
+            <span>{language === 'kz' ? 'Осы өтінімді қайталау' : 'Повторить эту заявку'}</span>
+          </button>
+        )}
         <button
           type="button"
           onClick={onNewSearch}

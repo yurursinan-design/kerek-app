@@ -17,6 +17,7 @@ import { MapPin, Calendar, Wallet, ChevronRight, Plus, Phone, MessageCircle, Hea
 import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
 import { FavoriteMaster, getFavorites, onFavoritesChange } from '../services/favorites';
 import { ProviderProfileModal } from './ProviderProfileModal';
+import { getCustomerRating } from '../services/reviewsExtra';
 import { Emoji3D } from './CategoryIcon';
 import { RequestIcon } from './RequestIcon';
 
@@ -138,6 +139,17 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completedIdsKey, language]);
 
+  // The rating masters gave this customer (two-sided reviews)
+  const [myRating, setMyRating] = useState<{ avg: number; count: number } | null>(null);
+  const myUid = requests[0]?.customerId || '';
+  useEffect(() => {
+    let alive = true;
+    if (myUid) getCustomerRating(myUid).then((r) => alive && setMyRating(r));
+    return () => {
+      alive = false;
+    };
+  }, [myUid]);
+
   // Masters saved with the heart button (on this phone)
   const [favorites, setFavorites] = useState<FavoriteMaster[]>(() => getFavorites());
   useEffect(() => onFavoritesChange(() => setFavorites(getFavorites())), []);
@@ -166,6 +178,11 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
               {requests.length > 0 && (
                 <p className="text-xs text-slate-500">
                   {requests.length} {language === 'kz' ? 'өтініш' : ruPlural(requests.length, 'заявка', 'заявки', 'заявок')}
+                  {myRating && myRating.count > 0 && (
+                    <span className="ml-1.5 text-amber-700 font-semibold">
+                      · ★ {myRating.avg.toFixed(1)} {language === 'kz' ? 'шеберлерден' : 'от мастеров'}
+                    </span>
+                  )}
                 </p>
               )}
             </div>

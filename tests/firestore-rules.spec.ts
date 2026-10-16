@@ -1979,6 +1979,99 @@ async function runTestSuite() {
       await assertSucceeds(updateDoc(doc(cust, 'appointments', 'appointment_req_ap3'), { status: 'PROPOSED', scheduledAt: later, updatedAt: later }));
     });
 
+    // =========================================================================
+    // SECTION 20: Operator panel, blocked accounts, review answers, customer ratings
+    // =========================================================================
+    console.log('\n--- SECTION 20: Operator panel and two-sided reviews ---');
+
+    const adminDb = () => testEnv.authenticatedContext('op_admin', { phone_number: '+77000000009', admin: true }).firestore();
+    const nowIso = new Date().toISOString();
+    await testEnv.withSecurityRulesDisabled(async (c) => {
+      const db = c.firestore();
+      await setDoc(doc(db, 'providers', 'prov_op'), { id: 'prov_op', userId: 'prov_op', name: 'Op Master', city: 'almaty', cityId: 'almaty', category: 'appliances' });
+      await setDoc(doc(db, 'providers', 'prov_cr2'), { id: 'prov_cr2', userId: 'prov_cr2', name: 'Other Master', city: 'almaty', cityId: 'almaty', category: 'appliances' });
+      await setDoc(doc(db, 'reports', 'REPORT-cust_r-provider-prov_op'), {
+        id: 'REPORT-cust_r-provider-prov_op', reporterId: 'cust_r', targetType: 'provider', targetId: 'prov_op', reason: 'rude', createdAt: nowIso,
+      });
+      // A finished job of prov_op for cust_cr, with the customer's review of the master
+      await setDoc(doc(db, 'requests', 'req_cr'), {
+        id: 'req_cr', customerId: 'cust_cr', city: 'almaty', cityId: 'almaty', category: 'x', service: 'x', status: 'COMPLETED', selectedOfferId: 'OFFER-req_cr-prov_op',
+      });
+      await setDoc(doc(db, 'requests', 'req_cr_open'), {
+        id: 'req_cr_open', customerId: 'cust_cr', city: 'almaty', cityId: 'almaty', category: 'x', service: 'x', status: 'IN_PROGRESS', selectedOfferId: 'OFFER-req_cr_open-prov_op',
+      });
+      await setDoc(doc(db, 'offers', 'OFFER-req_cr-prov_op'), { id: 'OFFER-req_cr-prov_op', requestId: 'req_cr', providerId: 'prov_op', providerUserId: 'prov_op', status: 'ACCEPTED' });
+      await setDoc(doc(db, 'offers', 'OFFER-req_cr_open-prov_op'), { id: 'OFFER-req_cr_open-prov_op', requestId: 'req_cr_open', providerId: 'prov_op', providerUserId: 'prov_op', status: 'ACCEPTED' });
+      await setDoc(doc(db, 'reviews', 'req_cr'), {
+        id: 'req_cr', requestId: 'req_cr', customerId: 'cust_cr', customerName: 'Cust', providerId: 'prov_op', providerName: 'Op Master', rating: 4, createdAt: nowIso,
+      });
+    });
+
+    await test('Operator lists and resolves reports; others cannot', async () => {
+      await assertSucceeds(getDocs(collection(adminDb(), 'reports')));
+      await assertFails(getDocs(collection(phoneUser('cust_r').firestore(), 'reports')));
+      const ref = (db: any) => doc(db, 'reports', 'REPORT-cust_r-provider-prov_op');
+      await assertFails(updateDoc(ref(phoneUser('cust_r').firestore()), { status: 'resolved', resolvedAt: nowIso }));
+      await assertFails(updateDoc(ref(adminDb()), { reason: 'spam' }));
+      await assertSucceeds(updateDoc(ref(adminDb()), { status: 'resolved', resolution: 'Предупреждён', resolvedAt: nowIso }));
+    });
+
+    await test('Operator sets badges, hides and blocks a master, but cannot edit the profile itself', async () => {
+      const ref = doc(adminDb(), 'providers', 'prov_op');
+      await assertSucceeds(updateDoc(ref, { verified: true, iinVerified: true, updatedAt: nowIso }));
+      await assertSucceeds(updateDoc(ref, { hidden: true, blocked: false }));
+      await assertFails(updateDoc(ref, { name: 'Renamed' }));
+      await assertFails(updateDoc(ref, { verified: 'yes' }));
+      await assertSucceeds(updateDoc(ref, { hidden: false }));
+      await assertSucceeds(getDocs(collection(adminDb(), 'providers')));
+      await assertFails(getDocs(collection(phoneUser('cust_r').firestore(), 'providers')));
+    });
+
+    await test('Operator reads requests and master stats for the health numbers', async () => {
+      await assertSucceeds(getDocs(collection(adminDb(), 'requests')));
+      await assertSucceeds(getDocs(collection(adminDb(), 'providerStats')));
+      await assertSucceeds(getDoc(doc(adminDb(), 'offers', 'OFFER-req_cr-prov_op')));
+    });
+
+    await test('A blocked account cannot publish requests or offers until the operator lifts the block', async () => {
+      const banRef = doc(adminDb(), 'bans', 'cust_ban');
+      await assertFails(setDoc(doc(phoneUser('cust_r').firestore(), 'bans', 'cust_ban'), { uid: 'cust_ban', createdAt: nowIso }));
+      await assertSucceeds(setDoc(banRef, { uid: 'cust_ban', reason: 'fraud', createdAt: nowIso }));
+      const req = { id: 'req_ban', customerId: 'cust_ban', city: 'almaty', cityId: 'almaty', category: 'x', service: 'x', status: 'OPEN' };
+      await assertFails(setDoc(doc(phoneUser('cust_ban').firestore(), 'requests', 'req_ban'), req));
+      await assertSucceeds(deleteDoc(banRef));
+      await assertSucceeds(setDoc(doc(phoneUser('cust_ban').firestore(), 'requests', 'req_ban'), req));
+    });
+
+    await test('The reviewed master answers a review; nobody else, and the rating stays', async () => {
+      const ref = (uid: string) => doc(phoneUser(uid).firestore(), 'reviews', 'req_cr');
+      await assertFails(updateDoc(ref('prov_cr2'), { providerReply: 'Not mine', providerReplyAt: nowIso }));
+      await assertFails(updateDoc(ref('prov_op'), { providerReply: 'Спасибо!', providerReplyAt: nowIso, rating: 5 }));
+      await assertFails(updateDoc(ref('prov_op'), { providerReply: 'x'.repeat(1001), providerReplyAt: nowIso }));
+      await assertSucceeds(updateDoc(ref('prov_op'), { providerReply: 'Спасибо за отзыв!', providerReplyAt: nowIso }));
+      await assertFails(deleteDoc(ref('cust_cr')));
+    });
+
+    await test('The selected master rates the customer once, after the job is completed', async () => {
+      const rating = (requestId: string, extra: Record<string, unknown> = {}) => ({
+        id: requestId, requestId, customerId: 'cust_cr', providerId: 'prov_op', rating: 5, comment: 'Вежливый заказчик', createdAt: nowIso, ...extra,
+      });
+      await assertFails(setDoc(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr_open'), rating('req_cr_open')));
+      await assertFails(setDoc(doc(phoneUser('prov_cr2').firestore(), 'customerReviews', 'req_cr'), rating('req_cr', { providerId: 'prov_cr2' })));
+      await assertFails(setDoc(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr'), rating('req_cr', { rating: 6 })));
+      await assertFails(setDoc(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr'), rating('req_cr', { customerId: 'someone_else' })));
+      await assertSucceeds(setDoc(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr'), rating('req_cr')));
+      await assertFails(updateDoc(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr'), { rating: 1 }));
+    });
+
+    await test('Masters and the customer see customer ratings; a stranger without a profile does not', async () => {
+      const byCustomer = (uid: string) => getDocs(query(collection(phoneUser(uid).firestore(), 'customerReviews'), where('customerId', '==', 'cust_cr')));
+      await assertSucceeds(byCustomer('prov_cr2'));
+      await assertSucceeds(byCustomer('cust_cr'));
+      await assertFails(byCustomer('cust_r'));
+      await assertSucceeds(deleteDoc(doc(adminDb(), 'customerReviews', 'req_cr')));
+    });
+
   } finally {
     // Isolated Emulator Cleanup
     console.log('\n--- CLEANUP: Clearing Emulator Data ---');

@@ -32,6 +32,7 @@ import {
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { PortfolioEditor } from './PortfolioPhotos';
 import { formatTenge, getPriceRange, PriceRange } from '../services/publicStats';
+import { getCustomerRating, getCustomerReview, rateCustomer } from '../services/reviewsExtra';
 import { ProviderOnboarding } from './ProviderOnboarding';
 import { ChatScreen } from './ChatScreen';
 import { AppointmentSection } from './AppointmentSection';
@@ -758,6 +759,61 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     return sum + (Number.isFinite(amount) ? amount : 0);
   }, 0);
 
+  // Two-sided reviews: the master rates customers of finished jobs, and sees a customer's rating
+  // from other masters before answering a request
+  const [customerRatings, setCustomerRatings] = useState<Record<string, { avg: number; count: number } | null>>({});
+  const feedCustomerKey = Array.from(new Set(newRequests.map((r) => r.customerId).filter(Boolean))).slice(0, 20).join(',');
+  useEffect(() => {
+    let alive = true;
+    const ids = feedCustomerKey ? feedCustomerKey.split(',') : [];
+    ids
+      .filter((id) => !(id in customerRatings))
+      .forEach((id) => {
+        getCustomerRating(id).then((r) => alive && setCustomerRatings((m) => ({ ...m, [id]: r })));
+      });
+    return () => {
+      alive = false;
+    };
+    // Each customer is looked up once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedCustomerKey]);
+
+  const jobsToRate = completedJobs
+    .slice()
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    .slice(0, 10);
+  const [myCustomerRatings, setMyCustomerRatings] = useState<Record<string, number>>({});
+  const [rateDraft, setRateDraft] = useState<{ requestId: string; stars: number; comment: string } | null>(null);
+  const [rateSaving, setRateSaving] = useState(false);
+  const jobsToRateKey = jobsToRate.map((r) => r.id).join(',');
+  useEffect(() => {
+    let alive = true;
+    (jobsToRateKey ? jobsToRateKey.split(',') : [])
+      .filter((id) => !(id in myCustomerRatings))
+      .forEach((id) => {
+        getCustomerReview(id).then((r) => alive && setMyCustomerRatings((m) => ({ ...m, [id]: r ? r.rating : 0 })));
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobsToRateKey]);
+
+  const submitCustomerRating = async (req: ServiceRequest) => {
+    if (!rateDraft || rateDraft.requestId !== req.id || rateSaving) return;
+    setRateSaving(true);
+    try {
+      await rateCustomer({ requestId: req.id, customerId: req.customerId, rating: rateDraft.stars, comment: rateDraft.comment });
+      setMyCustomerRatings((m) => ({ ...m, [req.id]: rateDraft.stars }));
+      setRateDraft(null);
+    } catch (err) {
+      setErrorMessage(getFriendlyErrorMessage(err, language));
+      setTimeout(() => setErrorMessage(null), 4000);
+    } finally {
+      setRateSaving(false);
+    }
+  };
+
   const newCount = newRequests.length;
   const offersCount = myOffersRequests.length;
   const activeCount = activeJobRequests.length;
@@ -1165,6 +1221,15 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                             {formatDynamicBudget(req.budget, language)}
                           </span>
                         )}
+                        {/* The customer's rating from other masters */}
+                        <span className="flex items-center gap-1 text-slate-500">
+                          <Star className={`w-3.5 h-3.5 ${customerRatings[req.customerId]?.count ? 'fill-amber-400 text-amber-500' : 'text-slate-300'}`} />
+                          {customerRatings[req.customerId]?.count
+                            ? `${customerRatings[req.customerId]!.avg.toFixed(1)} (${customerRatings[req.customerId]!.count})`
+                            : language === 'kz'
+                            ? 'Жаңа тапсырыс беруші'
+                            : 'Новый заказчик'}
+                        </span>
                         {/* How many masters already answered (a request takes 5) */}
                         <span className="flex items-center gap-1 text-slate-500">
                           <Send className="w-3.5 h-3.5 text-slate-400" />
@@ -1320,6 +1385,63 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     </span>
                   </div>
                 </div>
+
+                {/* Rate the customers of finished jobs (other masters see it) */}
+                {jobsToRate.some((r) => myCustomerRatings[r.id] === 0) && (
+                  <div className="p-3 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-2">
+                    <span className="block text-xs font-bold text-slate-800">
+                      {language === 'kz' ? 'Тапсырыс берушіні бағалаңыз' : 'Оцените заказчиков'}
+                    </span>
+                    <span className="block text-[11px] text-slate-500">
+                      {language === 'kz'
+                        ? 'Бағаңызды басқа шеберлер өтінімге жауап бермес бұрын көреді.'
+                        : 'Вашу оценку увидят другие мастера, прежде чем ответить на заявку.'}
+                    </span>
+                    {jobsToRate
+                      .filter((r) => myCustomerRatings[r.id] === 0)
+                      .map((req) => {
+                        const draft = rateDraft?.requestId === req.id ? rateDraft : null;
+                        return (
+                          <div key={req.id} className="pt-2 border-t border-slate-100 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-semibold text-slate-700 truncate">{getRequestTitle(req, language)}</span>
+                              <div className="flex shrink-0">
+                                {[1, 2, 3, 4, 5].map((n) => (
+                                  <button
+                                    key={n}
+                                    type="button"
+                                    aria-label={`${n}`}
+                                    onClick={() => setRateDraft({ requestId: req.id, stars: n, comment: draft?.comment || '' })}
+                                    className="w-7 h-7 flex items-center justify-center"
+                                  >
+                                    <Star className={`w-5 h-5 ${draft && n <= draft.stars ? 'fill-amber-400 text-amber-500' : 'text-slate-300'}`} />
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            {draft && (
+                              <div className="flex gap-2">
+                                <input
+                                  value={draft.comment}
+                                  onChange={(e) => setRateDraft({ ...draft, comment: e.target.value.slice(0, 500) })}
+                                  placeholder={language === 'kz' ? 'Пікір (міндетті емес)' : 'Комментарий (необязательно)'}
+                                  className="flex-1 min-w-0 h-9 px-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:border-sky-500"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={rateSaving}
+                                  onClick={() => submitCustomerRating(req)}
+                                  className="shrink-0 h-9 px-3 rounded-lg bg-sky-600 text-white text-xs font-bold disabled:opacity-50"
+                                >
+                                  {language === 'kz' ? 'Жіберу' : 'Отправить'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
                 {activeJobRequests.length === 0 ? (
                   <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
                     <Emoji3D code="1f4bc" size={84} className="mx-auto animate-float" />

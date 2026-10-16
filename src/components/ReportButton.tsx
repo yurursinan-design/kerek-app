@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Flag, Loader2, X } from 'lucide-react';
 import { Language } from '../types';
-import { ReportReason, ReportTargetType, submitReport } from '../services/reports';
+import { REPORT_REASONS as REASONS, ReportReason, ReportTargetType, submitReport } from '../services/reports';
 
 interface ReportButtonProps {
   language: Language;
@@ -10,15 +10,6 @@ interface ReportButtonProps {
   requestId?: string;
   className?: string;
 }
-
-const REASONS: { id: ReportReason; kz: string; ru: string }[] = [
-  { id: 'fraud', kz: 'Алаяқтық, ақша сұрады', ru: 'Мошенничество, просят деньги' },
-  { id: 'fake', kz: 'Жалған профиль немесе ұсыныс', ru: 'Фейковый профиль или предложение' },
-  { id: 'rude', kz: 'Дөрекі сөйлеу, қорлау', ru: 'Грубость, оскорбления' },
-  { id: 'no_show', kz: 'Келмеді, жұмысты істемеді', ru: 'Не пришёл, не сделал работу' },
-  { id: 'spam', kz: 'Спам, жарнама', ru: 'Спам, реклама' },
-  { id: 'other', kz: 'Басқа', ru: 'Другое' },
-];
 
 /** Small "Report" link that opens a sheet with reasons; the report goes to the operator. */
 export const ReportButton: React.FC<ReportButtonProps> = ({ language, targetType, targetId, requestId, className }) => {

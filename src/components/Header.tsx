@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AppNotification, Language } from '../types';
-import { ArrowLeft, Trash2, UserRound, LogOut } from 'lucide-react';
+import { ArrowLeft, Trash2, UserRound, LogOut, ShieldCheck } from 'lucide-react';
 import { maskPhone } from '../services/phoneAuth';
 import { NotificationBell } from './NotificationBell';
 import { LegalLinks } from './LegalModal';
@@ -24,6 +24,8 @@ interface HeaderProps {
   onLogout?: () => void;
   /** Deletes the account; rejects with a message to show if it fails */
   onDeleteAccount?: () => Promise<void>;
+  /** Opens the operator's panel (only for operator accounts) */
+  onOpenAdmin?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -41,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLoginClick,
   onLogout,
   onDeleteAccount,
+  onOpenAdmin,
 }) => {
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -129,6 +132,19 @@ export const Header: React.FC<HeaderProps> = ({
                       {language === 'kz' ? 'Расталған нөмір' : 'Подтверждённый номер'}
                     </div>
                     <div className="text-sm font-bold text-slate-900">{maskPhone(phoneNumber)}</div>
+                    {onOpenAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAccountMenu(false);
+                          onOpenAdmin();
+                        }}
+                        className="w-full min-h-[40px] rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center justify-center gap-1.5"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>{language === 'kz' ? 'Басқару панелі' : 'Панель управления'}</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {

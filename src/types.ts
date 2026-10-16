@@ -267,6 +267,20 @@ export interface Review {
   rating: number; // 1 to 5 integer
   comment?: string;
   createdAt: string;
+  /** The master's public answer to the review */
+  providerReply?: string;
+  providerReplyAt?: string;
+}
+
+/** The master's rating of the customer after a finished job (seen by masters) */
+export interface CustomerReview {
+  id: string; // the requestId
+  requestId: string;
+  customerId: string;
+  providerId: string;
+  rating: number;
+  comment?: string;
+  createdAt: string;
 }
 
 /**
@@ -483,6 +497,9 @@ export interface Provider {
   tradeLicense?: string;
   isActive?: boolean;
   isDemo?: boolean;
+  /** Set by the operator: hidden from customers / blocked from the platform */
+  hidden?: boolean;
+  blocked?: boolean;
   /** "Not taking orders now": new-request alerts stop until the master switches it off */
   paused?: boolean;
   /** Work photos: filled slots (p0 … p7), the files are in Storage under the master's folder */

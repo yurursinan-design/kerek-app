@@ -30,6 +30,17 @@ service cloud.firestore {
       return isSignedIn() && ('phone_number' in request.auth.token) && request.auth.token.phone_number is string;
     }
 
+    // The operator (owner): an account whose phone is in config/admins gets the admin claim from the
+    // claimAdmin function; it can manage badges, hide or block accounts and read reports
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    // An account the operator blocked (bans/{uid}) can't publish requests, offers or a profile
+    function notBanned() {
+      return !exists(/databases/$(database)/documents/bans/$(request.auth.uid));
+    }
+
     // Optional string field: absent, or a string of at most n characters
     function strMax(m, k, n) {
       return !(k in m) || (m[k] is string && m[k].size() <= n);
@@ -165,7 +176,14 @@ service cloud.firestore {
     match /providers/{providerId} {
       // Profiles carry phone numbers: only phone-verified accounts read them, not anonymous visitors
       allow get: if hasVerifiedPhone() && isValidId(providerId);
-      allow list: if false;
+      allow list: if isAdmin();
+      // Operator: trust badges, hiding and blocking, nothing else
+      allow update: if isAdmin() && isValidId(providerId)
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['verified', 'iinVerified', 'hasCertificate', 'blocked', 'hidden', 'updatedAt'])
+                    && incoming().get('verified', false) is bool && incoming().get('iinVerified', false) is bool
+                    && incoming().get('hasCertificate', false) is bool && incoming().get('blocked', false) is bool
+                    && incoming().get('hidden', false) is bool;
       allow create: if hasVerifiedPhone()
                     && isValidId(providerId)
                     && providerId == request.auth.uid
@@ -207,7 +225,8 @@ service cloud.firestore {
     // Jobs done and answer speed of a master, shown with the profile (same audience as the profile)
     match /providerStats/{uid} {
       allow get: if hasVerifiedPhone() && isValidId(uid);
-      allow list, write: if false;
+      allow list: if isAdmin();
+      allow write: if false;
     }
 
     // Typical prices of finished jobs per city and service, shown to signed-in users
@@ -247,13 +266,16 @@ service cloud.firestore {
         resource == null ||
         resource.data.customerId == request.auth.uid ||
         isProviderInCityOf(resource.data) ||
-        isSelectedProviderOf(resource.data)
+        isSelectedProviderOf(resource.data) ||
+        isAdmin()
       );
       allow list: if isSignedIn() && (
         resource.data.customerId == request.auth.uid ||
-        isProviderInCityOf(resource.data)
+        isProviderInCityOf(resource.data) ||
+        isAdmin()
       );
       allow create: if hasVerifiedPhone()
+                    && notBanned()
                     && isValidId(requestId)
                     && incoming().id == requestId
                     && incoming().customerId == request.auth.uid
@@ -408,6 +430,7 @@ service cloud.firestore {
         // A provider checks whether their own offer on a request already exists
         (resource == null && offerId.matches('OFFER-.+-' + request.auth.uid)) ||
         resource.data.providerUserId == request.auth.uid ||
+        isAdmin() ||
         (resource.data.requestId is string &&
          get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.customerId == request.auth.uid)
       );
@@ -421,6 +444,7 @@ service cloud.firestore {
       // One offer per provider and request (the id is fixed), only from a provider profile in the
       // request's city, never on your own request, and only with the known offer fields.
       allow create: if hasVerifiedPhone()
+                    && notBanned()
                     && isValidId(offerId)
                     && incoming().id == offerId
                     && incoming().requestId is string && incoming().requestId.size() <= 64
@@ -515,8 +539,49 @@ service cloud.firestore {
                     && exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId))
                     && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.status == 'ACCEPTED'
                     && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerId == incoming().providerId;
+      // The reviewed master answers the review (once or edits the answer); nothing else changes
+      allow update: if hasVerifiedPhone() && isValidId(reviewId)
+                    && resource.data.providerId == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['providerReply', 'providerReplyAt'])
+                    && incoming().providerReply is string && incoming().providerReply.size() > 0
+                    && incoming().providerReply.size() <= 1000
+                    && incoming().providerReplyAt is string && incoming().providerReplyAt.size() <= 40;
+      // The operator removes a review that breaks the rules (terms, section 7)
+      allow delete: if isAdmin();
+    }
+
+    // =================== Customer reviews (master → customer) ===================
+    // After a finished job the selected master rates the customer (one per request, write-once).
+    // Masters see them before answering a request; the customer sees their own; the operator all.
+    match /customerReviews/{reviewId} {
+      allow get: if hasVerifiedPhone() && isValidId(reviewId) && (
+        resource == null ||
+        resource.data.customerId == request.auth.uid ||
+        resource.data.providerId == request.auth.uid ||
+        exists(/databases/$(database)/documents/providers/$(request.auth.uid)) ||
+        isAdmin()
+      );
+      allow list: if hasVerifiedPhone() && (
+        resource.data.customerId == request.auth.uid ||
+        exists(/databases/$(database)/documents/providers/$(request.auth.uid)) ||
+        isAdmin()
+      );
+      allow create: if hasVerifiedPhone()
+                    && isValidId(reviewId)
+                    && incoming().keys().hasOnly(['id', 'requestId', 'customerId', 'providerId', 'rating', 'comment', 'createdAt'])
+                    && incoming().id == reviewId
+                    && incoming().requestId == reviewId
+                    && incoming().providerId == request.auth.uid
+                    && incoming().customerId is string && incoming().customerId != request.auth.uid
+                    && incoming().rating is int && incoming().rating >= 1 && incoming().rating <= 5
+                    && strMax(incoming(), 'comment', 500) && strMax(incoming(), 'createdAt', 40)
+                    && exists(/databases/$(database)/documents/requests/$(reviewId))
+                    && get(/databases/$(database)/documents/requests/$(reviewId)).data.status == 'COMPLETED'
+                    && get(/databases/$(database)/documents/requests/$(reviewId)).data.customerId == incoming().customerId
+                    && get(/databases/$(database)/documents/requests/$(reviewId)).data.selectedOfferId is string
+                    && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reviewId)).data.selectedOfferId)).data.providerUserId == request.auth.uid;
       allow update: if false;
-      allow delete: if false;
+      allow delete: if isAdmin();
     }
 
     // =================== Conversations Collection ===================
@@ -659,7 +724,12 @@ service cloud.firestore {
 
     // Operator bans (document id = user id), managed in the Firebase console only
     match /bans/{uid} {
-      allow read, write: if false;
+      allow get, list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(uid)
+                    && incoming().keys().hasOnly(['uid', 'reason', 'createdAt'])
+                    && incoming().uid == uid
+                    && strMax(incoming(), 'reason', 300) && strMax(incoming(), 'createdAt', 40);
+      allow delete: if isAdmin();
     }
 
     // =================== Reports Collection ===================
@@ -684,7 +754,12 @@ service cloud.firestore {
                     && (!('requestId' in incoming()) || isValidId(incoming().requestId))
                     && strMax(incoming(), 'details', 1000)
                     && incoming().createdAt is string && incoming().createdAt.size() >= 10 && incoming().createdAt.size() <= 40;
-      allow update, delete: if false;
+      // The operator marks a report handled
+      allow update: if isAdmin()
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'resolution', 'resolvedAt'])
+                    && incoming().status in ['open', 'resolved']
+                    && strMax(incoming(), 'resolution', 300) && strMax(incoming(), 'resolvedAt', 40);
+      allow delete: if false;
     }
 
     // =================== Appointments Collection ===================

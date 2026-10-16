@@ -3,10 +3,11 @@ import { ReportButton } from './ReportButton';
 import { isTopMaster, Language, Provider, Review } from '../types';
 import { translations } from '../i18n/translations';
 import { formatShortDate } from '../services/dateFormat';
-import { repository, getCurrentUserId } from '../services';
+import { repository, getCurrentUserId, getFriendlyErrorMessage } from '../services';
 import { isFavorite, masterProfileLink, onFavoritesChange, toggleFavorite } from '../services/favorites';
 import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
 import { PortfolioGallery } from './PortfolioPhotos';
+import { localReviewReply, replyToReview } from '../services/reviewsExtra';
 import { getProviderStats, ProviderStats, responseTimeLabel } from '../services/publicStats';
 import {
   X,
@@ -44,6 +45,12 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
   const [reviews, setReviews] = useState<Review[]>([]);
   const [favorite, setFavorite] = useState(false);
   const [stats, setStats] = useState<ProviderStats | null>(null);
+  // The master answering a review on their own profile
+  const [replyingId, setReplyingId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [replySaving, setReplySaving] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [savedReplies, setSavedReplies] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let alive = true;
@@ -530,6 +537,77 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                         «{rev.comment.trim()}»
                       </p>
                     )}
+
+                    {(() => {
+                      const reply = savedReplies[rev.id] || rev.providerReply || localReviewReply(rev.id)?.text;
+                      if (reply) {
+                        return (
+                          <div className="ml-2 pl-2.5 border-l-2 border-sky-200">
+                            <span className="text-[10px] font-bold text-sky-700 block">
+                              {language === 'kz' ? 'Шебердің жауабы' : 'Ответ мастера'}
+                            </span>
+                            <p className="text-xs text-slate-700 leading-relaxed">{reply}</p>
+                          </div>
+                        );
+                      }
+                      if (!isOwnProfile) return null;
+                      if (replyingId !== rev.id) {
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyingId(rev.id);
+                              setReplyText('');
+                              setReplyError(null);
+                            }}
+                            className="text-[11px] font-bold text-sky-700"
+                          >
+                            {language === 'kz' ? 'Жауап беру' : 'Ответить'}
+                          </button>
+                        );
+                      }
+                      return (
+                        <div className="space-y-1.5">
+                          <textarea
+                            rows={2}
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value.slice(0, 1000))}
+                            placeholder={language === 'kz' ? 'Мысалы: Рақмет! Тағы да қуана көмектесемін.' : 'Например: Спасибо! Буду рад помочь снова.'}
+                            className="w-full p-2 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-sky-500 resize-none"
+                          />
+                          {replyError && <p className="text-[11px] text-rose-600">{replyError}</p>}
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setReplyingId(null)}
+                              className="flex-1 h-8 rounded-lg bg-slate-100 text-slate-700 text-[11px] font-bold"
+                            >
+                              {language === 'kz' ? 'Болдырмау' : 'Отмена'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={replySaving || !replyText.trim()}
+                              onClick={async () => {
+                                setReplySaving(true);
+                                setReplyError(null);
+                                try {
+                                  const saved = await replyToReview(rev.id, replyText);
+                                  setSavedReplies((m) => ({ ...m, [rev.id]: saved.text }));
+                                  setReplyingId(null);
+                                } catch (err) {
+                                  setReplyError(getFriendlyErrorMessage(err, language));
+                                } finally {
+                                  setReplySaving(false);
+                                }
+                              }}
+                              className="flex-1 h-8 rounded-lg bg-sky-600 text-white text-[11px] font-bold disabled:opacity-50"
+                            >
+                              {language === 'kz' ? 'Жариялау' : 'Опубликовать'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>

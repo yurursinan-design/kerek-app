@@ -3,6 +3,7 @@ import {
   AppNotification,
   ExtractedNeed,
   Language,
+  normalizeRequestStatus,
   PendingAttachment,
   RequestAttachment,
   RequestLocation,
@@ -17,6 +18,7 @@ import { InterpretationScreen } from './components/InterpretationScreen';
 const ResultScreen = lazy(() => import('./components/ResultScreen').then((m) => ({ default: m.ResultScreen })));
 const MyRequestsScreen = lazy(() => import('./components/MyRequestsScreen').then((m) => ({ default: m.MyRequestsScreen })));
 const ProviderModeScreen = lazy(() => import('./components/ProviderModeScreen').then((m) => ({ default: m.ProviderModeScreen })));
+const AdminScreen = lazy(() => import('./components/AdminScreen').then((m) => ({ default: m.AdminScreen })));
 const ProviderProfileModal = lazy(() => import('./components/ProviderProfileModal').then((m) => ({ default: m.ProviderProfileModal })));
 import type { ProviderTab } from './components/ProviderModeScreen';
 import { RoleChooser, AppMode } from './components/RoleChooser';
@@ -26,6 +28,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { logoutToAnonymous, requiresPhoneLogin } from './services/phoneAuth';
 import { startPushNotifications } from './services/pushNotifications';
 import { ActiveJobsError, deleteMyAccount, RecentLoginRequiredError } from './services/account';
+import { checkAdminRole } from './services/admin';
 import { generateRequestId } from './services/ids';
 import { localRepository } from './services/localRepository';
 import {
@@ -127,6 +130,23 @@ export default function App() {
     afterPhoneLoginRef.current = action;
     setPhoneLogin(reason);
   };
+
+  // The operator's panel: offered in the account menu to accounts with the admin claim
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  useEffect(() => {
+    if (!phoneNumber) {
+      setIsAdmin(false);
+      return;
+    }
+    let cancelled = false;
+    checkAdminRole()
+      .then((admin) => !cancelled && setIsAdmin(admin))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [phoneNumber, authUid]);
 
   // A shared master profile link (?master=<id>): after a phone login, show that master's profile
   const [sharedMaster, setSharedMaster] = useState<Provider | null>(null);
@@ -572,6 +592,38 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // "Repeat this request": a new request filled in from an old one, checked on the summary screen first
+  const handleRepeatRequest = (req: ServiceRequest) => {
+    setActiveRequest(null);
+    setExtractedNeed({
+      city: req.city,
+      ...(req.cityId ? { cityId: req.cityId } : {}),
+      category: req.category,
+      ...(req.categoryId ? { categoryId: req.categoryId } : {}),
+      ...(req.serviceId ? { serviceId: req.serviceId } : {}),
+      service: req.service,
+      description: req.requestText || req.description,
+      date: req.date,
+      budget: req.budget,
+      urgency: req.urgency,
+      originalQuery: req.requestText || req.service,
+      confidence: 1,
+    });
+    setActiveTab('home');
+    setCurrentScreen('interpretation');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // A reminder on the home screen when an open request is about to stop taking offers
+  const expiringRequest = customerRequests.find(
+    (r) =>
+      normalizeRequestStatus(r.status) === 'OPEN' &&
+      !r.selectedOfferId &&
+      typeof r.expiresAtMs === 'number' &&
+      r.expiresAtMs > Date.now() &&
+      r.expiresAtMs - Date.now() < 12 * 3600000
+  );
+
   // Switch tabs
   // Provider side: needs a verified phone number first
   const enterProviderMode = () => {
@@ -783,6 +835,7 @@ export default function App() {
           onSelectNotification={handleNotificationClick}
           showAccount={isFirebaseConfigured()}
           phoneNumber={phoneNumber}
+          onOpenAdmin={isAdmin ? () => setAdminOpen(true) : undefined}
           onLoginClick={() => setPhoneLogin('header')}
           onLogout={async () => {
             try {
@@ -813,9 +866,17 @@ export default function App() {
             setPhoneLogin(null);
             setPhoneNumber(auth?.currentUser?.phoneNumber || null);
             setAuthUid(auth?.currentUser?.uid || null);
+            // A fresh login checks the operator role right away
+            checkAdminRole(true).then(setIsAdmin).catch(() => {});
             if (next) next();
           }}
         />
+
+        {adminOpen && isAdmin && (
+          <Suspense fallback={null}>
+            <AdminScreen language={language} onClose={() => setAdminOpen(false)} />
+          </Suspense>
+        )}
 
         {sharedMaster && (
           <Suspense fallback={null}>
@@ -903,6 +964,20 @@ export default function App() {
           )}
           {appMode && !restoringNav && activeTab === 'home' && (
             <>
+              {currentScreen === 'home' && appMode === 'customer' && expiringRequest && (
+                <button
+                  type="button"
+                  onClick={() => handleSelectRequestFromHistory(expiringRequest)}
+                  className="mx-4 mt-3 p-3 rounded-2xl bg-amber-50 border border-amber-200 flex items-center gap-3 text-left"
+                >
+                  <span className="text-lg" aria-hidden="true">⏳</span>
+                  <span className="flex-1 text-xs text-amber-900 leading-snug">
+                    {language === 'kz'
+                      ? `«${expiringRequest.service}» өтінімінің мерзімі ${Math.max(1, Math.ceil(((expiringRequest.expiresAtMs || 0) - Date.now()) / 3600000))} сағаттан кейін бітеді. Ашып, ұзартыңыз.`
+                      : `Срок заявки «${expiringRequest.service}» истекает через ${Math.max(1, Math.ceil(((expiringRequest.expiresAtMs || 0) - Date.now()) / 3600000))} ч. Откройте и продлите.`}
+                  </span>
+                </button>
+              )}
               {currentScreen === 'home' && (
                 <HomeScreen
                   language={language}
@@ -931,6 +1006,7 @@ export default function App() {
                   language={language}
                   onNewSearch={handleNewSearch}
                   onEditSearch={handleEditSearch}
+                  onRepeatRequest={handleRepeatRequest}
                 />
               )}
             </>

@@ -41,6 +41,17 @@ async function main() {
   assert(responseTimeLabel(12, 'ru') === 'в течение 15 мин', 'Answer time label (minutes)');
   assert(responseTimeLabel(130, 'kz') === '3 сағат ішінде', 'Answer time label (hours, kz)');
 
+  // Operator numbers (functions/src/admin.ts)
+  const adminPath = '../functions/src/admin';
+  const ad = await import(adminPath);
+  assert(ad.phoneDigits('+7 701 123 45 67') === '77011234567', 'Phone digits from +7');
+  assert(ad.phoneDigits('8 701 123 45 67') === '77011234567', 'Domestic 8 becomes 7');
+  assert(ad.phoneDigits('123') === '', 'Too short is no phone');
+  const list = ad.adminPhones('+77011234567, 8 702 000 00 00');
+  assert(list.length === 2 && list.includes('77020000000'), 'Operator list from text', list);
+  assert(ad.adminPhones(['+77011234567']).length === 1, 'Operator list from a list');
+  assert(ad.adminPhones(undefined).length === 0, 'No list, no operators');
+
   console.log(failed ? `\n${failed} FAILED` : '\nALL PASSED');
   process.exit(failed ? 1 : 0);
 }

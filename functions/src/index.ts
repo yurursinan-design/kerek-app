@@ -18,6 +18,8 @@ export {
   notifyOnAppointmentWritten,
   pushOnNotificationCreated,
 } from './notifications';
+// The operator's panel: admin claim for the numbers in config/admins; see admin.ts
+export { claimAdmin } from './admin';
 // Jobs done, answer speed and typical prices, counted from real events; see stats.ts
 export { statsOnOfferCreated, statsOnRequestCompleted } from './stats';
 // Copy of all personal data in Kazakhstan (Law 94-V art. 12 p. 2); see kzMirror.ts
