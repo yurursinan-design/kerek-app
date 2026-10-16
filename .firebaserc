@@ -1,0 +1,17 @@
+{
+  "projects": {
+    "default": "kerek-9d153"
+  },
+  "targets": {
+    "kerek-9d153": {
+      "storage": {
+        "main": ["kerek-9d153.firebasestorage.app"]
+      }
+    },
+    "demo-kerek": {
+      "storage": {
+        "main": ["demo-kerek.appspot.com"]
+      }
+    }
+  }
+}
