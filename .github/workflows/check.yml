@@ -1,7 +1,8 @@
 # Read-only checks on the live project. Runs only for a commit on a claude/** branch whose message
 # starts with "[check] <job>":
-#   gemini   is there a Gemini key in Secret Manager (its versions, never its value), and how did
-#            parseServiceRequest answer the app in the last 14 days (status codes, warnings, errors)
+#   gemini   is there a Gemini key in Secret Manager (its versions, never its value), does the live
+#            parser read three sample requests (through a temporary anonymous session that is deleted
+#            afterwards), and how did parseServiceRequest answer in the last 14 days
 # Nothing is deployed or changed.
 name: Kontrol
 
@@ -45,8 +46,36 @@ jobs:
           gcloud secrets versions list GEMINI_API_KEY --project "$FIREBASE_PROJECT_ID" \
             --format='table(name,state,createTime)'
 
-      - name: Canlı uygulamada son 14 gün
+      - name: Canlı fonksiyon örnek talepleri okuyor mu
+        # Same path as a visitor in the app: a temporary anonymous session (public web key) calls
+        # parseServiceRequest; the session is deleted at the end
         run: |
+          KEY=AIzaSyA2tm7w5In7uV6qEPbfCjSOKZ6Sj2fRoHI
+          TOKEN=$(curl -sS -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$KEY" \
+            -H 'Content-Type: application/json' -d '{"returnSecureToken":true}' | jq -r .idToken)
+          echo "::add-mask::$TOKEN"
+          fail=0
+          for t in 'Қызылордада кран ағып тұр, сантехник керек, бүгін' \
+                   'Нужно отремонтировать стиральную машину Samsung, Кызылорда' \
+                   'Пәтерге 2 бөлмелік жөндеу керек, келесі аптада'; do
+            code=$(curl -sS -o out.json -w '%{http_code}' -X POST \
+              "https://asia-south1-$FIREBASE_PROJECT_ID.cloudfunctions.net/parseServiceRequest" \
+              -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg t "$t" '{data:{text:$t}}')")
+            echo "$t → HTTP $code $(cat out.json)"
+            [ "$code" = 200 ] || fail=1
+          done
+          rm -f out.json
+          echo "Geçici oturum silindi: HTTP $(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+            "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$KEY" \
+            -H 'Content-Type: application/json' -d "$(jq -n --arg t "$TOKEN" '{idToken:$t}')")"
+          exit $fail
+
+      - name: Canlı uygulamada son 14 gün
+        # The deploy account may not be allowed to read logs
+        continue-on-error: true
+        run: |
+          set -o pipefail
           filter='resource.type="cloud_run_revision" AND resource.labels.service_name="parseservicerequest"'
           echo "Çağrı sonuçları (HTTP kodu, sayı):"
           gcloud logging read "$filter AND httpRequest.status>0" --project "$FIREBASE_PROJECT_ID" \
