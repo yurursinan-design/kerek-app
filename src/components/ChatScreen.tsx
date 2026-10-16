@@ -486,7 +486,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
       )}
 
       {/* Messages Scroll Area */}
-      <main className="flex-1 overflow-y-auto p-4 space-y-3 flex flex-col">
+      <main className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-3 flex flex-col">
         <div className="shrink-0 flex items-start gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-[11px] leading-relaxed text-amber-900">
           <ShieldAlert className="w-4 h-4 shrink-0 text-amber-600 mt-px" />
           <span>
@@ -720,7 +720,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                   key={q.ru}
                   type="button"
                   onClick={() => setInputText(language === 'kz' ? q.kz : q.ru)}
-                  className="shrink-0 px-3 py-1.5 rounded-full bg-sky-50 border border-sky-200 text-sky-800 text-xs font-semibold hover:bg-sky-100 active:scale-95 transition-all"
+                  className="shrink-0 px-3 py-1.5 rounded-full bg-sky-50 border border-sky-200 text-sky-800 text-xs font-semibold hover:bg-sky-100 active:scale-95 transition"
                 >
                   {language === 'kz' ? q.kz : q.ru}
                 </button>
@@ -758,7 +758,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
             <button
               type="submit"
               disabled={(!inputText.trim() && !pendingAttachment) || isSending || isLoading}
-              className="h-12 w-12 rounded-2xl bg-sky-600 hover:bg-sky-700 active:scale-95 text-white flex items-center justify-center shadow-md shadow-sky-600/20 transition-all disabled:opacity-40 disabled:pointer-events-none shrink-0"
+              className="h-12 w-12 rounded-2xl bg-sky-600 hover:bg-sky-700 active:scale-95 text-white flex items-center justify-center shadow-md shadow-sky-600/20 transition disabled:opacity-40 disabled:pointer-events-none shrink-0"
               aria-label={t.chatSendBtn}
             >
               {isSending ? (

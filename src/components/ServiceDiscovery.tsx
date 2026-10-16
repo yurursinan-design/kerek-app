@@ -287,7 +287,7 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
             {SERVICE_CATALOG.length} {tx(T.groupsUnit)} · {servicesCount(TOTAL_SERVICE_COUNT, lang)}
           </span>
         </div>
-        <div className="grid grid-cols-3 gap-2.5 stagger">
+        <div className="grid grid-cols-2 min-[360px]:grid-cols-3 gap-2.5 stagger">
           {SERVICE_CATALOG.map((group, i) => (
             <button
               key={group.id}
@@ -303,7 +303,7 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
                   <Photo name={groupPhoto(group.id)!} className="absolute inset-0 w-full h-full" />
                   <span className="absolute inset-0 bg-linear-to-t from-slate-950/85 via-slate-950/25 to-transparent" aria-hidden="true" />
                   <span className="relative px-2.5 pb-2.5">
-                    <span className="block text-[12px] font-bold text-white leading-tight line-clamp-2 [overflow-wrap:anywhere]">{groupName(group, lang)}</span>
+                    <span className="block text-[12px] font-bold text-white leading-tight line-clamp-3 break-words hyphens-auto">{groupName(group, lang)}</span>
                     <span className="block mt-0.5 text-[10px] font-medium text-white/75">{servicesCount(group.services.length, lang)}</span>
                   </span>
                 </>
@@ -320,7 +320,7 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
             type="button"
             onClick={onDescribeOwn}
             style={{ ['--i' as string]: SERVICE_CATALOG.length }}
-            className={`press ${SERVICE_CATALOG.length % 3 === 1 ? 'col-span-2' : SERVICE_CATALOG.length % 3 === 2 ? 'col-span-1' : 'col-span-3'} p-3 rounded-3xl border-2 border-dashed border-slate-200 bg-white flex items-center gap-3 text-left min-h-[136px]`}
+            className={`press ${SERVICE_CATALOG.length % 2 === 0 ? 'col-span-2' : 'col-span-1'} ${SERVICE_CATALOG.length % 3 === 1 ? 'min-[360px]:col-span-2' : SERVICE_CATALOG.length % 3 === 2 ? 'min-[360px]:col-span-1' : 'min-[360px]:col-span-3'} p-3 rounded-3xl border-2 border-dashed border-slate-200 bg-white flex items-center gap-3 text-left min-h-[136px]`}
           >
             <span className="w-11 h-11 rounded-2xl bg-sky-50 flex items-center justify-center shrink-0">
               <PenLine className="w-5 h-5 text-sky-700" />
@@ -432,7 +432,7 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
               </div>
             </div>
             )}
-            <div className="overflow-y-auto p-2 pb-4 stagger" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+            <div className="overflow-y-auto overscroll-contain p-2 pb-4 stagger" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
               {openGroup.services.map((service, i) => (
                 <button
                   key={service.id}

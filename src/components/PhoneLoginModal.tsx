@@ -207,7 +207,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
             <button
               type="submit"
               disabled={busy || !agreed}
-              className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
+              className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm shadow-md shadow-sky-600/20 active:scale-[0.99] transition flex items-center justify-center gap-2"
             >
               {busy && <Loader2 className="w-4 h-4 animate-spin" />}
               <span>{tx(TEXT.sendCode)}</span>
@@ -239,7 +239,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
             <button
               type="submit"
               disabled={busy || code.length < 6}
-              className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
+              className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm shadow-md shadow-sky-600/20 active:scale-[0.99] transition flex items-center justify-center gap-2"
             >
               {busy && <Loader2 className="w-4 h-4 animate-spin" />}
               <span>{tx(TEXT.confirm)}</span>

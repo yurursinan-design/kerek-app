@@ -322,7 +322,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="p-5 overflow-y-auto space-y-4 text-xs">
+        <div className="p-5 overflow-y-auto overscroll-contain space-y-4 text-xs">
           {/* Experience Badge (if provided) */}
           {experienceText && (
             <div className="p-3 rounded-2xl bg-sky-50 border border-sky-100 flex items-center gap-2.5">

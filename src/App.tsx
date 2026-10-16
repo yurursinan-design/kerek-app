@@ -828,9 +828,9 @@ export default function App() {
   }, [authUid, language]);
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-start sm:py-4">
+    <div className="min-h-dvh bg-slate-100 flex flex-col items-center justify-start sm:py-4">
       {/* Mobile Shell Container */}
-      <div className="w-full max-w-md bg-white sm:rounded-3xl sm:shadow-xl sm:border sm:border-slate-200/80 min-h-screen sm:min-h-[780px] flex flex-col justify-between overflow-clip relative">
+      <div className="w-full max-w-md bg-white sm:rounded-3xl sm:shadow-xl sm:border sm:border-slate-200/80 min-h-dvh sm:min-h-[780px] flex flex-col justify-between overflow-clip relative">
         {/* Unconfigured Firebase Local Mode Banner */}
         {!isFirebaseConfigured() && (
           <div className="sticky top-0 z-50 w-full bg-amber-500 text-slate-950 font-bold text-xs py-1.5 px-4 text-center shadow-xs">

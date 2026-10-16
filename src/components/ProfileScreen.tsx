@@ -206,7 +206,7 @@ const Row: React.FC<RowProps> = ({ icon, tint, label, sub, right, onClick, href,
 const Switch: React.FC<{ on: boolean; color?: string }> = ({ on, color = 'bg-sky-500' }) => (
   <span aria-hidden="true" className={`relative w-12 h-7 rounded-full shrink-0 transition-colors duration-200 ${on ? color : 'bg-slate-300'}`}>
     <span
-      className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow-md transition-all duration-200 ${on ? 'left-[22px]' : 'left-0.5'}`}
+      className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow-md transition duration-200 ${on ? 'left-[22px]' : 'left-0.5'}`}
     />
   </span>
 );
@@ -245,7 +245,7 @@ const Sheet: React.FC<{ title: string; closeLabel: string; onClose: () => void; 
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">{children}</div>
+        <div className="overflow-y-auto overscroll-contain px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">{children}</div>
       </div>
     </div>,
     document.body
@@ -645,7 +645,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         <button
           type="button"
           onClick={onSwitchMode}
-          className={`group w-full flex items-center gap-4 p-4 rounded-3xl text-left border transition-all active:scale-[0.99] animate-fadeUp ${
+          className={`group w-full flex items-center gap-4 p-4 rounded-3xl text-left border transition active:scale-[0.99] animate-fadeUp ${
             isProvider
               ? 'bg-linear-to-br from-sky-50 via-white to-indigo-50 border-sky-100'
               : 'bg-linear-to-br from-emerald-50 via-white to-teal-50 border-emerald-100'
@@ -777,7 +777,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
                   role="radio"
                   aria-checked={language === opt.id}
                   onClick={() => onLanguageChange(opt.id)}
-                  className={`h-9 pl-1.5 pr-2.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-all ${
+                  className={`h-9 pl-1.5 pr-2.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition ${
                     language === opt.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
                   }`}
                 >

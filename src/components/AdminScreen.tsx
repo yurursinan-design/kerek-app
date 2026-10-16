@@ -146,7 +146,7 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 max-w-md w-full mx-auto">
+      <div className="flex-1 overflow-y-auto overscroll-contain p-4 space-y-3 max-w-md w-full mx-auto">
         {error && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-2.5">{error}</p>}
 
         {tab === 'health' &&

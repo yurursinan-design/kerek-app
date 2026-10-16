@@ -44,7 +44,7 @@ export const LegalModal: React.FC<LegalModalProps> = ({ doc, language, onClose }
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="overflow-y-auto p-5 pt-3 space-y-4 text-sm text-slate-700 leading-relaxed">
+        <div className="overflow-y-auto overscroll-contain p-5 pt-3 space-y-4 text-sm text-slate-700 leading-relaxed">
           {content.sections.map((section) => (
             <section key={section.heading} className="space-y-1.5">
               <h3 className="text-sm font-bold text-slate-900">{section.heading}</h3>

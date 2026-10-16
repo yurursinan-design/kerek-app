@@ -452,7 +452,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
         {/* Search & Media Input Box */}
         <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="relative bg-white rounded-2xl border-2 border-slate-200 focus-within:border-sky-500 shadow-sm transition-all overflow-hidden">
+          <div className="relative bg-white rounded-2xl border-2 border-slate-200 focus-within:border-sky-500 shadow-sm transition overflow-hidden">
             <textarea
               ref={freeTextInputRef}
               value={query}
@@ -474,7 +474,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 type="button"
                 onClick={handleMicClick}
                 title={t.micTooltip}
-                className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                className={`w-9 h-9 rounded-xl flex items-center justify-center transition ${
                   isListening
                     ? 'bg-red-500 text-white animate-pulse'
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-600 active:scale-95'
@@ -613,7 +613,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <button
             type="submit"
             disabled={!canSubmit}
-            className={`w-full min-h-[52px] rounded-xl font-bold text-base flex items-center justify-center gap-2 transition-all shadow-md active:scale-[0.99] ${
+            className={`w-full min-h-[52px] rounded-xl font-bold text-base flex items-center justify-center gap-2 transition shadow-md active:scale-[0.99] ${
               !canSubmit
                 ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
                 : 'bg-sky-600 hover:bg-sky-700 text-white shadow-sky-600/20'

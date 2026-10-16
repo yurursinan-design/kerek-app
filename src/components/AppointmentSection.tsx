@@ -390,7 +390,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               <button
                 type="button"
                 onClick={() => setIsFormOpen(true)}
-                className="w-full min-h-[40px] px-3 rounded-xl bg-sky-50 hover:bg-sky-100 active:scale-[0.99] text-sky-800 font-bold text-xs flex items-center justify-center gap-2 transition-all border border-sky-200 cursor-pointer"
+                className="w-full min-h-[40px] px-3 rounded-xl bg-sky-50 hover:bg-sky-100 active:scale-[0.99] text-sky-800 font-bold text-xs flex items-center justify-center gap-2 transition border border-sky-200 cursor-pointer"
               >
                 <Calendar className="w-3.5 h-3.5" />
                 <span>{t.appointmentCreateBtn}</span>
@@ -462,7 +462,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="flex-1 min-h-[38px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50"
+                    className="flex-1 min-h-[38px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition disabled:opacity-50"
                   >
                     <Send className="w-3.5 h-3.5" />
                     <span>{submitting ? '...' : t.appointmentSubmitBtn}</span>
@@ -574,7 +574,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                     return (
                       <div key={m.key} className="flex flex-col items-center text-center">
                         <div
-                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
+                          className={`w-7 h-7 rounded-full flex items-center justify-center transition ${
                             isDone
                               ? isCurrent
                                 ? 'bg-sky-600 text-white ring-2 ring-sky-300 ring-offset-1 shadow-xs scale-105'
@@ -612,7 +612,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                         type="button"
                         disabled={submitting}
                         onClick={() => handleUpdateWorkStatus(nextWorkStatus)}
-                        className="flex-1 min-h-[38px] px-3 rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+                        className="flex-1 min-h-[38px] px-3 rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition disabled:opacity-50 cursor-pointer"
                       >
                         {nextWorkStatus === 'PROVIDER_ON_THE_WAY' && <Car className="w-3.5 h-3.5" />}
                         {nextWorkStatus === 'PROVIDER_ARRIVED' && <MapPin className="w-3.5 h-3.5" />}
@@ -749,7 +749,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   type="button"
                   disabled={submitting}
                   onClick={handleConfirm}
-                  className="flex-1 min-h-[38px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                  className="flex-1 min-h-[38px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition cursor-pointer"
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
                   <span>{t.appointmentConfirmBtn}</span>
@@ -780,7 +780,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   type="button"
                   disabled={submitting}
                   onClick={handleConfirmCompletion}
-                  className="w-full min-h-[42px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                  className="w-full min-h-[42px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition cursor-pointer disabled:opacity-50"
                 >
                   <CheckCircle2 className="w-4 h-4 text-emerald-100" />
                   <span>

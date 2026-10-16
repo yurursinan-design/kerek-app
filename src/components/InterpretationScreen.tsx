@@ -196,7 +196,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
   };
 
   return (
-    <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col min-h-[calc(100vh-56px)] justify-between">
+    <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col min-h-[calc(100dvh-56px)] justify-between">
       <div className="space-y-4">
         {/* --- 1. AI CONFIRMATION CARD (When confidence >= 0.70 and user hasn't toggled edit) --- */}
         {!isEditingManual && isHighConfidence ? (
@@ -398,7 +398,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                     <button
                       type="submit"
                       disabled={!clarificationInput.trim()}
-                      className="h-9 px-3 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 text-white disabled:text-slate-400 font-semibold text-xs rounded-xl flex items-center gap-1 transition-all"
+                      className="h-9 px-3 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 text-white disabled:text-slate-400 font-semibold text-xs rounded-xl flex items-center gap-1 transition"
                     >
                       <span>{t.btnSubmitClarification}</span>
                       <Send className="w-3 h-3" />
@@ -487,7 +487,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   type="button"
                   onClick={handleProceed}
                   disabled={isSubmitting}
-                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/25 active:scale-[0.99] transition-all"
+                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/25 active:scale-[0.99] transition"
                 >
                   {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                   <span>{t.aiConfirmBtn}</span>
@@ -498,7 +498,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsEditingManual(true)}
-                  className="w-full min-h-[44px] rounded-xl border border-slate-200 hover:bg-slate-50 bg-white text-slate-700 font-semibold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
+                  className="w-full min-h-[44px] rounded-xl border border-slate-200 hover:bg-slate-50 bg-white text-slate-700 font-semibold text-sm flex items-center justify-center gap-2 transition active:scale-[0.99]"
                 >
                   <Edit3 className="w-4 h-4 text-slate-500" />
                   <span>{t.aiEditBtn}</span>
@@ -508,7 +508,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <button
                   type="button"
                   onClick={onBack}
-                  className="w-full min-h-[40px] text-slate-500 hover:text-slate-800 text-xs font-medium flex items-center justify-center gap-1.5 transition-all"
+                  className="w-full min-h-[40px] text-slate-500 hover:text-slate-800 text-xs font-medium flex items-center justify-center gap-1.5 transition"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
                   <span>{t.backButton}</span>
@@ -701,7 +701,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                         key={quickDate}
                         type="button"
                         onClick={() => setDate(quickDate)}
-                        className={`min-h-[32px] px-2.5 text-xs rounded-md transition-all ${
+                        className={`min-h-[32px] px-2.5 text-xs rounded-md transition ${
                           date === quickDate
                             ? 'bg-sky-600 text-white font-medium'
                             : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -738,7 +738,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                         key={bVal}
                         type="button"
                         onClick={() => setBudget(bVal)}
-                        className={`min-h-[32px] px-2.5 text-xs rounded-md transition-all ${
+                        className={`min-h-[32px] px-2.5 text-xs rounded-md transition ${
                           budget === bVal
                             ? 'bg-sky-600 text-white font-medium'
                             : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -761,7 +761,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setUrgency('high')}
-                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition-all ${
+                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition ${
                       urgency === 'high'
                         ? 'bg-amber-50 border-amber-400 text-amber-900 shadow-2xs'
                         : 'border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -772,7 +772,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setUrgency('normal')}
-                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition-all ${
+                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition ${
                       urgency === 'normal'
                         ? 'bg-sky-50 border-sky-400 text-sky-900 shadow-2xs'
                         : 'border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -783,7 +783,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setUrgency('low')}
-                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition-all ${
+                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition ${
                       urgency === 'low'
                         ? 'bg-slate-200 border-slate-400 text-slate-900 shadow-2xs'
                         : 'border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -799,7 +799,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all"
+                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/20 active:scale-[0.99] transition"
                 >
                   {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                   <span>{t.continueButton}</span>
@@ -810,7 +810,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsEditingManual(false)}
-                    className="w-full min-h-[40px] rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all"
+                    className="w-full min-h-[40px] rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 font-semibold text-xs flex items-center justify-center gap-1.5 transition"
                   >
                     <Sparkles className="w-3.5 h-3.5 text-sky-600" />
                     <span>{language === 'kz' ? 'AI қорытындысына оралу' : 'Вернуться к карточке AI'}</span>
@@ -820,7 +820,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <button
                   type="button"
                   onClick={onBack}
-                  className="w-full min-h-[44px] rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium text-xs flex items-center justify-center gap-1.5 transition-all"
+                  className="w-full min-h-[44px] rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium text-xs flex items-center justify-center gap-1.5 transition"
                 >
                   <ArrowLeft className="w-4 h-4" />
                   <span>{t.backButton}</span>

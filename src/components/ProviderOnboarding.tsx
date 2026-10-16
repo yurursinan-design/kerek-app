@@ -272,7 +272,7 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
                     setCurrentStep(stepNum as 1 | 2 | 3 | 4);
                   }
                 }}
-                className={`h-2 rounded-full transition-all duration-300 ${
+                className={`h-2 rounded-full transition duration-300 ${
                   isCurrent
                     ? 'bg-emerald-500 shadow-xs'
                     : isCompleted
@@ -385,7 +385,7 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
             <button
               type="button"
               onClick={handleNext}
-              className="w-full min-h-[50px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-sky-600/20 flex items-center justify-center gap-2 transition-all"
+              className="w-full min-h-[50px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-sky-600/20 flex items-center justify-center gap-2 transition"
             >
               <span>{t.btnNextStep}</span>
               <ChevronRight className="w-4 h-4 stroke-[2.5]" />
@@ -484,7 +484,7 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
             <button
               type="button"
               onClick={handleNext}
-              className="flex-1 min-h-[50px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-sky-600/20 flex items-center justify-center gap-2 transition-all"
+              className="flex-1 min-h-[50px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-sky-600/20 flex items-center justify-center gap-2 transition"
             >
               <span>{t.btnNextStep}</span>
               <ChevronRight className="w-4 h-4 stroke-[2.5]" />
@@ -588,7 +588,7 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
             <button
               type="button"
               onClick={handleNext}
-              className="flex-1 min-h-[50px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-sky-600/20 flex items-center justify-center gap-2 transition-all"
+              className="flex-1 min-h-[50px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-sky-600/20 flex items-center justify-center gap-2 transition"
             >
               <span>{t.btnNextStep}</span>
               <ChevronRight className="w-4 h-4 stroke-[2.5]" />
@@ -736,7 +736,7 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
               type="button"
               disabled={isSubmitting}
               onClick={handleSubmit}
-              className="flex-1 min-h-[50px] rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              className="flex-1 min-h-[50px] rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 transition disabled:opacity-50"
             >
               {isSubmitting ? (
                 <>

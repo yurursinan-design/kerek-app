@@ -110,7 +110,7 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
               href={`https://www.google.com/maps?q=${location.latitude},${location.longitude}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs font-bold text-sky-700 hover:text-sky-900 bg-white px-2.5 py-1.5 rounded-lg border border-sky-200/80 shadow-2xs hover:shadow-xs transition-all"
+              className="inline-flex items-center gap-1 text-xs font-bold text-sky-700 hover:text-sky-900 bg-white px-2.5 py-1.5 rounded-lg border border-sky-200/80 shadow-2xs hover:shadow-xs transition"
               title="Google Maps"
             >
               <span>{language === 'kz' ? 'Карта' : 'Карта'}</span>
@@ -311,7 +311,7 @@ export const RequestMediaView: React.FC<RequestMediaViewProps> = ({
           <button
             type="button"
             onClick={() => setActivePreviewImage(null)}
-            className="absolute top-4 right-4 z-50 w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition-all"
+            className="absolute top-4 right-4 z-50 w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center transition"
             aria-label={t.closeButton}
           >
             <X className="w-6 h-6" />

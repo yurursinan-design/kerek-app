@@ -40,7 +40,7 @@ export const Header: React.FC<HeaderProps> = ({
   const accountLabel = 'Профиль';
   return (
     <>
-      <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
+      <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs pt-[env(safe-area-inset-top,0px)]">
         <div className="max-w-md mx-auto px-4 h-14 flex items-center justify-between">
           {/* Left slot: Back button or Brand logo */}
           <div className="flex items-center gap-2">
@@ -78,7 +78,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 onClick={() => onLanguageChange('kz')}
                 aria-pressed={language === 'kz'}
-                className={`min-h-[40px] px-3 text-xs font-semibold rounded-md transition-all ${
+                className={`min-h-[40px] px-3 text-xs font-semibold rounded-md transition ${
                   language === 'kz'
                     ? 'bg-white text-sky-700 shadow-xs'
                     : 'text-slate-500 hover:text-slate-800'
@@ -90,7 +90,7 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 onClick={() => onLanguageChange('ru')}
                 aria-pressed={language === 'ru'}
-                className={`min-h-[40px] px-3 text-xs font-semibold rounded-md transition-all ${
+                className={`min-h-[40px] px-3 text-xs font-semibold rounded-md transition ${
                   language === 'ru'
                     ? 'bg-white text-sky-700 shadow-xs'
                     : 'text-slate-500 hover:text-slate-800'

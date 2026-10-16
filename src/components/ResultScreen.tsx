@@ -634,7 +634,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                     <button
                       type="button"
                       onClick={handleOpenRating}
-                      className="w-full min-h-[46px] rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.99] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                      className="w-full min-h-[46px] rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.99] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
                     >
                       <Star className="w-4 h-4 fill-white text-white" />
                       <span>{t.rateProviderBtn}</span>
@@ -651,7 +651,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
               <button
                 type="button"
                 onClick={() => setIsChatOpen(true)}
-                className="w-full min-h-[46px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                className="w-full min-h-[46px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition cursor-pointer"
               >
                 <MessageSquare className="w-4 h-4" />
                 <span>{t.chatWithProviderBtn}</span>
@@ -778,7 +778,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                       type="button"
                       disabled={isSubmittingCompletion}
                       onClick={handleCompleteWorkClick}
-                      className="flex-1 min-h-[42px] px-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 active:scale-[0.99] text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="flex-1 min-h-[42px] px-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 active:scale-[0.99] text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <CheckCircle className="w-4 h-4" />
                       <span>{t.btnCompleteWork}</span>
@@ -923,7 +923,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 return (
                   <div
                     key={offer.id}
-                    className={`bg-white rounded-2xl border p-4 transition-all ${
+                    className={`bg-white rounded-2xl border p-4 transition ${
                       isSelected
                         ? 'border-2 border-emerald-500 shadow-sm bg-emerald-50/20'
                         : isRejected
@@ -1053,7 +1053,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                           <button
                             type="button"
                             onClick={() => handleAcceptOffer(offer)}
-                            className="min-h-[44px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all"
+                            className="min-h-[44px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition"
                           >
                             <UserCheck className="w-4 h-4" />
                             <span>{language === 'kz' ? 'Қабылдау' : 'Принять'}</span>
@@ -1062,7 +1062,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                           <button
                             type="button"
                             onClick={() => handleRejectOffer(offer)}
-                            className="min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all"
+                            className="min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition"
                           >
                             <XCircle className="w-4 h-4 text-slate-400" />
                             <span>{language === 'kz' ? 'Бас тарту' : 'Отклонить'}</span>
@@ -1088,7 +1088,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
           <button
             type="button"
             onClick={() => onRepeatRequest(request)}
-            className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xs active:scale-[0.99] transition-all"
+            className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xs active:scale-[0.99] transition"
           >
             <RotateCcw className="w-4 h-4" />
             <span>{language === 'kz' ? 'Осы өтінімді қайталау' : 'Повторить эту заявку'}</span>
@@ -1097,7 +1097,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
         <button
           type="button"
           onClick={onNewSearch}
-          className="w-full min-h-[48px] rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-bold text-sm flex items-center justify-center gap-2 shadow-xs active:scale-[0.99] transition-all"
+          className="w-full min-h-[48px] rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-bold text-sm flex items-center justify-center gap-2 shadow-xs active:scale-[0.99] transition"
         >
           <RotateCcw className="w-4 h-4 text-sky-600" />
           <span>{t.newSearchButton}</span>
@@ -1202,7 +1202,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 type="button"
                 disabled={isSubmittingCompletion}
                 onClick={handleConfirmCompleteWork}
-                className="flex-1 min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 active:scale-[0.99] text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="flex-1 min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 active:scale-[0.99] text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isSubmittingCompletion ? (
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />

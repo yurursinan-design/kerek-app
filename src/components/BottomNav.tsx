@@ -84,7 +84,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 
   return (
     <nav
-      className={`sticky bottom-0 z-40 w-full bg-white/95 backdrop-blur-md border-t-2 ${
+      className={`sticky bottom-0 z-40 w-full bg-white/95 backdrop-blur-md border-t-2 pb-[env(safe-area-inset-bottom,0px)] ${
         mode === 'provider' ? 'border-emerald-500' : 'border-sky-500'
       }`}
     >

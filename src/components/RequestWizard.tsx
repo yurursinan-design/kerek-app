@@ -220,7 +220,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
 
   const tick = (selected: boolean) => (
     <span
-      className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all ${
+      className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition ${
         selected ? 'bg-sky-600 scale-100' : 'border-2 border-slate-200 scale-90'
       }`}
     >
@@ -269,7 +269,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
         {Array.from({ length: STEPS }, (_, i) => (
           <span key={i} className="h-1.5 flex-1 rounded-full bg-slate-100 overflow-hidden">
             <span
-              className="block h-full rounded-full bg-linear-to-r from-sky-500 to-indigo-500 transition-all duration-500 ease-out"
+              className="block h-full rounded-full bg-linear-to-r from-sky-500 to-indigo-500 transition-[width] duration-300 ease-out"
               style={{ width: i <= step ? '100%' : '0%' }}
             />
           </span>

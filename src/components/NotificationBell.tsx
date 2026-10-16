@@ -116,7 +116,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
         aria-label={language === 'kz' ? 'Хабарламалар' : 'Уведомления'}
-        className="relative min-h-[36px] min-w-[36px] p-1.5 flex items-center justify-center rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 active:scale-95 transition-all"
+        className="relative min-h-[36px] min-w-[36px] p-1.5 flex items-center justify-center rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 active:scale-95 transition"
       >
         <Bell className="w-5 h-5" />
         {unreadCount > 0 && (
@@ -172,7 +172,7 @@ export const NotificationBell: React.FC<NotificationBellProps> = ({
           </div>
 
           {/* List of Notifications */}
-          <div className="overflow-y-auto divide-y divide-slate-100 max-h-[380px]">
+          <div className="overflow-y-auto overscroll-contain divide-y divide-slate-100 max-h-[380px]">
             {notifications.length === 0 ? (
               <div className="py-12 px-4 text-center">
                 <div className="w-10 h-10 mx-auto rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-2">
