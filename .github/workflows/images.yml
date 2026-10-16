@@ -1,0 +1,58 @@
+# Makes the app's photos (scripts/images/prompts.json) with Google's image model and commits the
+# new ones under public/img/photo. Runs only for a commit on a claude/** branch whose message starts
+# with "[images] ". Only missing photos are made; "[images] only: a b" remakes the listed ones.
+name: Fotoğraflar
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: images
+  cancel-in-progress: false
+
+env:
+  FIREBASE_PROJECT_ID: kerek-9d153
+
+jobs:
+  images:
+    if: startsWith(github.event.head_commit.message, '[images] ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Google Cloud'a giriş
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
+          service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Fotoğrafları üret
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          sudo apt-get install -y -qq imagemagick webp >/dev/null
+          ONLY=$(printf '%s\n' "$MSG" | head -1 | sed -n 's/.*only: *//p')
+          export ONLY
+          # The key never reaches the log: it only lives in this step's environment
+          GEMINI_API_KEY=$(gcloud secrets versions access latest --secret GEMINI_API_KEY --project "$FIREBASE_PROJECT_ID" 2>/dev/null || true)
+          export GEMINI_API_KEY
+          python3 scripts/images/generate.py
+
+      - name: Kaydet
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add public/img/photo
+          if git diff --cached --quiet; then echo "Yeni fotoğraf yok"; exit 0; fi
+          git commit -q -m "Add generated app photos"
+          git push -q origin "HEAD:${GITHUB_REF_NAME}"
