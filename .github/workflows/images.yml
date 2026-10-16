@@ -43,6 +43,10 @@ jobs:
           sudo apt-get install -y -qq imagemagick webp >/dev/null
           ONLY=$(printf '%s\n' "$MSG" | head -1 | sed -n 's/.*only: *//p')
           export ONLY
+          # "[images] icon" makes the app icon options instead of the app photos
+          if printf '%s\n' "$MSG" | head -1 | grep -q '^\[images\] icon'; then
+            export PROMPTS=icon-prompts.json OUT_DIR=marketing/icon-options
+          fi
           # The key never reaches the log: it only lives in this step's environment
           GEMINI_API_KEY=$(gcloud secrets versions access latest --secret GEMINI_API_KEY --project "$FIREBASE_PROJECT_ID" 2>/dev/null || true)
           export GEMINI_API_KEY
@@ -52,7 +56,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
-          git add public/img/photo
+          git add public/img/photo marketing/icon-options 2>/dev/null || git add public/img/photo
           if git diff --cached --quiet; then echo "Yeni fotoğraf yok"; exit 0; fi
           git commit -q -m "Add generated app photos"
           git push -q origin "HEAD:${GITHUB_REF_NAME}"

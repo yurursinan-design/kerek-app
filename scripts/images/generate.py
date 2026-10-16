@@ -6,9 +6,9 @@ allowed, uses the Gemini API key passed in GEMINI_API_KEY. Each image is saved a
 import base64, io, json, os, pathlib, subprocess, sys, time, urllib.request, urllib.error
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-OUT = ROOT / 'public' / 'img' / 'photo'
+OUT = ROOT / os.environ.get('OUT_DIR', 'public/img/photo')
 OUT.mkdir(parents=True, exist_ok=True)
-spec = json.loads((ROOT / 'scripts' / 'images' / 'prompts.json').read_text())
+spec = json.loads((ROOT / 'scripts' / 'images' / os.environ.get('PROMPTS', 'prompts.json')).read_text())
 PROJECT = os.environ['FIREBASE_PROJECT_ID']
 ONLY = set(filter(None, os.environ.get('ONLY', '').split()))
 
