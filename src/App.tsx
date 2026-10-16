@@ -382,9 +382,13 @@ export default function App() {
         if (typeof aiData.confidence === 'number' && aiData.confidence > need.confidence!) {
           need.confidence = aiData.confidence;
         }
+      } else if (aiResponse.error && !['EMPTY_INPUT', 'INPUT_TOO_LONG', 'FIREBASE_NOT_CONFIGURED'].includes(aiResponse.error.code)) {
+        // Gemini didn't answer: the summary screen asks the customer to check the fields
+        need.aiError = aiResponse.error.code;
       }
     } catch (err) {
       console.warn('[App] Cloud AI parser note (using local understanding):', err);
+      need.aiError = 'UNKNOWN_ERROR';
     } finally {
       setExtractedNeed(need);
       setIsAnalyzing(false);

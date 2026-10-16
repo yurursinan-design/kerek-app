@@ -41,6 +41,9 @@ export interface AiParserResponse {
 
 const RATE_LIMIT_ACTION = 'ai_request_parser';
 const RATE_LIMIT_COOLDOWN_MS = 1500; // 1.5s cooldown between consecutive AI parser invocations
+// The first call after the function has been idle took about 7s in production (start-up plus
+// Gemini), so the app waits a bit longer than that before using its own analysis
+const AI_PARSER_TIMEOUT_MS = 12000;
 
 /**
  * Parses user service request text into canonical structured metadata using
@@ -123,7 +126,7 @@ export async function parseServiceRequest(text: string): Promise<AiParserRespons
       };
     }
 
-    // 5. Invoke Callable Cloud Function in the specified region (asia-south1) with 8s timeout
+    // 5. Invoke Callable Cloud Function in the specified region (asia-south1) with a 12s timeout
     const functions = getFunctions(app, 'asia-south1');
     const parseCallable = httpsCallable<{ text: string }, AiParsedRequestResult>(
       functions,
@@ -134,7 +137,7 @@ export async function parseServiceRequest(text: string): Promise<AiParserRespons
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutTimer = setTimeout(() => {
         reject(new Error('AI_PARSER_TIMEOUT'));
-      }, 8000);
+      }, AI_PARSER_TIMEOUT_MS);
     });
 
     try {
@@ -168,7 +171,7 @@ export async function parseServiceRequest(text: string): Promise<AiParserRespons
     const rawCode = err?.code || '';
     if (err?.message === 'AI_PARSER_TIMEOUT') {
       code = 'TIMEOUT';
-      message = 'Превышено время ожидания ответа AI (8 сек). Выполняется локальный анализ.';
+      message = 'Превышено время ожидания ответа AI (12 сек). Выполняется локальный анализ.';
     } else if (rawCode.includes('unauthenticated')) {
       code = 'UNAUTHENTICATED';
       message = 'Ошибка авторизации пользователя.';
