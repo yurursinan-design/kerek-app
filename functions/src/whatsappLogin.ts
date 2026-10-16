@@ -37,8 +37,11 @@ const graphVersion = defineString('WHATSAPP_GRAPH_VERSION', { default: 'v23.0' }
 const REGION = 'asia-south1';
 const CODE_TTL_MS = 10 * 60 * 1000;
 const MAX_TRIES = 5;
-/** All codes sent by the app in one day; protects the WhatsApp balance from abuse */
-const GLOBAL_DAILY_CODES = 1000;
+/**
+ * All codes sent by the app in one day; protects the WhatsApp balance from abuse. Sized for the
+ * Kyzylorda pilot (real logins are a few dozen a day); raise it when the app grows.
+ */
+const GLOBAL_DAILY_CODES = 200;
 /** Template language per app language; Russian is the fallback when a Kazakh version is missing */
 const TEMPLATE_LANG: Record<string, string> = { kz: 'kk', ru: 'ru' };
 /** Graph API error codes: template missing in this language, and sending too fast */

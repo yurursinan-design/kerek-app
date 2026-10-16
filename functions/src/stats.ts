@@ -20,6 +20,17 @@ export function responseMinutes(requestCreatedAt: unknown, offerCreatedAt: unkno
   return Math.min(MAX_RESPONSE_MINUTES, Math.round((b - a) / 60000));
 }
 
+type ServerTime = { toDate(): Date } | null | undefined;
+
+/**
+ * Answer time from the server's create times of the request and the offer. The createdAt fields
+ * inside the documents are written by the apps, so a master could fake them to look quick.
+ */
+export function serverResponseMinutes(requestCreated: ServerTime, offerCreated: ServerTime): number | null {
+  if (!requestCreated || !offerCreated) return null;
+  return responseMinutes(requestCreated.toDate().toISOString(), offerCreated.toDate().toISOString());
+}
+
 /** A plain amount in tenge from a price text ("12 000 ₸"), or null for ranges, "from" prices and nonsense. */
 export function priceAmount(text: unknown): number | null {
   const s = String(text || '');
@@ -43,8 +54,8 @@ export const statsOnOfferCreated = onDocumentCreated({ ...OPTS, document: 'offer
   const uid = String(offer?.providerUserId || offer?.providerId || '');
   if (!offer || !uid || offer.isDemo === true || !offer.requestId) return;
   const db = getFirestore();
-  const request = (await db.collection('requests').doc(String(offer.requestId)).get()).data();
-  const minutes = responseMinutes(request?.createdAt, offer.createdAt);
+  const requestSnap = await db.collection('requests').doc(String(offer.requestId)).get();
+  const minutes = serverResponseMinutes(requestSnap.createTime, event.data?.createTime);
   const statsRef = db.collection('providerStats').doc(uid);
   const marker = statsRef.collection('offers').doc(event.params.offerId);
   await db.runTransaction(async (tx) => {

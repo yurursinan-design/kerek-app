@@ -46,6 +46,16 @@ service cloud.firestore {
       return !(k in m) || (m[k] is string && m[k].size() <= n);
     }
 
+    // On an update, each listed time field that changes is a short text (the app writes ISO times).
+    // Without this, anyone allowed to touch a shared document could plant a map or a huge string in
+    // it that the other side's app then has to read.
+    function changedTimesOk(changed, fields) {
+      return !changed.hasAny(fields) || (
+        (!changed.hasAny(['updatedAt']) || strMax(incoming(), 'updatedAt', 40))
+        && (!changed.hasAny(['lastMessageAt']) || strMax(incoming(), 'lastMessageAt', 40))
+      );
+    }
+
     // Trust badges are not self-assignable: absent or false only
     function falseOrAbsent(m, k) {
       return !(k in m) || m[k] == false;
@@ -293,13 +303,14 @@ service cloud.firestore {
                       'createdAt', 'updatedAt', 'attachments', 'location', 'understanding', 'expiresAtMs'
                     ])
                     && (!('expiresAtMs' in incoming()) || expiryOk(incoming().expiresAtMs))
+                    && strMax(incoming(), 'createdAt', 40) && strMax(incoming(), 'updatedAt', 40)
                     && requestFieldLimits(incoming())
                     && attachmentsOk(incoming()) && locationOk(incoming()) && understandingOk(incoming());
       // Which fields an update changes, computed once: diff() walks the whole document (including the
       // nested understanding map), so repeating it per branch could exceed the 1000-expression limit.
       function requestUpdateAllowed() {
         let changed = request.resource.data.diff(resource.data).affectedKeys();
-        return (
+        return changedTimesOk(changed, ['updatedAt']) && (
         // 1. Customer updating request details while open (allowlist of editable request fields; cannot change id, customerId, status or selectedOfferId)
         (existing().customerId == request.auth.uid &&
          incoming().status == existing().status &&
@@ -464,7 +475,7 @@ service cloud.firestore {
                       'inspectionFee'
                     ])
                     && falseOrAbsent(incoming(), 'isDemo')
-                    && strMax(incoming(), 'createdAt', 40)
+                    && strMax(incoming(), 'createdAt', 40) && strMax(incoming(), 'updatedAt', 40)
                     && incoming().providerUserId == request.auth.uid
                     // providerId names the provider profile shown to the customer; it must be the caller's own
                     && (!('providerId' in incoming()) || incoming().providerId == request.auth.uid)
@@ -472,7 +483,8 @@ service cloud.firestore {
                     && incoming().status == 'PENDING'
                     && noTrustBadges(incoming())
                     && offerFieldLimits(incoming());
-      allow update: if isSignedIn() && isValidId(offerId) && (
+      allow update: if isSignedIn() && isValidId(offerId)
+        && changedTimesOk(incoming().diff(existing()).affectedKeys(), ['updatedAt']) && (
         // Provider updating their own offer details while still PENDING
         (
           (existing().providerUserId == request.auth.uid || (('providerId' in existing()) && existing().providerId == request.auth.uid)) &&
@@ -488,6 +500,10 @@ service cloud.firestore {
             'providerPhone', 'providerWhatsapp', 'providerName', 'updatedAt'
           ]) &&
           incoming().price is string && incoming().price.size() <= 50 &&
+          // The name on an offer is the provider profile's name: it can follow a profile rename, but
+          // can't be changed to anything else (no posing as another master or as Tapsyr)
+          (!incoming().diff(existing()).affectedKeys().hasAny(['providerName']) ||
+           incoming().providerName == get(/databases/$(database)/documents/providers/$(request.auth.uid)).data.name) &&
           offerFieldLimits(incoming())
         ) ||
         // Account deletion: the provider removes their phone numbers from their offers in any status
@@ -520,7 +536,9 @@ service cloud.firestore {
     // - Rating must be an integer from 1 to 5
     // - Updates and deletes are strictly prohibited
     match /reviews/{reviewId} {
-      allow get, list: if isSignedIn();
+      // Shown with master profiles and on the customer's own jobs, which only phone-verified
+      // accounts open: anonymous visitors can't page through customers' names and comments
+      allow get, list: if hasVerifiedPhone();
       allow create: if isSignedIn()
                     && isValidId(reviewId)
                     && reviewId == incoming().requestId
@@ -630,6 +648,7 @@ service cloud.firestore {
         incoming().get('providerId', null) == existing().get('providerId', null) &&
         incoming().requestId == existing().requestId &&
         incoming().id == existing().id &&
+        changedTimesOk(incoming().diff(existing()).affectedKeys(), ['updatedAt', 'lastMessageAt']) &&
         // Participants only move the last-message preview, the unread counters and their own read mark
         incoming().diff(existing()).affectedKeys().hasOnly([
           'lastMessageText', 'lastMessageSenderId', 'lastMessageAt', 'unreadCountCustomer', 'unreadCountProvider',

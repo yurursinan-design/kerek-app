@@ -3,15 +3,27 @@
  * helpers make sure a malformed value can't crash a screen or point at an outside website.
  */
 
-/** Files we show come from our own Cloud Storage bucket, or are local previews on this device. */
-export function isTrustedMediaUrl(url: unknown): url is string {
+/** This project's Cloud Storage bucket, set at build time (VITE_FIREBASE_STORAGE_BUCKET). */
+function ownStorageBucket(): string {
+  return String(import.meta.env?.VITE_FIREBASE_STORAGE_BUCKET || '').trim();
+}
+
+/**
+ * Files we show come from our own Cloud Storage bucket, or are local previews on this device.
+ * The links sit in documents other users write (messages, requests), so a link to anything else
+ * is ignored: another Firebase project's bucket, on the same Google address, could serve a fake
+ * login page, and an SVG "image" can carry scripts.
+ */
+export function isTrustedMediaUrl(url: unknown, bucket: string = ownStorageBucket()): url is string {
   if (typeof url !== 'string' || !url) return false;
-  if (url.startsWith('blob:') || url.startsWith('data:image/') || url.startsWith('data:audio/') || url.startsWith('data:video/')) {
+  if (url.startsWith('blob:') || /^data:(image\/(png|jpeg|webp|gif)|audio\/|video\/)/.test(url)) {
     return true;
   }
   try {
     const u = new URL(url);
-    if (u.protocol === 'https:' && u.hostname === 'firebasestorage.googleapis.com') return true;
+    if (u.protocol === 'https:' && u.hostname === 'firebasestorage.googleapis.com') {
+      return Boolean(bucket) && u.pathname.startsWith(`/v0/b/${bucket}/o/`);
+    }
     // Storage emulator during local development
     if (import.meta.env?.DEV && u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost')) return true;
   } catch {

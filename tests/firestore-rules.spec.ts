@@ -573,6 +573,26 @@ async function runTestSuite() {
       await assertSucceeds(sendOffer(db, 'OFFER-req_fresh-prov_lim', limOffer('req_fresh', { priceType: 'inspection', inspectionFee: '2 000 ₸' })));
     });
 
+    await test('Sending an offer cannot plant junk in the customer request (updatedAt stays a short text)', async () => {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), 'requests', 'req_junk'), {
+          id: 'req_junk', customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances', service: 'Repair', status: 'OPEN',
+        });
+      });
+      const db = phoneUser('prov_lim').firestore();
+      const withUpdatedAt = (updatedAt: unknown) => {
+        const batch = writeBatch(db);
+        batch.set(doc(db, 'offers', 'OFFER-req_junk-prov_lim'), limOffer('req_junk'));
+        batch.update(doc(db, 'requests', 'req_junk'), {
+          status: 'OFFERS_RECEIVED', lastOfferId: 'OFFER-req_junk-prov_lim', offerCount: 1, updatedAt,
+        });
+        return batch.commit();
+      };
+      await assertFails(withUpdatedAt({ planted: 'x'.repeat(200) }));
+      await assertFails(withUpdatedAt('x'.repeat(5000)));
+      await assertSucceeds(withUpdatedAt(new Date().toISOString()));
+    });
+
     await test('Inspection fee is short text, editable while the offer is pending', async () => {
       const db = phoneUser('prov_lim').firestore();
       const ref = doc(db, 'offers', 'OFFER-req_fresh-prov_lim');
@@ -628,6 +648,16 @@ async function runTestSuite() {
       await assertFails(
         updateDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
           status: 'ACCEPTED', // Provider cannot self-accept!
+        })
+      );
+    });
+
+    await test('Provider cannot change the name on an offer after sending it (no impersonation)', async () => {
+      const masterDb = phoneUser('prov_master1').firestore();
+      await assertFails(
+        updateDoc(doc(masterDb, 'offers', 'offer_m1_01'), {
+          providerName: 'Tapsyr қолдау қызметі',
+          updatedAt: new Date().toISOString(),
         })
       );
     });
@@ -1149,6 +1179,11 @@ async function runTestSuite() {
       await updateDoc(doc(adminDb, 'requests', 'req_alice_01'), {
         status: 'COMPLETED',
       });
+    });
+
+    await test('Reviews are read by phone-verified accounts only, not anonymous visitors', async () => {
+      await assertFails(getDocs(query(collection(anonymousUser('anon_review_reader').firestore(), 'reviews'), where('providerId', '==', 'prov_master1'))));
+      await assertSucceeds(getDocs(query(collection(phoneUser('phone_review_reader').firestore(), 'reviews'), where('providerId', '==', 'prov_master1'))));
     });
 
     await test('Customer can submit review for COMPLETED request with accepted provider', async () => {
@@ -1690,6 +1725,12 @@ async function runTestSuite() {
       await assertFails(updateDoc(provRef, { finalPrice: 'x'.repeat(51) }));
       await assertFails(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_1'), { finalPrice: '1 ₸' }));
     });
+    await test('Selected provider cannot plant junk in the customer request (updatedAt stays a short text)', async () => {
+      const provRef = doc(phoneUser('prov_job').firestore(), 'requests', 'req_job_1');
+      await assertFails(updateDoc(provRef, { updatedAt: { planted: 'x'.repeat(200) } }));
+      await assertFails(updateDoc(provRef, { updatedAt: 'x'.repeat(5000) }));
+      await assertSucceeds(updateDoc(provRef, { updatedAt: new Date().toISOString() }));
+    });
     await test('Customer confirms completion', async () => {
       await assertSucceeds(updateDoc(doc(phoneUser('cust_job').firestore(), 'requests', 'req_job_1'), { status: 'COMPLETED' }));
     });
@@ -1784,6 +1825,12 @@ async function runTestSuite() {
       await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { junk: 'x'.repeat(1000) }));
       await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { lastMessageText: 'x'.repeat(301) }));
       await assertFails(updateDoc(doc(custA(), 'conversations', 'conv_req_a'), { lastMessageSenderId: 'prov_a', lastMessageText: 'Клиент: согласен на 50 000' }));
+    });
+
+    await test('A participant cannot plant junk times in the shared conversation', async () => {
+      await assertFails(updateDoc(doc(provA(), 'conversations', 'conv_req_a'), { lastMessageAt: { planted: 'x'.repeat(200) } }));
+      await assertFails(updateDoc(doc(provA(), 'conversations', 'conv_req_a'), { updatedAt: 'x'.repeat(5000) }));
+      await assertSucceeds(updateDoc(doc(provA(), 'conversations', 'conv_req_a'), { lastMessageAt: new Date().toISOString(), updatedAt: new Date().toISOString() }));
     });
 
     await test('Each participant sets only their own read mark', async () => {

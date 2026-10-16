@@ -22,6 +22,10 @@ async function main() {
   assert(st.responseMinutes('2026-10-15T10:00:00Z', '2026-10-30T10:00:00Z') === 7 * 24 * 60, 'Very late answers count as a week');
   assert(st.responseMinutes('2026-10-15T10:00:00Z', '2026-10-15T09:00:00Z') === null, 'An offer before the request is ignored');
   assert(st.responseMinutes(undefined, '2026-10-15T09:00:00Z') === null, 'Unknown request time is ignored');
+  const at = (iso: string) => ({ toDate: () => new Date(iso) });
+  assert(st.serverResponseMinutes(at('2026-10-15T10:00:00Z'), at('2026-10-15T12:00:00Z')) === 120, 'Answer time comes from the server create times');
+  assert(st.serverResponseMinutes(undefined, at('2026-10-15T12:00:00Z')) === null, 'No server time, no answer time');
+  assert(st.serverResponseMinutes(at('2026-10-15T10:00:00Z'), null) === null, 'No offer time, no answer time');
 
   assert(st.priceAmount('12 000 ₸') === 12000, 'Fixed price is read');
   assert(st.priceAmount('от 5 000 ₸') === null, '"From" prices are not counted');
