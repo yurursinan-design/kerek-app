@@ -1,0 +1,56 @@
+# Read-only checks on the live project. Runs only for a commit on a claude/** branch whose message
+# starts with "[check] <job>":
+#   gemini   is there a Gemini key in Secret Manager (its versions, never its value), and how did
+#            parseServiceRequest answer the app in the last 14 days (status codes, warnings, errors)
+# Nothing is deployed or changed.
+name: Kontrol
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  FIREBASE_PROJECT_ID: kerek-9d153
+
+jobs:
+  check:
+    if: startsWith(github.event.head_commit.message, '[check] ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ne kontrol edilecek
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          mode=$(printf '%s\n' "$MSG" | head -n1 | awk '{print $2}' | tr -cd 'a-z')
+          case "$mode" in gemini) ;; *) echo "Bilinmeyen kontrol: $mode (gemini)"; exit 1 ;; esac
+          echo "Kontrol: $mode"
+
+      - name: Google Cloud'a giriş
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
+          service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Anahtar Secret Manager'da mı
+        run: |
+          gcloud secrets versions list GEMINI_API_KEY --project "$FIREBASE_PROJECT_ID" \
+            --format='table(name,state,createTime)'
+
+      - name: Canlı uygulamada son 14 gün
+        run: |
+          filter='resource.type="cloud_run_revision" AND resource.labels.service_name="parseservicerequest"'
+          echo "Çağrı sonuçları (HTTP kodu, sayı):"
+          gcloud logging read "$filter AND httpRequest.status>0" --project "$FIREBASE_PROJECT_ID" \
+            --freshness=14d --limit=1000 --format='value(httpRequest.status)' | sort | uniq -c
+          echo "Uyarı ve hatalar (son 20):"
+          gcloud logging read "$filter AND severity>=WARNING AND textPayload:*" --project "$FIREBASE_PROJECT_ID" \
+            --freshness=14d --limit=20 --format='value(timestamp,severity,textPayload)' | cut -c1-300
