@@ -69,7 +69,7 @@ async function main() {
   }
 
   // 5. Every collection with personal data is copied
-  for (const c of ['users', 'providers', 'requests', 'requestContacts', 'offers', 'reviews', 'conversations', 'appointments', 'notifications', 'reports', 'pushTokens']) {
+  for (const c of ['users', 'providers', 'requests', 'requestContacts', 'offers', 'reviews', 'conversations', 'appointments', 'notifications', 'reports', 'pushTokens', 'customerReviews', 'bans']) {
     assert(m.MIRRORED_PATHS.some((p: string) => p.startsWith(`${c}/`)), `Collection ${c} is copied`);
   }
   assert(m.MIRRORED_PATHS.includes('conversations/{cid}/messages/{id}'), 'Chat messages are copied');

@@ -23,8 +23,10 @@ const kzSecret = defineSecret('KZ_STORAGE_SECRET');
 const kzBucket = defineString('KZ_STORAGE_BUCKET', { default: 'kerek-kz-data' });
 const kzEndpoint = defineString('KZ_STORAGE_ENDPOINT', { default: 'https://storage.yandexcloud.kz' });
 const kzRegion = defineString('KZ_STORAGE_REGION', { default: 'kz1' });
+// The app's Cloud Storage bucket, named here because the default-bucket lookup fails for this project
+const appBucket = defineString('APP_STORAGE_BUCKET', { default: 'kerek-9d153.firebasestorage.app' });
 
-/** Collections whose documents contain personal data (all of them except bans and login codes) */
+/** Collections whose documents contain personal data (all of them except short-lived login codes) */
 export const MIRRORED_PATHS = [
   'users/{id}',
   'providers/{id}',
@@ -38,6 +40,8 @@ export const MIRRORED_PATHS = [
   'notifications/{id}',
   'reports/{id}',
   'pushTokens/{id}',
+  'customerReviews/{id}',
+  'bans/{id}',
 ];
 
 export interface MirrorTarget {
@@ -142,11 +146,13 @@ export const kzMirrorAppointments = mirrorTrigger('appointments/{id}');
 export const kzMirrorNotifications = mirrorTrigger('notifications/{id}');
 export const kzMirrorReports = mirrorTrigger('reports/{id}');
 export const kzMirrorPushTokens = mirrorTrigger('pushTokens/{id}');
+export const kzMirrorCustomerReviews = mirrorTrigger('customerReviews/{id}');
+export const kzMirrorBans = mirrorTrigger('bans/{id}');
 
-export const kzMirrorFileSaved = onObjectFinalized({ ...OPTS, memory: '512MiB' }, async (event) => {
+export const kzMirrorFileSaved = onObjectFinalized({ ...OPTS, bucket: appBucket, memory: '512MiB' }, async (event) => {
   await mirrorFile(event.data.bucket, event.data.name);
 });
 
-export const kzMirrorFileDeleted = onObjectDeleted(OPTS, async (event) => {
+export const kzMirrorFileDeleted = onObjectDeleted({ ...OPTS, bucket: appBucket }, async (event) => {
   await mirrorFile(event.data.bucket, event.data.name);
 });

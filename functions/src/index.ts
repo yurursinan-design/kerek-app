@@ -36,9 +36,11 @@ export {
   kzMirrorNotifications,
   kzMirrorReports,
   kzMirrorPushTokens,
+  kzMirrorCustomerReviews,
+  kzMirrorBans,
+  kzMirrorFileSaved,
+  kzMirrorFileDeleted,
 } from './kzMirror';
-// kzMirrorFileSaved / kzMirrorFileDeleted (copies of uploaded files) are exported once Cloud
-// Storage has its default bucket: until then the deploy can't find the bucket's region
 
 const db = getFirestore();
 
