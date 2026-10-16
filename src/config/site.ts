@@ -15,7 +15,7 @@ export const LEGACY_HOSTS = ['kerek-9d153.web.app', 'kerek-9d153.firebaseapp.com
  * Switched on once the app was checked on the new address (sign-in works there); until then
  * both addresses simply serve the app.
  */
-export const MOVE_TO_NEW_ADDRESS = false;
+export const MOVE_TO_NEW_ADDRESS = true;
 
 /** Where the app should continue when it was opened on an old address, otherwise null */
 export function legacyRedirectTarget(loc: Pick<Location, 'hostname' | 'pathname' | 'search' | 'hash'>): string | null {
