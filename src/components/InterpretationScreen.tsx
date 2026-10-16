@@ -5,28 +5,8 @@ import { ALL_CITIES_LIST } from '../services/analyzer';
 import { SERVICE_CATALOG, getGroup, getService, groupName, searchServices } from '../data/serviceCatalog';
 import { isCityOpen, normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { RequestMediaView } from './RequestMediaView';
-import {
-  ArrowRight,
-  ArrowLeft,
-  MapPin,
-  Tag,
-  Briefcase,
-  Calendar,
-  Wallet,
-  Flame,
-  Sparkles,
-  Edit3,
-  AlertCircle,
-  AlertTriangle,
-  Info,
-  Wrench,
-  Smartphone,
-  HelpCircle,
-  Send,
-  Check,
-  Loader2,
-} from 'lucide-react';
-import { CategoryIcon, Emoji3D } from './CategoryIcon';
+import { AlertCircle, AlertTriangle, ArrowLeft, ArrowRight, Briefcase, Calendar, Check, Edit3, FilePenLine, Flame, HelpCircle, Info, Loader2, MapPin, Send, Smartphone, Sparkles, Tag, Wallet, Wrench } from 'lucide-react';
+import { CategoryIcon, Emoji3D, Photo } from './CategoryIcon';
 import { requestVisual } from './RequestIcon';
 
 interface InterpretationScreenProps {
@@ -223,7 +203,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
           <div className="space-y-4 animate-fadeIn">
             {/* Header */}
             <div className="text-center pt-1">
-              <Emoji3D code={visual.emoji} size={72} eager className="mx-auto mb-2 animate-popIn" />
+              {visual.photo ? <Photo name={visual.photo} eager className="mx-auto mb-3 w-20 h-20 rounded-3xl shadow-md animate-popIn" /> : <Emoji3D code={visual.emoji} size={72} eager className="mx-auto mb-2 animate-popIn" />}
               <h2 className="text-2xl font-bold text-slate-900 tracking-tight font-display">
                 {t.aiConfirmTitle}
               </h2>
@@ -260,7 +240,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
                 {/* Category */}
                 <div className="flex items-start gap-3">
-                  <CategoryIcon emoji={visual.emoji} color={visual.color} size="xs" />
+                  <CategoryIcon emoji={visual.emoji} color={visual.color} photo={visual.photo} size="xs" />
                   <div>
                     <span className="text-[11px] font-semibold text-slate-400 block uppercase tracking-wider">
                       {t.fieldCategory}
@@ -541,7 +521,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
           <div className="space-y-4 animate-fadeIn">
             {/* Header */}
             <div className="text-center pt-1">
-              <Emoji3D code="1f4dd" size={64} eager className="mx-auto mb-2 animate-popIn" />
+              <span className="mx-auto mb-3 w-16 h-16 rounded-3xl bg-sky-50 text-sky-700 flex items-center justify-center animate-popIn"><FilePenLine className="w-7 h-7" /></span>
               <h2 className="text-2xl font-bold text-slate-900 tracking-tight font-display">
                 {t.interpretationTitle}
               </h2>

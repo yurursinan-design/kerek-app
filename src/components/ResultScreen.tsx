@@ -29,27 +29,12 @@ import { getCityDisplayName } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { toIntlDigits, toTelHref, toWhatsAppHref } from '../services/phoneLinks';
 import { ReviewModal } from './ReviewModal';
-import { Emoji3D } from './CategoryIcon';
+import { Emoji3D, Photo } from './CategoryIcon';
 import { RequestIcon, requestVisual } from './RequestIcon';
 import { ChatScreen } from './ChatScreen';
 import { AppointmentSection } from './AppointmentSection';
 import { formatTenge, getPriceRange, PriceRange } from '../services/publicStats';
-import {
-  Clock,
-  MapPin,
-  Phone,
-  MessageCircle,
-  MessageSquare,
-  RotateCcw,
-  X,
-  CheckCircle,
-  UserCheck,
-  Calendar,
-  Wallet,
-  XCircle,
-  Inbox,
-  Star,
-} from 'lucide-react';
+import { Calendar, CheckCircle, Clock, Inbox, MapPin, MessageCircle, MessageSquare, Phone, RotateCcw, ShieldCheck, Star, UserCheck, Wallet, X, XCircle } from 'lucide-react';
 
 interface ResultScreenProps {
   need: ExtractedNeed;
@@ -540,8 +525,8 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
               <span className="absolute inset-0 rounded-full bg-sky-300/40 animate-radar" />
               <span className="absolute inset-0 rounded-full bg-sky-300/40 animate-radar" style={{ animationDelay: '0.8s' }} />
               <span className="absolute inset-0 rounded-full bg-sky-300/40 animate-radar" style={{ animationDelay: '1.6s' }} />
-              <span className="relative w-24 h-24 rounded-full bg-white shadow-lg shadow-sky-200 flex items-center justify-center">
-                <Emoji3D code={requestVisual(request).emoji} size={60} eager className="animate-float" />
+              <span className="relative w-24 h-24 rounded-full bg-white p-1 shadow-lg shadow-sky-200 flex items-center justify-center">
+                {requestVisual(request).photo ? <Photo name={requestVisual(request).photo!} eager className="w-full h-full rounded-full" /> : <Emoji3D code={requestVisual(request).emoji} size={60} eager className="animate-float" />}
               </span>
             </div>
             <h3 className="mt-3 text-lg font-bold text-slate-900">
@@ -567,7 +552,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
 
         {/* Phone number privacy */}
         <div className="flex items-start gap-2.5 px-1 text-xs text-slate-600">
-          <Emoji3D code="1f6e1-fe0f" size={22} />
+          <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
           <p className="leading-relaxed">{t.phoneMaskingGuarantee}</p>
         </div>
 

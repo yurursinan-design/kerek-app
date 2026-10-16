@@ -8,28 +8,11 @@ import { getService, groupName, serviceName } from '../data/serviceCatalog';
 import { ServicePicker } from './ServicePicker';
 import { isCityOpen, normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
-import {
-  User,
-  Phone,
-  MapPin,
-  Briefcase,
-  Clock,
-  Wallet,
-  CheckCircle,
-  ChevronRight,
-  ChevronLeft,
-  Eye,
-  Send,
-  AlertCircle,
-  Sparkles,
-  Wrench,
-  FileText,
-  Award,
-} from 'lucide-react';
-import { Emoji3D } from './CategoryIcon';
+import { AlertCircle, Award, Briefcase, BriefcaseBusiness, CheckCircle, ChevronLeft, ChevronRight, Clock, Eye, FileText, MapPin, Phone, Rocket, Send, Sparkles, User, UserRound, Wallet, Wrench } from 'lucide-react';
+
 
 /** 3D icon next to each onboarding step's title */
-const STEP_EMOJI: Record<number, string> = { 1: '1f9d1-200d-1f527', 2: '1f6e0-fe0f', 3: '1f4bc', 4: '1f680' };
+const STEP_ICON: Record<number, typeof Wrench> = { 1: UserRound, 2: Wrench, 3: BriefcaseBusiness, 4: Rocket };
 
 export interface ProviderOnboardingProps {
   language: Language;
@@ -304,8 +287,8 @@ export const ProviderOnboarding: React.FC<ProviderOnboardingProps> = ({
 
         {/* Title and Subtitle */}
         <div key={currentStep} className="pt-1 flex items-center gap-3.5 animate-stepIn">
-          <span className="w-14 h-14 rounded-2xl bg-linear-to-br from-emerald-50 to-teal-100 flex items-center justify-center shrink-0">
-            <Emoji3D code={STEP_EMOJI[currentStep]} size={38} eager className="animate-popIn" />
+          <span className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0 animate-popIn">
+            {React.createElement(STEP_ICON[currentStep] || Wrench, { className: 'w-6 h-6' })}
           </span>
           <div className="min-w-0">
             <h2 className="text-lg font-extrabold text-slate-900 tracking-tight font-display leading-tight">

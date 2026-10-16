@@ -38,26 +38,10 @@ import { ChatScreen } from './ChatScreen';
 import { AppointmentSection } from './AppointmentSection';
 import { RequestMediaView } from './RequestMediaView';
 import { getGroup, groupName, providerGroupIds } from '../data/serviceCatalog';
-import { Emoji3D } from './CategoryIcon';
+import { groupPhoto } from '../data/photos';
+import { Emoji3D, Photo } from './CategoryIcon';
 import { RequestIcon } from './RequestIcon';
-import {
-  Briefcase,
-  CheckCircle,
-  MapPin,
-  Calendar,
-  Send,
-  X,
-  Edit3,
-  Flame,
-  ThumbsDown,
-  Clock,
-  Wallet,
-  Star,
-  UserCheck,
-  MessageSquare,
-  Share2,
-  ShieldCheck,
-} from 'lucide-react';
+import { Briefcase, BriefcaseBusiness, Calendar, CheckCircle, Clock, Edit3, Flame, Inbox, MapPin, MessageSquare, Send, Share2, ShieldCheck, Star, ThumbsDown, UserCheck, Wallet, X } from 'lucide-react';
 import { requestWhenLabel } from '../services/dateFormat';
 import { masterProfileLink } from '../services/favorites';
 import { SUPPORT_EMAIL, supportWhatsAppHref } from '../config/support';
@@ -975,7 +959,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                       const g = getGroup(normalizeCategoryId(gid));
                       return (
                         <span key={gid} className="inline-flex items-center gap-1 h-7 pl-1 pr-2.5 rounded-full bg-slate-100 text-[11px] font-semibold text-slate-700">
-                          {g && <Emoji3D code={g.emoji} size={18} />}
+                          {g && (groupPhoto(g.id) ? <Photo name={groupPhoto(g.id)!} className="w-5 h-5 rounded-full" /> : <Emoji3D code={g.emoji} size={18} />)}
                           {g ? groupName(g, language) : getCategoryDisplayName(gid, language)}
                         </span>
                       );
@@ -1170,7 +1154,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                 )}
                 {newRequests.length === 0 ? (
                   <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
-                    <Emoji3D code="1f4e5" size={84} className="mx-auto animate-float" />
+                    <span className="mx-auto w-20 h-20 rounded-full bg-sky-100 text-sky-600 flex items-center justify-center"><Inbox className="w-9 h-9" strokeWidth={1.75} /></span>
                     <h4 className="text-base font-bold text-slate-900">
                       {language === 'kz' ? 'Әзірге жаңа өтініш жоқ' : 'Пока новых заявок нет'}
                     </h4>
@@ -1283,7 +1267,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               <div className="space-y-3">
                 {myOffersRequests.length === 0 ? (
                   <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
-                    <Emoji3D code="1f4e4" size={84} className="mx-auto animate-float" />
+                    <span className="mx-auto w-20 h-20 rounded-full bg-sky-100 text-sky-600 flex items-center justify-center"><Send className="w-8 h-8" strokeWidth={1.75} /></span>
                     <h4 className="text-base font-bold text-slate-900">
                       {language === 'kz'
                         ? 'Жіберілген ұсыныстар жоқ'
@@ -1448,7 +1432,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                 )}
                 {activeJobRequests.length === 0 ? (
                   <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
-                    <Emoji3D code="1f4bc" size={84} className="mx-auto animate-float" />
+                    <span className="mx-auto w-20 h-20 rounded-full bg-sky-100 text-sky-600 flex items-center justify-center"><BriefcaseBusiness className="w-9 h-9" strokeWidth={1.75} /></span>
                     <h4 className="text-base font-bold text-slate-900">
                       {language === 'kz'
                         ? 'Белсенді жұмыстар жоқ'

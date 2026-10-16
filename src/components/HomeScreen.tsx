@@ -8,23 +8,12 @@ import {
   sanitizeFileName,
 } from '../types';
 import { translations } from '../i18n/translations';
-import {
-  Mic,
-  MicOff,
-  Search,
-  Image as ImageIcon,
-  Video as VideoIcon,
-  MapPin,
-  Square,
-  AlertCircle,
-  Loader2,
-} from 'lucide-react';
+import { AlertCircle, Image as ImageIcon, Loader2, MapPin, Mic, MicOff, PenLine, Search, ShieldCheck, Square, Video as VideoIcon } from 'lucide-react';
 import { LegalLinks } from './LegalModal';
 import { ServiceDiscovery } from './ServiceDiscovery';
 import { RequestWizard } from './RequestWizard';
 import type { CatalogGroup, CatalogService } from '../data/serviceCatalog';
 import { RequestMediaView } from './RequestMediaView';
-import { Emoji3D } from './CategoryIcon';
 
 interface HomeScreenProps {
   language: Language;
@@ -448,7 +437,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           className="scroll-mt-20 p-4 rounded-3xl bg-linear-to-br from-violet-50 via-white to-sky-50 border border-violet-100 space-y-3"
         >
           <div className="flex items-center gap-3">
-            <Emoji3D code="270d-fe0f" size={46} />
+            <span className="w-12 h-12 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center shrink-0"><PenLine className="w-5 h-5" /></span>
             <div className="min-w-0">
               <h2 className="text-lg font-extrabold text-slate-900 tracking-tight leading-tight">
                 {language === 'kz' ? 'Өз сөзіңізбен жазыңыз' : 'Опишите своими словами'}
@@ -651,7 +640,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
           {/* Phone number privacy */}
           <div className="flex items-start gap-2.5 text-xs text-slate-600">
-            <Emoji3D code="1f6e1-fe0f" size={22} />
+            <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
             <p className="leading-relaxed">{t.phoneMaskingGuarantee}</p>
           </div>
         </section>

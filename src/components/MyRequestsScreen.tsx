@@ -13,12 +13,12 @@ import { getRequestDescription, getRequestTitle } from '../services/requestTitle
 import { formatShortDate } from '../services/dateFormat';
 import { repository } from '../services';
 import { getCityDisplayName } from '../services/taxonomy';
-import { MapPin, Calendar, Wallet, ChevronRight, Plus, Phone, MessageCircle, Heart } from 'lucide-react';
+import { Calendar, ChevronRight, ClipboardList, Heart, Inbox, MapPin, MessageCircle, Phone, Plus, Wallet } from 'lucide-react';
 import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
 import { FavoriteMaster, getFavorites, onFavoritesChange } from '../services/favorites';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { getCustomerRating } from '../services/reviewsExtra';
-import { Emoji3D } from './CategoryIcon';
+
 import { RequestIcon } from './RequestIcon';
 
 /** Russian noun form after a number: 1 заявка, 2 заявки, 5 заявок */
@@ -172,7 +172,7 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
         {/* Title */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
-            <Emoji3D code="1f4cb" size={40} eager />
+            <span className="w-11 h-11 rounded-2xl bg-sky-50 text-sky-700 flex items-center justify-center shrink-0"><ClipboardList className="w-5 h-5" /></span>
             <div className="min-w-0">
               <h2 className="text-lg font-bold text-slate-900 tracking-tight font-display leading-tight">{t.myRequestsTitle}</h2>
               {requests.length > 0 && (
@@ -206,7 +206,7 @@ export const MyRequestsScreen: React.FC<MyRequestsScreenProps> = ({
           </div>
         ) : requests.length === 0 ? (
           <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-4 mt-4 animate-fadeUp">
-            <Emoji3D code="1f4ed" size={96} eager className="mx-auto animate-float" />
+            <span className="mx-auto w-20 h-20 rounded-full bg-sky-100 text-sky-600 flex items-center justify-center"><Inbox className="w-9 h-9" strokeWidth={1.75} /></span>
             <div>
               <h3 className="text-lg font-bold text-slate-900">{t.myRequestsEmpty}</h3>
               <p className="text-[13px] text-slate-500 max-w-xs mx-auto mt-1 leading-relaxed">

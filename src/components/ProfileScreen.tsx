@@ -1,34 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
-import {
-  ArrowRight,
-  BadgeCheck,
-  Bell,
-  ChevronRight,
-  Eye,
-  FileText,
-  Heart,
-  LifeBuoy,
-  Lock,
-  LogOut,
-  Mail,
-  MapPin,
-  Megaphone,
-  Pencil,
-  Phone,
-  Share2,
-  ShieldCheck,
-  Star,
-  Trash2,
-  UserRound,
-  Volume2,
-  X,
-  Zap,
-} from 'lucide-react';
+import { ArrowRight, BadgeCheck, Bell, ChevronRight, Eye, FileText, Heart, LifeBuoy, Lock, LogOut, Mail, MapPin, Megaphone, Pencil, Phone, Share2, ShieldCheck, Star, Trash2, UserRound, Volume2, X, Zap } from 'lucide-react';
 import { Language, Provider, ServiceRequest, normalizeRequestStatus } from '../types';
 import type { AppMode } from './RoleChooser';
-import { Emoji3D } from './CategoryIcon';
+import { hasPhoto } from '../data/photos';
+import { Emoji3D, Photo } from './CategoryIcon';
 import { LegalModal } from './LegalModal';
 import type { LegalDocId } from '../data/legalTexts';
 import { repository, getFriendlyErrorMessage } from '../services';
@@ -639,7 +616,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             </div>
           ) : (
             <div className="relative">
-              <Emoji3D code="1f44b" size={60} eager className="animate-float" />
+              <span className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center"><UserRound className="w-8 h-8" /></span>
               <h1 className="mt-3 text-2xl font-extrabold tracking-tight">{tx('welcome')}</h1>
               <p className="mt-1.5 text-sm text-white/85 leading-relaxed">{tx('welcomeText')}</p>
               <button
@@ -675,7 +652,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           }`}
           style={{ animationDelay: '60ms' }}
         >
-          <Emoji3D code={isProvider ? '1f3e1' : '1f9d1-200d-1f527'} size={54} />
+          {hasPhoto(isProvider ? 'role_customer' : 'role_master') ? <Photo name={isProvider ? 'role_customer' : 'role_master'} className="w-16 h-16 rounded-2xl shrink-0" /> : <Emoji3D code={isProvider ? '1f3e1' : '1f9d1-200d-1f527'} size={54} />}
           <span className="flex-1 min-w-0">
             <span className="block text-[16px] font-extrabold text-slate-900 leading-tight">
               {isProvider ? tx('toCustomer') : provider ? tx('toMaster') : tx('becomeMaster')}
