@@ -12,6 +12,7 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { app, auth, ensureFirebaseAuth, isFirebaseConfigured } from './firebase';
 import { clearPersonalLocalData } from './storage';
 import { forgetPushToken } from './pushNotifications';
+import { getDeviceId } from './deviceId';
 
 /**
  * Phone login.
@@ -112,9 +113,11 @@ async function sendCodeViaWhatsApp(phoneE164: string, lang: Lang): Promise<Confi
     verificationId: 'whatsapp-code',
     confirm: async (code: string) => {
       if (!auth) throw new Error('Firebase Auth is not configured');
-      const { data } = await httpsCallable<{ phone: string; code: string }, { token: string }>(functions, 'verifyLoginCode')({
+      const deviceId = getDeviceId();
+      const { data } = await httpsCallable<{ phone: string; code: string; deviceId?: string }, { token: string }>(functions, 'verifyLoginCode')({
         phone: phoneE164,
         code,
+        ...(deviceId ? { deviceId } : {}),
       });
       return signInWithCustomToken(auth, data.token);
     },

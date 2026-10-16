@@ -74,3 +74,28 @@ export async function getPriceRange(cityId?: string, serviceOrCategoryId?: strin
 export function formatTenge(n: number): string {
   return `${String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} ₸`;
 }
+
+function ruCount(n: number, one: string, few: string, many: string): string {
+  const d = n % 10;
+  const h = n % 100;
+  if (d === 1 && h !== 11) return one;
+  if (d >= 2 && d <= 4 && (h < 12 || h > 14)) return few;
+  return many;
+}
+
+/** "4 отзыва" / "4 пікір" */
+export function reviewsCountLabel(reviews: number, lang: 'kz' | 'ru'): string {
+  const r = Math.max(0, Math.floor(reviews));
+  return lang === 'kz' ? `${r} пікір` : `${r} ${ruCount(r, 'отзыв', 'отзыва', 'отзывов')}`;
+}
+
+/**
+ * The line under a master's rating: all published reviews and how many different customers wrote
+ * them ("15 отзывов от 12 клиентов"). The stars count each customer once, so this shows why.
+ */
+export function reviewsFromCustomersLabel(reviews: number, customers: number, lang: 'kz' | 'ru'): string {
+  const r = Math.max(0, Math.floor(reviews));
+  const c = Math.max(0, Math.floor(customers));
+  if (lang === 'kz') return `${c} клиенттен ${r} пікір`;
+  return `${r} ${ruCount(r, 'отзыв', 'отзыва', 'отзывов')} от ${c} ${ruCount(c, 'клиента', 'клиентов', 'клиентов')}`;
+}

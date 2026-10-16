@@ -1,10 +1,11 @@
 // Numbers shown on profiles and requests, counted on the server from real events:
 //   providerStats/{uid}  — jobs completed and how fast the master usually answers
 //   priceStats/{key}     — prices of finished jobs per city and service (key: "<cityId>_<serviceId>")
+//   providerStats/{uid}  — also the rating from published reviews, each customer counted once
 // Each event is counted once: a marker document under the stats document remembers it, so a
 // repeated delivery of the same event changes nothing.
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
-import { onDocumentCreated, onDocumentUpdated } from 'firebase-functions/v2/firestore';
+import { FieldValue, Firestore, getFirestore } from 'firebase-admin/firestore';
+import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 
 const OPTS = { region: 'asia-south1', maxInstances: 10 };
 /** Answers slower than a week are counted as a week, so one old request doesn't skew the average */
@@ -114,3 +115,50 @@ export const statsOnRequestCompleted = onDocumentUpdated({ ...OPTS, document: 'r
     });
   });
 });
+
+export interface RatedReview {
+  customerId?: unknown;
+  rating?: unknown;
+  /** Server time the review was published, to pick a customer's newest review */
+  atMs?: number;
+}
+
+/**
+ * A master's rating from the published reviews, counting each customer once (their newest review):
+ * twenty reviews from two accounts of one person make two ratings, not twenty.
+ */
+export function ratingFromReviews(reviews: RatedReview[]): { ratingCount: number; ratingTotal: number; reviewCount: number } {
+  const newest = new Map<string, { rating: number; at: number }>();
+  let reviewCount = 0;
+  for (const r of reviews) {
+    const rating = Number(r.rating);
+    const who = typeof r.customerId === 'string' ? r.customerId : '';
+    if (!who || !Number.isInteger(rating) || rating < 1 || rating > 5) continue;
+    reviewCount++;
+    const at = Number(r.atMs) || 0;
+    const prev = newest.get(who);
+    if (!prev || at >= prev.at) newest.set(who, { rating, at });
+  }
+  let ratingTotal = 0;
+  newest.forEach((v) => (ratingTotal += v.rating));
+  return { ratingCount: newest.size, ratingTotal, reviewCount };
+}
+
+/** Any change to a published review (new, answered, removed) recounts the master's rating. */
+export const ratingsOnReviewWritten = onDocumentWritten({ ...OPTS, document: 'reviews/{reviewId}' }, async (event) => {
+  const providerIds = new Set<string>();
+  for (const d of [event.data?.before?.data(), event.data?.after?.data()]) {
+    if (typeof d?.providerId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(d.providerId)) providerIds.add(d.providerId);
+  }
+  const db = getFirestore();
+  for (const providerId of providerIds) await recountRating(db, providerId);
+});
+
+/** A master's rating, recounted from all their published reviews into providerStats. */
+export async function recountRating(db: Firestore, providerId: string): Promise<void> {
+  const snap = await db.collection('reviews').where('providerId', '==', providerId).limit(1000).get();
+  const rating = ratingFromReviews(
+    snap.docs.map((d) => ({ customerId: d.get('customerId'), rating: d.get('rating'), atMs: d.createTime.toMillis() }))
+  );
+  await db.collection('providerStats').doc(providerId).set({ ...rating, ratingUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
+}

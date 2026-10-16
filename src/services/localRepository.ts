@@ -14,6 +14,7 @@ import {
   ProviderOffer,
   RequestAttachment,
   RequestStatus,
+  RatingSummary,
   Review,
   sanitizeFileName,
   ServiceRequest,
@@ -1099,11 +1100,19 @@ export class LocalRepository implements Repository {
     }
   }
 
-  async getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }> {
+  /** Same counting as the server: each customer once (their newest review), all reviews for "N reviews" */
+  async getRatingSummary(providerIds: string[]): Promise<RatingSummary> {
     const ids = new Set(providerIds.map((id) => (id || '').trim()).filter(Boolean));
     const reviews = (await this.getAllReviewsRaw()).filter((r) => ids.has((r.providerId || '').trim()));
-    const total = reviews.length;
-    return { count: total, avg: total ? reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / total : 0 };
+    const newest = new Map<string, Review>();
+    for (const r of reviews) {
+      const who = (r.customerId || r.id || '').trim();
+      const prev = newest.get(who);
+      if (!prev || String(r.createdAt || '') >= String(prev.createdAt || '')) newest.set(who, r);
+    }
+    const people = Array.from(newest.values());
+    const total = people.reduce((sum, r) => sum + (Number(r.rating) || 0), 0);
+    return { count: people.length, avg: people.length ? total / people.length : 0, reviews: reviews.length };
   }
 
   private async getAllReviewsRaw(): Promise<Review[]> {

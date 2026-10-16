@@ -185,3 +185,59 @@ export async function unblockAccount(uid: string): Promise<void> {
   await deleteDoc(doc(fs, 'bans', uid));
   if ((await getDoc(doc(fs, 'providers', uid))).exists()) await setMasterFlag(uid, 'blocked', false);
 }
+
+// ------------------------------------------------------------ Review check (functions/src/reviewModeration.ts)
+
+export type ReviewSignalCode = 'same_device' | 'same_network' | 'quick_job' | 'new_account' | 'contact_in_text';
+
+export interface ReviewCheck {
+  id: string;
+  customerId: string;
+  providerId: string;
+  customerName?: string;
+  providerName?: string;
+  rating: number;
+  comment?: string;
+  createdAt: string;
+  /** Not set while the check is still running */
+  status?: 'published' | 'held' | 'rejected';
+  /** detail: minutes (quick_job) or hours (new_account) */
+  signals: { code: ReviewSignalCode; detail?: number }[];
+  ai?: { decision: 'approve' | 'hold'; reason: string };
+  decidedBy?: 'ai' | 'operator';
+}
+
+/** Whether the operator still has to decide: held by the check, or the check never finished. */
+export const reviewNeedsDecision = (r: ReviewCheck) => r.status === 'held' || !r.status;
+
+/** The newest submitted reviews, with what the check found. */
+export async function loadReviewChecks(): Promise<ReviewCheck[]> {
+  const snap = await getDocs(query(collection(firestore(), 'reviewSubmissions'), orderBy('createdAt', 'desc'), limit(200)));
+  return snap.docs.map((d) => {
+    const x = d.data();
+    return {
+      id: d.id,
+      customerId: String(x.customerId || ''),
+      providerId: String(x.providerId || ''),
+      customerName: typeof x.customerName === 'string' ? x.customerName : undefined,
+      providerName: typeof x.providerName === 'string' ? x.providerName : undefined,
+      rating: Math.max(0, Math.min(5, Math.round(Number(x.rating) || 0))),
+      comment: typeof x.comment === 'string' ? x.comment : undefined,
+      createdAt: String(x.createdAt || ''),
+      status: ['published', 'held', 'rejected'].includes(x.status) ? x.status : undefined,
+      signals: Array.isArray(x.signals) ? x.signals.filter((s: unknown) => typeof (s as { code?: unknown })?.code === 'string') : [],
+      ai: x.ai && typeof x.ai.decision === 'string' ? { decision: x.ai.decision, reason: String(x.ai.reason || '') } : undefined,
+      decidedBy: x.decidedBy === 'ai' || x.decidedBy === 'operator' ? x.decidedBy : undefined,
+    };
+  });
+}
+
+/** Publishes a review (also one rejected earlier) or rejects it (a published one is taken down). */
+export async function decideReviewCheck(id: string, action: 'publish' | 'reject'): Promise<'published' | 'rejected'> {
+  if (!app) throw new Error('Firebase is not configured');
+  const { data } = await httpsCallable<{ id: string; action: string }, { status: string }>(
+    getFunctions(app, 'asia-south1'),
+    'decideReview'
+  )({ id, action });
+  return data.status === 'published' ? 'published' : 'rejected';
+}

@@ -15,6 +15,7 @@ import {
   paymentMethodLabel,
   Provider,
   ProviderOffer,
+  RatingSummary,
   ServiceRequest,
 } from '../types';
 import { translations } from '../i18n/translations';
@@ -31,7 +32,7 @@ import {
 } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { PortfolioEditor } from './PortfolioPhotos';
-import { formatTenge, getPriceRange, PriceRange } from '../services/publicStats';
+import { formatTenge, getPriceRange, PriceRange, reviewsCountLabel } from '../services/publicStats';
 import { getCustomerRating, getCustomerReview, rateCustomer } from '../services/reviewsExtra';
 import { ProviderOnboarding } from './ProviderOnboarding';
 import { ChatScreen } from './ChatScreen';
@@ -141,7 +142,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [provider, setProvider] = useState<Provider | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isProfilePreviewOpen, setIsProfilePreviewOpen] = useState(false);
-  const [providerRating, setProviderRating] = useState<{ avg: number; count: number }>({ avg: 0, count: 0 });
+  const [providerRating, setProviderRating] = useState<RatingSummary>({ avg: 0, count: 0 });
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(null);
 
   // Profile fallbacks used when saving
@@ -947,7 +948,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                       <div className="inline-flex items-center gap-1 text-xs font-bold text-amber-900 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">
                         <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
                         <span>
-                          {providerRating.avg.toFixed(1)} / 5 ({providerRating.count} {t.reviewsCountUnit})
+                          {providerRating.avg.toFixed(1)} / 5 ({reviewsCountLabel(providerRating.reviews ?? providerRating.count, language === 'kz' ? 'kz' : 'ru')})
                         </span>
                       </div>
                     </div>

@@ -8,6 +8,7 @@ import {
   ProviderOffer,
   RequestAttachment,
   RequestStatus,
+  RatingSummary,
   Review,
   ServiceRequest,
   User,
@@ -98,7 +99,7 @@ export interface Repository {
   createReview(reviewData: Partial<Review>): Promise<Review>;
   getReviews(filter?: ReviewFilter): Promise<Review[]>;
   /** Average rating and review count for a provider (ids: provider id and, for old profiles, user id) */
-  getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }>;
+  getRatingSummary(providerIds: string[]): Promise<RatingSummary>;
 
   // Matching
   matchProviders(request: ServiceRequest): Promise<Provider[]>;

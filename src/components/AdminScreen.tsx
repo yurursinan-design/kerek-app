@@ -1,28 +1,38 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Flag, Loader2, Search, ShieldCheck, Users, X } from 'lucide-react';
+import { BarChart3, Flag, Loader2, MessageSquareText, Search, ShieldCheck, Users, X } from 'lucide-react';
 import { Language, Provider } from '../types';
 import { getFriendlyErrorMessage } from '../services';
 import { REPORT_REASONS } from '../services/reports';
 import {
   AdminReport,
   blockAccount,
+  decideReviewCheck,
   HealthNumbers,
   isAccountBlocked,
   loadHealthNumbers,
   loadMasters,
   loadReports,
+  loadReviewChecks,
   MasterFlag,
   reportedAccount,
   resolveReport,
+  ReviewCheck,
+  reviewNeedsDecision,
   setMasterFlag,
   unblockAccount,
 } from '../services/admin';
 
-type Tab = 'health' | 'reports' | 'masters';
+type Tab = 'health' | 'reviews' | 'reports' | 'masters';
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
-/** The operator's panel: health numbers, reports and masters (badges, hiding, blocking). */
+/** A check that has not finished after this long will not finish by itself: the operator decides */
+const CHECK_STUCK_MS = 5 * 60 * 1000;
+
+/** Published by the review check although something was noticed: shown until the operator looks at it */
+const flaggedByCheck = (r: ReviewCheck) => r.status === 'published' && r.decidedBy === 'ai' && r.signals.length > 0;
+
+/** The operator's panel: health numbers, review check, reports and masters (badges, hiding, blocking). */
 export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> = ({ language, onClose }) => {
   const kz = language === 'kz';
   const tx = (k: string, r: string) => (kz ? k : r);
@@ -32,6 +42,8 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
   const [health, setHealth] = useState<HealthNumbers | null>(null);
   const [reports, setReports] = useState<AdminReport[] | null>(null);
   const [masters, setMasters] = useState<Provider[] | null>(null);
+  const [reviewChecks, setReviewChecks] = useState<ReviewCheck[] | null>(null);
+  const [showDecided, setShowDecided] = useState(false);
   const [showResolved, setShowResolved] = useState(false);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -43,12 +55,27 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
     if (tab === 'health' && !health) loadHealthNumbers().then(setHealth).catch(fail);
     if (tab === 'reports' && !reports) loadReports().then(setReports).catch(fail);
     if (tab === 'masters' && !masters) loadMasters().then(setMasters).catch(fail);
-  }, [tab, health, reports, masters, language]);
+    if (tab === 'reviews' && !reviewChecks) loadReviewChecks().then(setReviewChecks).catch(fail);
+  }, [tab, health, reports, masters, reviewChecks, language]);
+
+  // Loaded at once so the tab shows how many reviews wait for a decision
+  useEffect(() => {
+    loadReviewChecks()
+      .then(setReviewChecks)
+      .catch(() => {
+        // shown when the tab is opened
+      });
+  }, []);
 
   const visibleReports = useMemo(
     () => (reports || []).filter((r) => showResolved || r.status !== 'resolved'),
     [reports, showResolved]
   );
+  const visibleChecks = useMemo(
+    () => (reviewChecks || []).filter((r) => showDecided || reviewNeedsDecision(r) || flaggedByCheck(r)),
+    [reviewChecks, showDecided]
+  );
+  const waitingReviews = (reviewChecks || []).filter(reviewNeedsDecision).length;
   const visibleMasters = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (masters || []).filter((m) => !q || (m.name || '').toLowerCase().includes(q) || (m.phone || '').includes(q));
@@ -87,6 +114,12 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
       setReports((list) => (list || []).map((x) => (x.id === r.id ? { ...x, status: 'resolved' } : x)));
     });
 
+  const decideReview = (r: ReviewCheck, action: 'publish' | 'reject') =>
+    run(`${r.id}_${action}`, async () => {
+      const status = await decideReviewCheck(r.id, action);
+      setReviewChecks((list) => (list || []).map((x) => (x.id === r.id ? { ...x, status, decidedBy: 'operator' } : x)));
+    });
+
   const toggleBlockMaster = (m: Provider) =>
     run(`${m.id}_block`, async () => {
       const isBlocked = blocked[m.id] ?? (await isAccountBlocked(m.id));
@@ -97,11 +130,69 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
       setMasters((list) => (list || []).map((x) => (x.id === m.id ? { ...x, blocked: next } : x)));
     });
 
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: 'health', label: tx('Көрсеткіштер', 'Показатели'), icon: <BarChart3 className="w-4 h-4" /> },
+  const tabs: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
+    { id: 'health', label: tx('Шолу', 'Обзор'), icon: <BarChart3 className="w-4 h-4" /> },
+    { id: 'reviews', label: tx('Пікірлер', 'Отзывы'), icon: <MessageSquareText className="w-4 h-4" />, badge: waitingReviews },
     { id: 'reports', label: tx('Шағымдар', 'Жалобы'), icon: <Flag className="w-4 h-4" /> },
     { id: 'masters', label: tx('Шеберлер', 'Мастера'), icon: <Users className="w-4 h-4" /> },
   ];
+
+  const aiLabels: Record<string, [string, string]> = {
+    ok: ['ИИ: мәтін дұрыс', 'ИИ: текст в порядке'],
+    insult: ['ИИ: балағат немесе қорлау', 'ИИ: мат или оскорбления'],
+    contacts: ['ИИ: байланыс деректері', 'ИИ: контакты или личные данные'],
+    advert: ['ИИ: жарнама', 'ИИ: реклама'],
+    off_topic: ['ИИ: жұмысқа қатысы жоқ', 'ИИ: не о работе'],
+    self_promotion: ['ИИ: шебер өзін мақтағандай', 'ИИ: похоже, пишет сам мастер'],
+    rating_mismatch: ['ИИ: жұлдыз мәтінге сай емес', 'ИИ: звёзды не совпадают с текстом'],
+    unclear: ['ИИ: сенімді емес', 'ИИ: не уверен'],
+    unavailable: ['ИИ жауап бермеді', 'ИИ не ответил'],
+  };
+
+  const signalLabel = (s: ReviewCheck['signals'][number]) => {
+    const n = typeof s.detail === 'number' ? s.detail : null;
+    switch (s.code) {
+      case 'same_device':
+        return tx('Клиент пен шебер бір телефоннан', 'Клиент и мастер с одного телефона');
+      case 'same_network':
+        return tx('Бір желіден кірген', 'Вход из одной сети');
+      case 'quick_job':
+        return n === null ? tx('Тез аяқталған', 'Завершён очень быстро') : tx(`Таңдаудан ${n} мин кейін аяқталды`, `Завершён через ${n} мин после выбора`);
+      case 'new_account':
+        return n === null ? tx('Клиенттің жаңа тіркелгісі', 'Новый аккаунт клиента') : tx(`Клиенттің жаңа тіркелгісі (${n} сағ)`, `Новый аккаунт клиента (${n} ч)`);
+      case 'contact_in_text':
+        return tx('Мәтінде телефон не сілтеме', 'В тексте телефон или ссылка');
+      default:
+        return String(s.code);
+    }
+  };
+
+  const reviewStatus = (r: ReviewCheck): { text: string; tone: string } => {
+    if (r.status === 'held') return { text: tx('Сіздің шешіміңізді күтеді', 'Ждёт вашего решения'), tone: 'text-amber-700' };
+    if (r.status === 'rejected') return { text: tx('✕ Жарияланбады', '✕ Отклонён'), tone: 'text-rose-700' };
+    if (r.status === 'published') {
+      return r.decidedBy === 'operator'
+        ? { text: tx('✓ Жарияланды (сіз)', '✓ Опубликован (вы)'), tone: 'text-emerald-700' }
+        : { text: tx('✓ ИИ жариялады', '✓ Опубликован ИИ'), tone: 'text-emerald-700' };
+    }
+    const stuck = Date.now() - Date.parse(r.createdAt) > CHECK_STUCK_MS;
+    return stuck
+      ? { text: tx('Тексеру аяқталмады: өзіңіз шешіңіз', 'Проверка не завершилась: решите сами'), tone: 'text-amber-700' }
+      : { text: tx('Тексерілуде…', 'Проверяется…'), tone: 'text-slate-500' };
+  };
+
+  const decisionButton = (r: ReviewCheck, action: 'publish' | 'reject', label: string) => (
+    <button
+      type="button"
+      onClick={() => decideReview(r, action)}
+      disabled={busy === `${r.id}_${action}`}
+      className={`flex-1 h-9 rounded-xl text-xs font-bold disabled:opacity-50 ${
+        action === 'publish' ? 'bg-emerald-600 text-white' : 'bg-rose-50 text-rose-800 border border-rose-200'
+      }`}
+    >
+      {label}
+    </button>
+  );
 
   const chip = (on: boolean, label: string, onClick: () => void, key: string, danger = false) => (
     <button
@@ -136,12 +227,18 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
-            className={`flex-1 h-10 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 ${
+            aria-pressed={tab === t.id}
+            className={`relative flex-1 min-w-0 h-12 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-0.5 ${
               tab === t.id ? 'bg-sky-600 text-white' : 'text-slate-600 bg-slate-100'
             }`}
           >
             {t.icon}
-            {t.label}
+            <span className="max-w-full truncate">{t.label}</span>
+            {t.badge ? (
+              <span className="absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full bg-rose-600 text-white text-[10px] leading-4 text-center">
+                {t.badge}
+              </span>
+            ) : null}
           </button>
         ))}
       </div>
@@ -180,6 +277,87 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
                   'Если предложений на заявку мало или мастера отвечают долго, привлеките больше мастеров.'
                 )}
               </p>
+            </>
+          ))}
+
+        {tab === 'reviews' &&
+          (!reviewChecks ? (
+            <Loader2 className="w-6 h-6 animate-spin text-sky-600 mx-auto mt-8" />
+          ) : (
+            <>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                {tx(
+                  'Әр пікірді ИИ (Gemini) тексереді. Күдікті пікір сіз шешкенше жарияланбайды. Шебер бағасында әр клиент бір рет есептеледі.',
+                  'Каждый отзыв проверяет ИИ (Gemini). Подозрительный отзыв не публикуется, пока вы не решите. В оценке мастера каждый клиент учитывается один раз.'
+                )}
+              </p>
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input type="checkbox" checked={showDecided} onChange={(e) => setShowDecided(e.target.checked)} />
+                {tx('Шешілгендерді де көрсету', 'Показывать решённые')}
+              </label>
+              {visibleChecks.length === 0 && (
+                <p className="text-sm text-slate-500 text-center py-6">{tx('Шешім күтетін пікір жоқ', 'Нет отзывов, ждущих решения')}</p>
+              )}
+              {visibleChecks.map((r) => {
+                const status = reviewStatus(r);
+                const aiHolds = r.ai && r.ai.decision !== 'approve';
+                return (
+                  <div key={r.id} className="p-3 bg-white rounded-2xl border border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-base leading-none tracking-wider" aria-label={`${r.rating}/5`}>
+                        <span className="text-amber-500">{'★'.repeat(r.rating)}</span>
+                        <span className="text-slate-200">{'★'.repeat(5 - r.rating)}</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400">{r.createdAt.slice(0, 10)}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 break-words">
+                      {r.customerName || tx('Клиент', 'Клиент')} → {r.providerName || tx('Шебер', 'Мастер')}
+                    </div>
+                    {r.comment ? (
+                      <p className="text-xs text-slate-700 bg-slate-50 rounded-xl p-2 whitespace-pre-wrap break-words">{r.comment}</p>
+                    ) : (
+                      <p className="text-[11px] text-slate-400">{tx('Мәтінсіз, тек жұлдыздар', 'Без текста, только звёзды')}</p>
+                    )}
+                    {(r.ai || r.signals.length > 0) && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {r.ai && (
+                          <span
+                            className={`px-2 py-1 rounded-full border text-[11px] font-bold ${
+                              aiHolds ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                            }`}
+                          >
+                            {(aiLabels[r.ai.reason] || aiLabels.unclear)[kz ? 0 : 1]}
+                          </span>
+                        )}
+                        {r.signals.map((s) => (
+                          <span
+                            key={s.code}
+                            className={`px-2 py-1 rounded-full border text-[11px] font-bold ${
+                              s.code === 'same_device' || s.code === 'contact_in_text'
+                                ? 'border-rose-200 bg-rose-50 text-rose-800'
+                                : 'border-amber-200 bg-amber-50 text-amber-800'
+                            }`}
+                          >
+                            {signalLabel(s)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <p className={`text-[11px] font-bold ${status.tone}`}>{status.text}</p>
+                    <div className="flex gap-2">
+                      {reviewNeedsDecision(r) && (
+                        <>
+                          {decisionButton(r, 'publish', tx('Жариялау', 'Опубликовать'))}
+                          {decisionButton(r, 'reject', tx('Жарияламау', 'Отклонить'))}
+                        </>
+                      )}
+                      {flaggedByCheck(r) && decisionButton(r, 'publish', tx('Қалдыру', 'Оставить'))}
+                      {r.status === 'published' && decisionButton(r, 'reject', tx('Алып тастау', 'Снять'))}
+                      {r.status === 'rejected' && decisionButton(r, 'publish', tx('Жариялау', 'Опубликовать'))}
+                    </div>
+                  </div>
+                );
+              })}
             </>
           ))}
 

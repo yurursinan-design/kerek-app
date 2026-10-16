@@ -529,34 +529,38 @@ service cloud.firestore {
     // =================== Reviews Collection ===================
     // Customer Reviews & Ratings for Completed Jobs:
     // - Document ID is strictly bound to requestId (/reviews/{requestId}) to prevent duplicate reviews
-    // - Server-side verified against actual completed request & accepted offer
-    // - Reviewer must be the customer who created the completed request
-    // - Reviewed provider must be the one whose offer was accepted
-    // - Provider cannot review themselves
+    // - Verified against the actual completed request & accepted offer (reviewOk)
+    // - Reviewer must be the customer who created the completed request; no self-reviews
     // - Rating must be an integer from 1 to 5
-    // - Updates and deletes are strictly prohibited
+    // - The customer submits to reviewSubmissions; the review check publishes it to reviews
+    // A customer's review of the master of their own finished job (ids bound to the request)
+    function reviewOk(reviewId) {
+      return isValidId(reviewId)
+        && reviewId == incoming().requestId
+        && incoming().id == reviewId
+        && incoming().customerId == request.auth.uid
+        && incoming().providerId is string
+        && incoming().providerId != request.auth.uid
+        && incoming().rating is int && incoming().rating >= 1 && incoming().rating <= 5
+        && incoming().keys().hasOnly(['id', 'requestId', 'customerId', 'customerName', 'providerId', 'providerName', 'rating', 'comment', 'createdAt'])
+        && strMax(incoming(), 'comment', 1000) && strMax(incoming(), 'customerName', 100)
+        && strMax(incoming(), 'providerName', 100) && strMax(incoming(), 'createdAt', 40)
+        && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
+        && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status == 'COMPLETED'
+        && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == request.auth.uid
+        && (get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId is string)
+        && exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId))
+        && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.status == 'ACCEPTED'
+        && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerId == incoming().providerId;
+    }
+
     match /reviews/{reviewId} {
       // Shown with master profiles and on the customer's own jobs, which only phone-verified
       // accounts open: anonymous visitors can't page through customers' names and comments
       allow get, list: if hasVerifiedPhone();
-      allow create: if isSignedIn()
-                    && isValidId(reviewId)
-                    && reviewId == incoming().requestId
-                    && incoming().id == reviewId
-                    && incoming().customerId == request.auth.uid
-                    && incoming().providerId is string
-                    && incoming().providerId != request.auth.uid
-                    && incoming().rating is int && incoming().rating >= 1 && incoming().rating <= 5
-                    && incoming().keys().hasOnly(['id', 'requestId', 'customerId', 'customerName', 'providerId', 'providerName', 'rating', 'comment', 'createdAt'])
-                    && strMax(incoming(), 'comment', 1000) && strMax(incoming(), 'customerName', 100)
-                    && strMax(incoming(), 'providerName', 100) && strMax(incoming(), 'createdAt', 40)
-                    && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
-                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status == 'COMPLETED'
-                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == request.auth.uid
-                    && (get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId is string)
-                    && exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId))
-                    && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.status == 'ACCEPTED'
-                    && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerId == incoming().providerId;
+      // Published only by the server, after the review check (functions/src/reviewModeration.ts),
+      // or by the operator in the admin panel: the app writes to reviewSubmissions below
+      allow create: if false;
       // The reviewed master answers the review (once or edits the answer); nothing else changes
       allow update: if hasVerifiedPhone() && isValidId(reviewId)
                     && resource.data.providerId == request.auth.uid
@@ -566,6 +570,20 @@ service cloud.firestore {
                     && incoming().providerReplyAt is string && incoming().providerReplyAt.size() <= 40;
       // The operator removes a review that breaks the rules (terms, section 7)
       allow delete: if isAdmin();
+    }
+
+    // =================== Review submissions (checked before they are published) ===================
+    // The customer's review waits here while Gemini and the suspicion checks look at it
+    // (functions/src/reviewModeration.ts). A clean review is copied to reviews at once; a doubtful one
+    // waits for the operator. The customer sees their own submission and its status.
+    match /reviewSubmissions/{reviewId} {
+      allow get: if hasVerifiedPhone() && isValidId(reviewId)
+                 && (resource == null || resource.data.customerId == request.auth.uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if hasVerifiedPhone() && notBanned() && reviewOk(reviewId)
+                    && !exists(/databases/$(database)/documents/reviews/$(reviewId));
+      // Decisions are written by the server only
+      allow update, delete: if false;
     }
 
     // =================== Customer reviews (master → customer) ===================

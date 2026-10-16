@@ -1161,7 +1161,7 @@ async function runTestSuite() {
     await test('Customer cannot submit review while request is not COMPLETED', async () => {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
-        setDoc(doc(aliceDb, 'reviews', 'req_alice_01'), {
+        setDoc(doc(aliceDb, 'reviewSubmissions', 'req_alice_01'), {
           id: 'req_alice_01',
           requestId: 'req_alice_01',
           customerId: 'user_alice',
@@ -1186,10 +1186,20 @@ async function runTestSuite() {
       await assertSucceeds(getDocs(query(collection(phoneUser('phone_review_reader').firestore(), 'reviews'), where('providerId', '==', 'prov_master1'))));
     });
 
+    await test('Customer cannot publish a review directly: it goes through the review check', async () => {
+      const aliceDb = phoneUser('user_alice').firestore();
+      await assertFails(
+        setDoc(doc(aliceDb, 'reviews', 'req_alice_01'), {
+          id: 'req_alice_01', requestId: 'req_alice_01', customerId: 'user_alice', providerId: 'prov_master1',
+          rating: 5, comment: 'Great job!', createdAt: new Date().toISOString(),
+        })
+      );
+    });
+
     await test('Customer can submit review for COMPLETED request with accepted provider', async () => {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
-        setDoc(doc(aliceDb, 'reviews', 'req_alice_01'), {
+        setDoc(doc(aliceDb, 'reviewSubmissions', 'req_alice_01'), {
           id: 'req_alice_01',
           requestId: 'req_alice_01',
           customerId: 'user_alice',
@@ -1199,6 +1209,31 @@ async function runTestSuite() {
           createdAt: new Date().toISOString(),
         })
       );
+    });
+
+    await test('The customer sees their own submission; other users and anonymous visitors cannot; only operators list them', async () => {
+      await assertSucceeds(getDoc(doc(phoneUser('user_alice').firestore(), 'reviewSubmissions', 'req_alice_01')));
+      await assertFails(getDoc(doc(phoneUser('prov_master1').firestore(), 'reviewSubmissions', 'req_alice_01')));
+      await assertFails(getDoc(doc(anonymousUser('anon_sub_reader').firestore(), 'reviewSubmissions', 'req_alice_01')));
+      await assertFails(getDocs(collection(phoneUser('user_alice').firestore(), 'reviewSubmissions')));
+      const operator = testEnv.authenticatedContext('op_reviews', { phone_number: '+77000000008', admin: true }).firestore();
+      await assertSucceeds(getDocs(collection(operator, 'reviewSubmissions')));
+      await assertSucceeds(getDoc(doc(operator, 'reviewSubmissions', 'req_alice_01')));
+    });
+
+    await test('A submission cannot be changed or withdrawn by the customer (the check decides)', async () => {
+      const aliceDb = phoneUser('user_alice').firestore();
+      await assertFails(updateDoc(doc(aliceDb, 'reviewSubmissions', 'req_alice_01'), { rating: 1 }));
+      await assertFails(updateDoc(doc(aliceDb, 'reviewSubmissions', 'req_alice_01'), { status: 'published' }));
+      await assertFails(deleteDoc(doc(aliceDb, 'reviewSubmissions', 'req_alice_01')));
+    });
+
+    // The review check publishes the review (the server writes with full access)
+    await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+      await setDoc(doc(adminContext.firestore(), 'reviews', 'req_alice_01'), {
+        id: 'req_alice_01', requestId: 'req_alice_01', customerId: 'user_alice', customerName: 'Alice',
+        providerId: 'prov_master1', providerName: 'Master Ruslan', rating: 5, comment: 'Great job!', createdAt: new Date().toISOString(),
+      });
     });
 
     // Isolated Genuine Self-Review Test on Fresh Unreviewed Request (Fixes false-positive)
@@ -1228,7 +1263,7 @@ async function runTestSuite() {
       const masterDb = phoneUser('prov_master1').firestore();
       // prov_master1 tries to create reviews/req_self_audit_01 for their own service
       await assertFails(
-        setDoc(doc(masterDb, 'reviews', 'req_self_audit_01'), {
+        setDoc(doc(masterDb, 'reviewSubmissions', 'req_self_audit_01'), {
           id: 'req_self_audit_01',
           requestId: 'req_self_audit_01',
           customerId: 'prov_master1',
@@ -1243,7 +1278,7 @@ async function runTestSuite() {
     await test('Legitimate customer can review provider on the fresh completed request', async () => {
       const charlieDb = phoneUser('user_charlie').firestore();
       await assertSucceeds(
-        setDoc(doc(charlieDb, 'reviews', 'req_self_audit_01'), {
+        setDoc(doc(charlieDb, 'reviewSubmissions', 'req_self_audit_01'), {
           id: 'req_self_audit_01',
           requestId: 'req_self_audit_01',
           customerId: 'user_charlie',
@@ -1263,6 +1298,28 @@ async function runTestSuite() {
         })
       );
       await assertFails(deleteDoc(doc(aliceDb, 'reviews', 'req_alice_01')));
+    });
+
+    await test('A published review cannot be submitted again', async () => {
+      await testEnv.withSecurityRulesDisabled(async (adminContext) => {
+        const db = adminContext.firestore();
+        await setDoc(doc(db, 'requests', 'req_published_01'), {
+          id: 'req_published_01', customerId: 'user_dana', city: 'almaty', category: 'appliances', service: 'Repair',
+          status: 'COMPLETED', selectedOfferId: 'offer_dana_m1',
+        });
+        await setDoc(doc(db, 'offers', 'offer_dana_m1'), {
+          id: 'offer_dana_m1', requestId: 'req_published_01', providerId: 'prov_master1', providerUserId: 'prov_master1', price: '9 000 ₸', status: 'ACCEPTED',
+        });
+        await setDoc(doc(db, 'reviews', 'req_published_01'), {
+          id: 'req_published_01', requestId: 'req_published_01', customerId: 'user_dana', providerId: 'prov_master1', rating: 4, createdAt: new Date().toISOString(),
+        });
+      });
+      await assertFails(
+        setDoc(doc(phoneUser('user_dana').firestore(), 'reviewSubmissions', 'req_published_01'), {
+          id: 'req_published_01', requestId: 'req_published_01', customerId: 'user_dana', providerId: 'prov_master1',
+          rating: 5, createdAt: new Date().toISOString(),
+        })
+      );
     });
 
     // =========================================================================
@@ -1894,10 +1951,36 @@ async function runTestSuite() {
         });
       });
       const review = { id: 'req_r', requestId: 'req_r', customerId: 'cust_a', providerId: 'prov_a', rating: 5, createdAt: new Date().toISOString() };
-      await assertFails(setDoc(doc(custA(), 'reviews', 'req_r'), { ...review, comment: 'x'.repeat(1001) }));
-      await assertFails(setDoc(doc(custA(), 'reviews', 'req_r'), { ...review, providerName: 'x'.repeat(101) }));
-      await assertFails(setDoc(doc(custA(), 'reviews', 'req_r'), { ...review, verifiedPurchase: true }));
-      await assertSucceeds(setDoc(doc(custA(), 'reviews', 'req_r'), { ...review, comment: 'Жақсы' }));
+      await assertFails(setDoc(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, comment: 'x'.repeat(1001) }));
+      await assertFails(setDoc(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, providerName: 'x'.repeat(101) }));
+      await assertFails(setDoc(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, verifiedPurchase: true }));
+      await assertFails(setDoc(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, comment: 'Жақсы', status: 'published' }));
+      await assertSucceeds(setDoc(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, comment: 'Жақсы' }));
+    });
+
+    await test('A blocked account cannot submit a review until the block is lifted', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        await setDoc(doc(db, 'requests', 'req_rb'), {
+          id: 'req_rb', customerId: 'cust_rb', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'COMPLETED', selectedOfferId: 'OFFER-req_rb-prov_a',
+        });
+        await setDoc(doc(db, 'offers', 'OFFER-req_rb-prov_a'), {
+          id: 'OFFER-req_rb-prov_a', requestId: 'req_rb', providerId: 'prov_a', providerUserId: 'prov_a', providerName: 'A', price: '1', status: 'ACCEPTED',
+        });
+        await setDoc(doc(db, 'bans', 'cust_rb'), { uid: 'cust_rb', reason: 'fraud', createdAt: new Date().toISOString() });
+      });
+      const sub = { id: 'req_rb', requestId: 'req_rb', customerId: 'cust_rb', providerId: 'prov_a', rating: 5, createdAt: new Date().toISOString() };
+      const ref = doc(phoneUser('cust_rb').firestore(), 'reviewSubmissions', 'req_rb');
+      await assertFails(setDoc(ref, sub));
+      await testEnv.withSecurityRulesDisabled(async (c) => deleteDoc(doc(c.firestore(), 'bans', 'cust_rb')));
+      await assertSucceeds(setDoc(ref, sub));
+    });
+
+    await test('Account suspicion signals are server-only: no app can read or write them', async () => {
+      await assertFails(getDoc(doc(custA(), 'accountSignals', 'cust_a')));
+      await assertFails(setDoc(doc(custA(), 'accountSignals', 'cust_a'), { devices: ['x'] }));
+      const operator = testEnv.authenticatedContext('op_signals', { phone_number: '+77000000007', admin: true }).firestore();
+      await assertFails(getDoc(doc(operator, 'accountSignals', 'cust_a')));
     });
 
     // ---------------- 17. Reports ----------------

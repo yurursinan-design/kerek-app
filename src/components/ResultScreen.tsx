@@ -16,6 +16,7 @@ import {
   paymentMethodLabel,
   Provider,
   ProviderOffer,
+  RatingSummary,
   RequestStatus,
   Review,
   ServiceRequest,
@@ -171,7 +172,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   }, [initialRequest, language, refreshTick]);
 
   // Average rating per provider from real reviews (shown on offer cards)
-  const [providerRatings, setProviderRatings] = useState<Record<string, { avg: number; count: number }>>({});
+  const [providerRatings, setProviderRatings] = useState<Record<string, RatingSummary>>({});
   useEffect(() => {
     const ids = Array.from(new Set(offers.map((o) => o.providerUserId || o.providerId).filter(Boolean))) as string[];
     const missing = ids.filter((id) => !(id in providerRatings));
@@ -617,8 +618,20 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                           «{existingReview.comment}»
                         </p>
                       )}
-                      <span className="text-[10px] text-emerald-700 font-semibold block">
-                        {t.thankYouNotice}
+                      <span
+                        className={`text-[10px] font-semibold block ${
+                          existingReview.moderation === 'rejected'
+                            ? 'text-rose-700'
+                            : existingReview.moderation === 'pending'
+                            ? 'text-amber-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {existingReview.moderation === 'rejected'
+                          ? t.reviewRejectedNotice
+                          : existingReview.moderation === 'pending'
+                          ? t.reviewPendingNotice
+                          : t.thankYouNotice}
                       </span>
                     </div>
                   ) : isSelfProvider ? (
@@ -973,7 +986,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                               <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
                               <span className="font-bold">{r.avg.toFixed(1)}</span>
                               <span className="text-slate-500">
-                                ({r.count} {language === 'kz' ? 'пікір' : 'отзыв.'})
+                                ({r.reviews ?? r.count} {language === 'kz' ? 'пікір' : 'отзыв.'})
                               </span>
                               {isTopMaster(r) && (
                                 <span className="ml-1 text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded-full">

@@ -4,6 +4,7 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret, defineString } from 'firebase-functions/params';
 import { allowCall, clientIp, DAY_MS } from './limits';
+import { recordLoginSignals } from './signals';
 
 /**
  * Phone login with a one-time code sent to WhatsApp (WhatsApp Business Platform, Cloud API), using
@@ -161,7 +162,7 @@ export const requestLoginCode = onCall<{ phone?: string; lang?: string }, Promis
   }
 );
 
-export const verifyLoginCode = onCall<{ phone?: string; code?: string }, Promise<{ token: string }>>(
+export const verifyLoginCode = onCall<{ phone?: string; code?: string; deviceId?: string }, Promise<{ token: string }>>(
   { region: REGION, maxInstances: 5, timeoutSeconds: 20 },
   async (request) => {
     const callerUid = request.auth?.uid;
@@ -210,6 +211,8 @@ export const verifyLoginCode = onCall<{ phone?: string; code?: string }, Promise
       }
     }
     const token = await auth.createCustomToken(uid);
+    // Which phone and network the account uses, for the review check (signals.ts); never fails the login
+    await recordLoginSignals(uid, request.data?.deviceId, clientIp(request.rawRequest));
     return { token };
   }
 );

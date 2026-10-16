@@ -9,6 +9,7 @@ import {
   ProviderOffer,
   RequestAttachment,
   RequestStatus,
+  RatingSummary,
   Review,
   ServiceRequest,
   User,
@@ -512,7 +513,7 @@ export class ResilientRepository implements Repository {
     return Array.from(map.values());
   }
 
-  async getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }> {
+  async getRatingSummary(providerIds: string[]): Promise<RatingSummary> {
     return this.executeWithFallback(
       'getRatingSummary',
       () => this.firebaseRepo.getRatingSummary(providerIds),

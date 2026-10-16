@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ReportButton } from './ReportButton';
-import { isTopMaster, Language, Provider, Review } from '../types';
+import { isTopMaster, Language, Provider, RatingSummary, Review } from '../types';
 import { translations } from '../i18n/translations';
 import { formatShortDate } from '../services/dateFormat';
 import { repository, getCurrentUserId, getFriendlyErrorMessage } from '../services';
@@ -8,7 +8,7 @@ import { isFavorite, masterProfileLink, onFavoritesChange, toggleFavorite } from
 import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
 import { PortfolioGallery } from './PortfolioPhotos';
 import { localReviewReply, replyToReview } from '../services/reviewsExtra';
-import { getProviderStats, ProviderStats, responseTimeLabel } from '../services/publicStats';
+import { getProviderStats, ProviderStats, responseTimeLabel, reviewsCountLabel, reviewsFromCustomersLabel } from '../services/publicStats';
 import {
   X,
   Heart,
@@ -74,7 +74,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
   }, [provider?.id]);
   const [isLoadingReviews, setIsLoadingReviews] = useState<boolean>(false);
   // Counted on the server over all reviews (the list below shows the newest ones)
-  const [ratingSummary, setRatingSummary] = useState<{ avg: number; count: number } | null>(null);
+  const [ratingSummary, setRatingSummary] = useState<RatingSummary | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -126,7 +126,9 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
   const t = translations[language];
 
   // Rating from real reviews: the server count over all of them, or the loaded list until it arrives
+  // Stars count each customer once (server); "N reviews" counts every published review
   const reviewsCount = ratingSummary ? ratingSummary.count : reviews.length;
+  const totalReviews = ratingSummary?.reviews ?? reviewsCount;
   const ratingAvg = ratingSummary
     ? ratingSummary.avg
     : reviews.length > 0
@@ -234,7 +236,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                   >
                     <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
                     <span>
-                      {averageRating} ({reviewsCount})
+                      {averageRating} ({totalReviews})
                     </span>
                   </span>
                 ) : (
@@ -442,7 +444,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                 <span className="text-[11px] font-bold text-amber-900 bg-amber-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
                   <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
                   <span>
-                    {averageRating} / 5 ({reviewsCount} {t.reviewsCountUnit})
+                    {averageRating} / 5 ({reviewsCountLabel(totalReviews, language === 'kz' ? 'kz' : 'ru')})
                   </span>
                 </span>
               )}
@@ -471,10 +473,10 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                 </div>
                 <div className="text-right">
                   <span className="text-xs font-bold text-slate-800 block">
-                    {reviewsCount} {language === 'kz' ? 'пікір' : (reviewsCount === 1 ? 'отзыв' : reviewsCount < 5 ? 'отзыва' : 'отзывов')}
+                    {reviewsFromCustomersLabel(totalReviews, reviewsCount, language === 'kz' ? 'kz' : 'ru')}
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    {language === 'kz' ? 'Клиенттер бағасы' : 'Оценки клиентов'}
+                    {language === 'kz' ? 'Әр клиент бір рет есептеледі' : 'Каждый клиент учтён один раз'}
                   </span>
                 </div>
               </div>

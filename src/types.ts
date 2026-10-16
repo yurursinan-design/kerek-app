@@ -270,6 +270,19 @@ export interface Review {
   /** The master's public answer to the review */
   providerReply?: string;
   providerReplyAt?: string;
+  /**
+   * The customer's own view of their review while it is checked before publishing:
+   * 'pending' (being checked), 'published', or 'rejected' (did not pass the rules).
+   * Absent on published reviews read from a master's profile.
+   */
+  moderation?: 'pending' | 'published' | 'rejected';
+}
+
+/** A master's rating: each customer counted once (count), and all published reviews (reviews) */
+export interface RatingSummary {
+  avg: number;
+  count: number;
+  reviews?: number;
 }
 
 /** The master's rating of the customer after a finished job (seen by masters) */

@@ -186,9 +186,10 @@ export const translations = {
     submitRatingBtn: 'Жіберу',
     yourReviewTitle: 'Сіздің бағаңыз:',
     thankYouNotice: 'Рахмет сізге!',
+    reviewPendingNotice: 'Пікіріңіз тексерілуде: қысқа уақытта шебердің парақшасында шығады.',
+    reviewRejectedNotice: 'Пікір жарияланбады: ол ережелерге сай келмеді.',
     reviewsSectionTitle: 'Пікірлер',
     noReviewsYet: 'Әзірше пікірлер жоқ',
-    reviewsCountUnit: 'пікір',
     selectRatingPrompt: 'Бағаны таңдаңыз (1-5)',
 
     // In-App Chat
@@ -432,9 +433,10 @@ export const translations = {
     submitRatingBtn: 'Отправить',
     yourReviewTitle: 'Ваша оценка:',
     thankYouNotice: 'Спасибо за оценку!',
+    reviewPendingNotice: 'Отзыв на проверке: скоро появится на странице мастера.',
+    reviewRejectedNotice: 'Отзыв не опубликован: он не прошёл проверку правил.',
     reviewsSectionTitle: 'Отзывы',
     noReviewsYet: 'Пока нет отзывов',
-    reviewsCountUnit: 'отзывов',
     selectRatingPrompt: 'Выберите оценку (1-5)',
 
     // In-App Chat

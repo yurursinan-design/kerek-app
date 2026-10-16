@@ -43,6 +43,7 @@ import {
   RequestAttachment,
   RequestLocation,
   RequestStatus,
+  RatingSummary,
   Review,
   sanitizeFileName,
   ServiceRequest,
@@ -1855,15 +1856,16 @@ export class FirebaseRepository implements Repository {
     };
 
     try {
-      const reviewRef = doc(firestore, 'reviews', id);
-      // Check if doc already exists to ensure idempotency
-      const existingSnap = await getDoc(reviewRef);
-      if (existingSnap.exists()) {
+      // The review goes to the check first (Gemini and suspicion signals, functions/src/reviewModeration.ts);
+      // a clean one appears on the master's profile within moments, a doubtful one after the operator looks
+      const submissionRef = doc(firestore, 'reviewSubmissions', id);
+      const [published, submitted] = await Promise.all([getDoc(doc(firestore, 'reviews', id)), getDoc(submissionRef)]);
+      if (published.exists() || submitted.exists()) {
         throw new Error('Duplicate Review Error: A review already exists for this completed request');
       }
 
-      await setDoc(reviewRef, sanitizeForFirestore(newReview));
-      return newReview;
+      await setDoc(submissionRef, sanitizeForFirestore(newReview));
+      return { ...newReview, moderation: 'pending' };
     } catch (err: any) {
       if (err?.message?.includes('Duplicate Review Error')) {
         throw err;
@@ -1876,26 +1878,45 @@ export class FirebaseRepository implements Repository {
         msg.includes('Missing or insufficient permissions')
       ) {
         console.warn(
-          `[FirebaseRepository] Note: Cloud Firestore review write on 'reviews/${id}' restricted by security rules. Falling back gracefully to LocalRepository.`
+          `[FirebaseRepository] Note: Cloud Firestore review write on 'reviewSubmissions/${id}' restricted by security rules. Falling back gracefully to LocalRepository.`
         );
         throw new Error(`FirestorePermissionDenied: ${msg}`);
       }
-      handleFirestoreError(err, OperationType.WRITE, `reviews/${id}`);
+      handleFirestoreError(err, OperationType.WRITE, `reviewSubmissions/${id}`);
     }
   }
 
-  /** Average rating and number of reviews, counted on the server (no review documents downloaded). */
-  async getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }> {
+  /**
+   * A master's rating. The server keeps it in providerStats, counting each customer once (their newest
+   * review), so a pile of reviews from a second account of the same person doesn't lift it. Masters
+   * whose rating was never counted there yet (older data) are counted from the reviews directly.
+   */
+  async getRatingSummary(providerIds: string[]): Promise<RatingSummary> {
     const ids = Array.from(new Set(providerIds.map((id) => (id || '').trim()).filter(Boolean))).slice(0, 10);
-    if (ids.length === 0) return { avg: 0, count: 0 };
+    if (ids.length === 0) return { avg: 0, count: 0, reviews: 0 };
     await ensureFirebaseAuth();
     const firestore = this.ensureDb();
+    const stats = await Promise.all(ids.map((id) => getDoc(doc(firestore, 'providerStats', id)).catch(() => null)));
+    const counted = stats
+      .map((s) => (s?.exists() ? s.data() : null))
+      .filter((d): d is NonNullable<typeof d> => Boolean(d) && typeof d!.ratingCount === 'number');
+    if (counted.length > 0) {
+      let people = 0;
+      let total = 0;
+      let reviews = 0;
+      for (const d of counted) {
+        people += Number(d.ratingCount) || 0;
+        total += Number(d.ratingTotal) || 0;
+        reviews += Number(d.reviewCount) || 0;
+      }
+      return { count: people, avg: people ? total / people : 0, reviews };
+    }
     const snap = await getAggregateFromServer(query(collection(firestore, 'reviews'), where('providerId', 'in', ids)), {
       total: count(),
       avgRating: average('rating'),
     });
     const { total, avgRating } = snap.data();
-    return { count: total || 0, avg: total ? Number(avgRating) || 0 : 0 };
+    return { count: total || 0, avg: total ? Number(avgRating) || 0 : 0, reviews: total || 0 };
   }
 
   async getReviews(filter?: ReviewFilter): Promise<Review[]> {
@@ -1910,6 +1931,18 @@ export class FirebaseRepository implements Repository {
         const snap = await getDoc(reviewRef);
         if (snap.exists()) {
           reviews.push(snap.data() as Review);
+          return reviews;
+        }
+        // Not published (yet): the customer's own submission, with where the check stands
+        try {
+          const sub = await getDoc(doc(firestore, 'reviewSubmissions', filter.requestId.trim()));
+          if (sub.exists()) {
+            const data = sub.data();
+            const state = data.status === 'rejected' ? 'rejected' : data.status === 'published' ? 'published' : 'pending';
+            reviews.push({ ...(data as Review), moderation: state });
+          }
+        } catch {
+          // Someone else's submission: not readable, nothing to show
         }
         return reviews;
       }

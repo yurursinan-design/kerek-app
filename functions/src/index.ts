@@ -21,7 +21,11 @@ export {
 // The operator's panel: admin claim for the numbers in config/admins; see admin.ts
 export { claimAdmin } from './admin';
 // Jobs done, answer speed and typical prices, counted from real events; see stats.ts
-export { statsOnOfferCreated, statsOnRequestCompleted } from './stats';
+export { statsOnOfferCreated, statsOnRequestCompleted, ratingsOnReviewWritten } from './stats';
+// Reviews are checked (Gemini and suspicion signals) before they are published; see reviewModeration.ts
+export { moderateReviewSubmission, decideReview } from './reviewModeration';
+// Which phone and network accounts log in from, for the review check; see signals.ts
+export { cleanupAccountData } from './signals';
 // Copy of all personal data in Kazakhstan (Law 94-V art. 12 p. 2); see kzMirror.ts
 export {
   kzMirrorUsers,
@@ -38,6 +42,8 @@ export {
   kzMirrorPushTokens,
   kzMirrorCustomerReviews,
   kzMirrorBans,
+  kzMirrorReviewSubmissions,
+  kzMirrorAccountSignals,
   kzMirrorFileSaved,
   kzMirrorFileDeleted,
 } from './kzMirror';
