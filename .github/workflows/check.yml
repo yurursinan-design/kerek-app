@@ -104,3 +104,25 @@ jobs:
         run: |
           gcloud services list --enabled --project "$FIREBASE_PROJECT_ID" --format='value(config.name)' \
             | grep -E 'generativelanguage|aiplatform|identitytoolkit' || echo "Bu API'lerin hiçbiri açık değil"
+
+      - name: Herkese açık anahtarlarla Gemini çağrılabiliyor mu
+        # The web key (in the site) and the Android key (in every APK) are public by design; what keeps
+        # them from spending the project's Gemini credit is the list of APIs each key may call. Lists
+        # models only (free); prints the answer code and reason, never the key.
+        if: steps.mode.outputs.mode == 'keys'
+        continue-on-error: true
+        run: |
+          WEB_KEY=$(grep -h 'VITE_FIREBASE_API_KEY:' .github/workflows/preview.yml | head -1 | awk '{print $2}')
+          ANDROID_KEY=$(jq -r '.client[0].api_key[0].current_key' android/app/google-services.json)
+          echo "::add-mask::$WEB_KEY"; echo "::add-mask::$ANDROID_KEY"
+          try() {
+            code=$(curl -sS -o out.json -w '%{http_code}' "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1" -H "x-goog-api-key: $2" "${@:3}")
+            reason=$(jq -r '.error.details[]? | select(.reason) | .reason' out.json 2>/dev/null | head -1)
+            if [ "$code" = 200 ]; then verdict="AÇIK: bu anahtarla Gemini çağrılabiliyor"; else verdict="kapalı"; fi
+            echo "$1 -> HTTP $code ${reason:-} ($verdict)"
+          }
+          try "Web anahtarı, başlıksız" "$WEB_KEY"
+          try "Web anahtarı, tapsyr.web.app gibi davranarak" "$WEB_KEY" -H 'Referer: https://tapsyr.web.app/'
+          try "Android anahtarı, başlıksız" "$ANDROID_KEY"
+          try "Android anahtarı, uygulama gibi davranarak" "$ANDROID_KEY" -H 'X-Android-Package: kerek.kz.app'
+          rm -f out.json
