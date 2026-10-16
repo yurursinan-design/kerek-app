@@ -3,6 +3,8 @@
 #   gemini   is there a Gemini key in Secret Manager (its versions, never its value), does the live
 #            parser read three sample requests (through a temporary anonymous session that is deleted
 #            afterwards), and how did parseServiceRequest answer in the last 14 days
+#   keys     which APIs, websites and Android apps each Google API key is limited to (never the key
+#            itself), and whether the Gemini (Generative Language) API is switched on in the project
 # Nothing is deployed or changed.
 name: Kontrol
 
@@ -26,12 +28,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Ne kontrol edilecek
+        id: mode
         env:
           MSG: ${{ github.event.head_commit.message }}
         run: |
           mode=$(printf '%s\n' "$MSG" | head -n1 | awk '{print $2}' | tr -cd 'a-z')
-          case "$mode" in gemini) ;; *) echo "Bilinmeyen kontrol: $mode (gemini)"; exit 1 ;; esac
+          case "$mode" in gemini|keys) ;; *) echo "Bilinmeyen kontrol: $mode (gemini, keys)"; exit 1 ;; esac
           echo "Kontrol: $mode"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
 
       - name: Google Cloud'a giriş
         uses: google-github-actions/auth@v2
@@ -42,11 +46,13 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
 
       - name: Anahtar Secret Manager'da mı
+        if: steps.mode.outputs.mode == 'gemini'
         run: |
           gcloud secrets versions list GEMINI_API_KEY --project "$FIREBASE_PROJECT_ID" \
             --format='table(name,state,createTime)'
 
       - name: Canlı fonksiyon örnek talepleri okuyor mu
+        if: steps.mode.outputs.mode == 'gemini'
         # Same path as a visitor in the app: a temporary anonymous session (public web key) calls
         # parseServiceRequest; the session is deleted at the end
         run: |
@@ -72,6 +78,7 @@ jobs:
           exit $fail
 
       - name: Canlı uygulamada son 14 gün
+        if: steps.mode.outputs.mode == 'gemini'
         # The deploy account may not be allowed to read logs
         continue-on-error: true
         run: |
@@ -83,3 +90,17 @@ jobs:
           echo "Uyarı ve hatalar (son 20):"
           gcloud logging read "$filter AND severity>=WARNING AND textPayload:*" --project "$FIREBASE_PROJECT_ID" \
             --freshness=14d --limit=20 --format='value(timestamp,severity,textPayload)' | cut -c1-300
+
+      - name: API anahtarlarının kısıtlamaları
+        if: steps.mode.outputs.mode == 'keys'
+        continue-on-error: true
+        run: |
+          gcloud services api-keys list --project "$FIREBASE_PROJECT_ID" --format=json | jq -r '.[] |
+            "\(.displayName // .name | tostring)\n  API: \((.restrictions.apiTargets // []) | map(.service) | if length == 0 then "KISITLAMA YOK (her API)" else join(", ") end)\n  Web siteleri: \((.restrictions.browserKeyRestrictions.allowedReferrers // []) | join(", "))\n  Android: \((.restrictions.androidKeyRestrictions.allowedApplications // []) | map(.packageName) | join(", "))"'
+
+      - name: Gemini API projede açık mı
+        if: steps.mode.outputs.mode == 'keys'
+        continue-on-error: true
+        run: |
+          gcloud services list --enabled --project "$FIREBASE_PROJECT_ID" --format='value(config.name)' \
+            | grep -E 'generativelanguage|aiplatform|identitytoolkit' || echo "Bu API'lerin hiçbiri açık değil"
