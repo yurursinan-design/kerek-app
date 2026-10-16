@@ -12,6 +12,7 @@ import {
   LifeBuoy,
   Lock,
   LogOut,
+  Mail,
   MapPin,
   Megaphone,
   Pencil,
@@ -43,7 +44,7 @@ import {
   requestNotificationPermission,
 } from '../services/pushNotifications';
 import { PUBLIC_SITE_URL } from '../config/site';
-import { SUPPORT_EMAIL, SUPPORT_TELEGRAM } from '../config/support';
+import { SUPPORT_EMAIL, SUPPORT_TELEGRAM, SUPPORT_WHATSAPP_DISPLAY, supportWhatsAppHref } from '../config/support';
 
 const L = {
   hello: { kz: 'Сәлем', ru: 'Привет' },
@@ -102,6 +103,9 @@ const L = {
   invite: { kz: 'Достарыңызға ұсыныңыз', ru: 'Посоветуйте друзьям' },
   inviteSub: { kz: 'Tapsyr сілтемесін жіберіңіз', ru: 'Отправьте ссылку на Tapsyr' },
   support: { kz: 'Көмек және қолдау', ru: 'Помощь и поддержка' },
+  supportWhatsApp: { kz: 'WhatsApp-та жазыңыз', ru: 'Напишите в WhatsApp' },
+  supportHello: { kz: 'Сәлеметсіз бе! Tapsyr бойынша сұрағым бар: ', ru: 'Здравствуйте! У меня вопрос по Tapsyr: ' },
+  supportEmail: { kz: 'Электрондық пошта', ru: 'Электронная почта' },
   terms: { kz: 'Пайдалану шарттары', ru: 'Условия использования' },
   privacy: { kz: 'Құпиялылық саясаты', ru: 'Политика конфиденциальности' },
   admin: { kz: 'Басқару панелі', ru: 'Панель управления' },
@@ -520,7 +524,9 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
         { value: String(counts.done), label: tx('statDone'), onClick: onOpenRequests },
       ];
 
-  const supportHref = SUPPORT_TELEGRAM ? `https://t.me/${SUPPORT_TELEGRAM}` : SUPPORT_EMAIL ? `mailto:${SUPPORT_EMAIL}` : '';
+  // WhatsApp first (what people here use), then Telegram, with e-mail as its own row
+  const whatsappHref = supportWhatsAppHref(tx('supportHello'));
+  const supportHref = whatsappHref || (SUPPORT_TELEGRAM ? `https://t.me/${SUPPORT_TELEGRAM}` : '');
   const iconCls = 'w-5 h-5';
 
   return (
@@ -838,10 +844,19 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
           {supportHref && (
             <Row
               icon={<LifeBuoy className={iconCls} />}
-              tint="bg-sky-50 text-sky-600"
+              tint="bg-emerald-50 text-emerald-600"
               label={tx('support')}
-              sub={SUPPORT_TELEGRAM ? `@${SUPPORT_TELEGRAM}` : SUPPORT_EMAIL}
+              sub={whatsappHref ? `${tx('supportWhatsApp')} · ${SUPPORT_WHATSAPP_DISPLAY}` : `@${SUPPORT_TELEGRAM}`}
               href={supportHref}
+            />
+          )}
+          {SUPPORT_EMAIL && (
+            <Row
+              icon={<Mail className={iconCls} />}
+              tint="bg-sky-50 text-sky-600"
+              label={tx('supportEmail')}
+              sub={SUPPORT_EMAIL}
+              href={`mailto:${SUPPORT_EMAIL}`}
             />
           )}
           <Row

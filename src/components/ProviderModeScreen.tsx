@@ -60,7 +60,7 @@ import {
 } from 'lucide-react';
 import { requestWhenLabel } from '../services/dateFormat';
 import { masterProfileLink } from '../services/favorites';
-import { SUPPORT_EMAIL } from '../config/support';
+import { SUPPORT_EMAIL, supportWhatsAppHref } from '../config/support';
 
 export type ProviderTab = 'new' | 'offers' | 'active';
 
@@ -1060,15 +1060,19 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     <Share2 className="w-3.5 h-3.5" />
                     {language === 'kz' ? 'Профиль сілтемесін WhatsApp-та бөлісу' : 'Поделиться профилем в WhatsApp'}
                   </button>
-                  {!provider.iinVerified && SUPPORT_EMAIL && (
+                  {!provider.iinVerified && (supportWhatsAppHref() || SUPPORT_EMAIL) && (
                     <a
-                      href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
-                        language === 'kz' ? 'Жеке басты тексеру (Tapsyr шебері)' : 'Проверка личности (мастер Tapsyr)'
-                      )}&body=${encodeURIComponent(
-                        language === 'kz'
-                          ? `Сәлеметсіз бе! Жеке басымды тексертіп, «Жеке басы тексерілген» белгісін алғым келеді.\nШебер: ${provider.name}\nID: ${provider.id}`
-                          : `Здравствуйте! Хочу пройти проверку личности и получить значок «Личность проверена».\nМастер: ${provider.name}\nID: ${provider.id}`
-                      )}`}
+                      // WhatsApp when the support number is set, otherwise an e-mail with the same text
+                      href={(() => {
+                        const body =
+                          language === 'kz'
+                            ? `Сәлеметсіз бе! Жеке басымды тексертіп, «Жеке басы тексерілген» белгісін алғым келеді.\nШебер: ${provider.name}\nID: ${provider.id}`
+                            : `Здравствуйте! Хочу пройти проверку личности и получить значок «Личность проверена».\nМастер: ${provider.name}\nID: ${provider.id}`;
+                        const subject = language === 'kz' ? 'Жеке басты тексеру (Tapsyr шебері)' : 'Проверка личности (мастер Tapsyr)';
+                        return supportWhatsAppHref(body) || `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                      })()}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="min-h-[34px] px-2.5 rounded-lg bg-sky-50 text-sky-800 text-[11px] font-bold inline-flex items-center gap-1"
                     >
                       <ShieldCheck className="w-3.5 h-3.5" />
