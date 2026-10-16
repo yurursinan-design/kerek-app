@@ -42,6 +42,14 @@ jobs:
           workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
           service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
 
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Cloud Storage hizmet hesabı
+        # Storage triggers need the Cloud Storage service agent, which Google creates the first time
+        # its address is asked for; it then needs Pub/Sub Publisher, granted once by the owner
+        continue-on-error: true
+        run: gcloud storage service-agent --project "$FIREBASE_PROJECT_ID"
+
       - name: Seçili fonksiyonları yükle
         run: |
           # Only function targets are accepted here
