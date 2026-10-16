@@ -19,6 +19,7 @@ const ResultScreen = lazy(() => import('./components/ResultScreen').then((m) => 
 const MyRequestsScreen = lazy(() => import('./components/MyRequestsScreen').then((m) => ({ default: m.MyRequestsScreen })));
 const ProviderModeScreen = lazy(() => import('./components/ProviderModeScreen').then((m) => ({ default: m.ProviderModeScreen })));
 const AdminScreen = lazy(() => import('./components/AdminScreen').then((m) => ({ default: m.AdminScreen })));
+const ProfileScreen = lazy(() => import('./components/ProfileScreen').then((m) => ({ default: m.ProfileScreen })));
 const ProviderProfileModal = lazy(() => import('./components/ProviderProfileModal').then((m) => ({ default: m.ProviderProfileModal })));
 import type { ProviderTab } from './components/ProviderModeScreen';
 import { RoleChooser, AppMode } from './components/RoleChooser';
@@ -29,6 +30,7 @@ import { logoutToAnonymous, requiresPhoneLogin } from './services/phoneAuth';
 import { startPushNotifications } from './services/pushNotifications';
 import { ActiveJobsError, deleteMyAccount, RecentLoginRequiredError } from './services/account';
 import { checkAdminRole } from './services/admin';
+import { forgetCachedNames } from './services/profile';
 import { generateRequestId } from './services/ids';
 import { localRepository } from './services/localRepository';
 import {
@@ -185,6 +187,7 @@ export default function App() {
   const handleDeleteAccount = async (): Promise<void> => {
     try {
       await deleteMyAccount();
+      forgetCachedNames();
       // Start over as a new anonymous visitor
       window.location.replace('/');
     } catch (err) {
@@ -512,8 +515,27 @@ export default function App() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await logoutToAnonymous();
+      forgetCachedNames();
+      setAppMode('customer');
+      setActiveTab('home');
+      setCurrentScreen('home');
+      setActiveRequest(null);
+      setExtractedNeed(null);
+      window.scrollTo({ top: 0 });
+    } catch (err) {
+      setAppError(getFriendlyErrorMessage(err, language));
+    }
+  };
+
   // Back actions
   const handleBack = () => {
+    if (appMode === 'provider' && activeTab === 'profile') {
+      setActiveTab('provider-mode');
+      return;
+    }
     if (appMode === 'provider') {
       // Provider side: "back" returns to the new-requests list
       if (providerTab !== 'new') setProviderTab('new');
@@ -536,7 +558,10 @@ export default function App() {
   // Phone/browser back button: while the user is away from the start screen, keep one history
   // entry so "back" steps back inside the app instead of leaving it.
   const isAtRoot =
-    !appMode || (appMode === 'provider' ? providerTab === 'new' : activeTab === 'home' && currentScreen === 'home');
+    !appMode ||
+    (appMode === 'provider'
+      ? activeTab === 'provider-mode' && providerTab === 'new'
+      : activeTab === 'home' && currentScreen === 'home');
   const handleBackRef = useRef(handleBack);
   handleBackRef.current = handleBack;
 
@@ -561,7 +586,7 @@ export default function App() {
 
   // Keep the visible tab consistent with the chosen side of the app
   useEffect(() => {
-    if (appMode === 'provider' && activeTab !== 'provider-mode') setActiveTab('provider-mode');
+    if (appMode === 'provider' && activeTab !== 'provider-mode' && activeTab !== 'profile') setActiveTab('provider-mode');
     if (appMode === 'customer' && activeTab === 'provider-mode') setActiveTab('home');
   }, [appMode, activeTab]);
 
@@ -726,8 +751,8 @@ export default function App() {
           }
         }
         await auth?.authStateReady?.();
-        if (saved.activeTab === 'my-requests') {
-          setActiveTab('my-requests');
+        if (saved.activeTab === 'my-requests' || saved.activeTab === 'profile') {
+          setActiveTab(saved.activeTab);
         } else if (saved.activeTab === 'provider-mode') {
           if (!requiresPhoneLogin()) setActiveTab('provider-mode');
         } else if (saved.currentScreen === 'results' && saved.requestId) {
@@ -821,7 +846,7 @@ export default function App() {
             !appMode
               ? 'home'
               : appMode === 'provider'
-              ? providerTab === 'new'
+              ? providerTab === 'new' && activeTab !== 'profile'
                 ? 'home'
                 : 'results'
               : activeTab !== 'home'
@@ -839,21 +864,8 @@ export default function App() {
           onSelectNotification={handleNotificationClick}
           showAccount={isFirebaseConfigured()}
           phoneNumber={phoneNumber}
-          onOpenAdmin={isAdmin ? () => setAdminOpen(true) : undefined}
           onLoginClick={() => setPhoneLogin('header')}
-          onLogout={async () => {
-            try {
-              await logoutToAnonymous();
-              setAppMode('customer');
-              setActiveTab('home');
-              setCurrentScreen('home');
-              setActiveRequest(null);
-              setExtractedNeed(null);
-            } catch (err) {
-              setAppError(getFriendlyErrorMessage(err, language));
-            }
-          }}
-          onDeleteAccount={handleDeleteAccount}
+          onOpenProfile={() => handleTabChange('profile')}
         />
 
         <PhoneLoginModal
@@ -1026,6 +1038,31 @@ export default function App() {
             />
           )}
 
+          {appMode && activeTab === 'profile' && (
+            <ProfileScreen
+              language={language}
+              onLanguageChange={setLanguage}
+              mode={appMode}
+              uid={authUid || getCurrentUserId()}
+              phoneNumber={phoneNumber}
+              cloud={isFirebaseConfigured()}
+              isAdmin={isAdmin}
+              requests={customerRequests}
+              onLogin={() => setPhoneLogin('header')}
+              onLogout={handleLogout}
+              onDeleteAccount={handleDeleteAccount}
+              onSwitchMode={appMode === 'provider' ? enterCustomerMode : enterProviderMode}
+              onOpenRequests={() => handleTabChange('my-requests')}
+              onOpenAdmin={() => setAdminOpen(true)}
+              onOpenMaster={(prov) => setSharedMaster(prov)}
+              onOpenMasterSettings={() => {
+                setProviderTab('new');
+                setActiveTab('provider-mode');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
+          )}
+
           {appMode && activeTab === 'provider-mode' && (
             <ProviderModeScreen
               language={language}
@@ -1053,6 +1090,7 @@ export default function App() {
             onTabChange={handleTabChange}
             onProviderTabChange={(tab) => {
               setProviderTab(tab);
+              setActiveTab('provider-mode');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onSwitchMode={appMode === 'provider' ? enterCustomerMode : enterProviderMode}

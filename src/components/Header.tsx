@@ -1,10 +1,7 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { AppNotification, Language } from '../types';
-import { ArrowLeft, Trash2, UserRound, LogOut, ShieldCheck } from 'lucide-react';
-import { maskPhone } from '../services/phoneAuth';
+import { ArrowLeft, UserRound } from 'lucide-react';
 import { NotificationBell } from './NotificationBell';
-import { LegalLinks } from './LegalModal';
-import { SUPPORT_EMAIL, SUPPORT_TELEGRAM } from '../config/support';
 
 interface HeaderProps {
   currentScreen: 'home' | 'interpretation' | 'results';
@@ -21,11 +18,8 @@ interface HeaderProps {
   showAccount?: boolean;
   phoneNumber?: string | null;
   onLoginClick?: () => void;
-  onLogout?: () => void;
-  /** Deletes the account; rejects with a message to show if it fails */
-  onDeleteAccount?: () => Promise<void>;
-  /** Opens the operator's panel (only for operator accounts) */
-  onOpenAdmin?: () => void;
+  /** Opens the profile tab (account, settings, logout) */
+  onOpenProfile?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -41,14 +35,9 @@ export const Header: React.FC<HeaderProps> = ({
   showAccount = false,
   phoneNumber = null,
   onLoginClick,
-  onLogout,
-  onDeleteAccount,
-  onOpenAdmin,
+  onOpenProfile,
 }) => {
-  const [showAccountMenu, setShowAccountMenu] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const accountLabel = 'Аккаунт';
+  const accountLabel = 'Профиль';
   return (
     <>
       <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
@@ -111,114 +100,19 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             </div>
 
-            {/* Phone login: "log in" when not verified, otherwise the masked number with a log-out option */}
+            {/* Account: "log in" when not verified, otherwise the profile tab */}
             {showAccount && (
-              <div className="relative">
-                <button
-                  type="button"
-                  aria-label={accountLabel}
-                  aria-expanded={showAccountMenu}
-                  onClick={() => (phoneNumber ? setShowAccountMenu((v) => !v) : onLoginClick?.())}
-                  className={`relative min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center transition-colors ${
-                    phoneNumber ? 'text-emerald-700 hover:bg-emerald-50' : 'text-slate-500 hover:bg-slate-100'
-                  }`}
-                >
-                  <UserRound className="w-5 h-5" />
-                  {phoneNumber && <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-500" />}
-                </button>
-                {phoneNumber && showAccountMenu && (
-                  <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl p-3 space-y-2">
-                    <div className="text-[11px] text-slate-500">
-                      {language === 'kz' ? 'Расталған нөмір' : 'Подтверждённый номер'}
-                    </div>
-                    <div className="text-sm font-bold text-slate-900">{maskPhone(phoneNumber)}</div>
-                    {onOpenAdmin && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowAccountMenu(false);
-                          onOpenAdmin();
-                        }}
-                        className="w-full min-h-[40px] rounded-xl bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold flex items-center justify-center gap-1.5"
-                      >
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                        <span>{language === 'kz' ? 'Басқару панелі' : 'Панель управления'}</span>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowAccountMenu(false);
-                        onLogout?.();
-                      }}
-                      className="w-full min-h-[40px] rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold flex items-center justify-center gap-1.5"
-                    >
-                      <LogOut className="w-3.5 h-3.5" />
-                      <span>{language === 'kz' ? 'Шығу' : 'Выйти'}</span>
-                    </button>
-
-                    {onDeleteAccount && !confirmDelete && (
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDelete(true)}
-                        className="w-full min-h-[40px] rounded-xl text-rose-700 hover:bg-rose-50 text-xs font-bold flex items-center justify-center gap-1.5"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>{language === 'kz' ? 'Аккаунтты жою' : 'Удалить аккаунт'}</span>
-                      </button>
-                    )}
-
-                    {onDeleteAccount && confirmDelete && (
-                      <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 space-y-2">
-                        <p className="text-[11px] text-rose-900 leading-relaxed">
-                          {language === 'kz'
-                            ? 'Профиліңіз, байланыс деректеріңіз және аккаунтыңыз жойылады, ашық өтініштер жабылады. Мұны қайтару мүмкін емес.'
-                            : 'Профиль, контактные данные и аккаунт будут удалены, открытые заявки закроются. Это нельзя отменить.'}
-                        </p>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            disabled={deleting}
-                            onClick={async () => {
-                              setDeleting(true);
-                              try {
-                                await onDeleteAccount();
-                                setShowAccountMenu(false);
-                              } finally {
-                                setDeleting(false);
-                                setConfirmDelete(false);
-                              }
-                            }}
-                            className="flex-1 min-h-[38px] rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold"
-                          >
-                            {language === 'kz' ? 'Жою' : 'Удалить'}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={deleting}
-                            onClick={() => setConfirmDelete(false)}
-                            className="flex-1 min-h-[38px] rounded-lg bg-white border border-slate-200 text-slate-700 text-xs font-bold"
-                          >
-                            {language === 'kz' ? 'Болдырмау' : 'Отмена'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {(SUPPORT_TELEGRAM || SUPPORT_EMAIL) && (
-                      <a
-                        href={SUPPORT_TELEGRAM ? `https://t.me/${SUPPORT_TELEGRAM}` : `mailto:${SUPPORT_EMAIL}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block w-full min-h-[44px] rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 text-center leading-[44px]"
-                      >
-                        {language === 'kz' ? 'Көмек және қолдау' : 'Помощь и поддержка'}
-                      </a>
-                    )}
-                    <LegalLinks language={language} className="block text-[10px] text-slate-500 text-center leading-relaxed pt-1" />
-                  </div>
-                )}
-              </div>
+              <button
+                type="button"
+                aria-label={accountLabel}
+                onClick={() => (phoneNumber ? onOpenProfile?.() : onLoginClick?.())}
+                className={`relative min-h-[40px] min-w-[40px] rounded-xl flex items-center justify-center transition-colors ${
+                  phoneNumber ? 'text-emerald-700 hover:bg-emerald-50' : 'text-slate-500 hover:bg-slate-100'
+                }`}
+              >
+                <UserRound className="w-5 h-5" />
+                {phoneNumber && <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-emerald-500" />}
+              </button>
             )}
 
             {/* In-App Notifications Bell */}

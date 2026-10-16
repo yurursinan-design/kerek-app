@@ -19,6 +19,7 @@ export default defineConfig({
     },
   },
   define: {
+    __APP_VERSION__: JSON.stringify('emulator'),
     // src/services/firebase.ts connects to the emulators when these are present
     'process.env': JSON.stringify({
       VITE_USE_EMULATOR: 'true',
