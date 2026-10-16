@@ -61,8 +61,9 @@ jobs:
       - name: Önizleme linki oluştur
         id: channel
         run: |
+          # Previews stay on the project's first site (its preview addresses are allowed for sign-in)
           out=$(npx --yes firebase-tools@15.31.0 hosting:channel:deploy "pr-${{ github.event.pull_request.number }}" \
-            --expires 7d --project "$FIREBASE_PROJECT_ID" --json --non-interactive)
+            --only legacy --expires 7d --project "$FIREBASE_PROJECT_ID" --json --non-interactive)
           echo "$out"
           url=$(echo "$out" | jq -r '.result[].url' | head -n 1)
           echo "url=$url" >> "$GITHUB_OUTPUT"

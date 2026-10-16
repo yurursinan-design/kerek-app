@@ -5,12 +5,32 @@
   "targets": {
     "kerek-9d153": {
       "storage": {
-        "main": ["kerek-9d153.firebasestorage.app"]
+        "main": [
+          "kerek-9d153.firebasestorage.app"
+        ]
+      },
+      "hosting": {
+        "app": [
+          "tapsyr"
+        ],
+        "legacy": [
+          "kerek-9d153"
+        ]
       }
     },
     "demo-kerek": {
       "storage": {
-        "main": ["demo-kerek.appspot.com"]
+        "main": [
+          "demo-kerek.appspot.com"
+        ]
+      },
+      "hosting": {
+        "app": [
+          "demo-kerek"
+        ],
+        "legacy": [
+          "demo-kerek-legacy"
+        ]
       }
     }
   }

@@ -2,7 +2,12 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { startDialogA11y } from './services/dialogA11y';
+import { legacyRedirectTarget, MOVE_TO_NEW_ADDRESS } from './config/site';
 import './index.css';
+
+// Opened on the project's old address: continue on the app's own address (same page and link)
+const movedTo = MOVE_TO_NEW_ADDRESS ? legacyRedirectTarget(window.location) : null;
+if (movedTo) window.location.replace(movedTo);
 
 // Keyboard and focus handling for all dialogs (Escape, focus kept inside, focus returned)
 startDialogA11y();
@@ -19,8 +24,10 @@ window.addEventListener('vite:preloadError', (event) => {
   window.location.reload();
 });
 
-createRoot(document.getElementById('root')!).render(
-  <ErrorBoundary>
-    <App />
-  </ErrorBoundary>
-);
+if (!movedTo) {
+  createRoot(document.getElementById('root')!).render(
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
