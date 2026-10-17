@@ -5,7 +5,7 @@ import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { defineSecret } from 'firebase-functions/params';
 import { GEMINI_CONFIG } from './config';
 import { parseTextWithGemini, ParsedServiceRequest } from './geminiParser';
-import { allowCall, clientIp, DAY_MS } from './limits';
+import { allowCall, allowCallOnce, clientIp, DAY_MS, tooOldToRetry } from './limits';
 
 // Phone login with a one-time code sent to WhatsApp; see whatsappLogin.ts
 export { requestLoginCode, verifyLoginCode } from './whatsappLogin';
@@ -164,120 +164,117 @@ export const parseServiceRequest = onCall<
   }
 );
 
+/** Providers fetched per query page when a new request is matched (all pages are read) */
+const MATCH_PAGE = 300;
+
 /**
- * Triggered on new service request creation in Firestore.
- * Automatically notifies providers matching the same cityId and categoryId.
+ * Alerts every matching provider (same city, works in the request's group) about a new request.
+ * All matching profiles are read, page by page. Each alert is created only if it doesn't exist yet,
+ * so a repeated delivery of the event never resets one a provider has read and never alerts twice;
+ * alerts that could not be written make the call fail, and the retried event writes the rest.
+ * Returns how many alerts were written.
+ */
+export async function notifyProvidersOfNewRequest(requestId: string, requestData: any): Promise<number> {
+  const cityId = requestData?.cityId;
+  const categoryId = requestData?.categoryId;
+  const customerId = requestData?.customerId;
+  const serviceTitle = cleanForNotification(requestData?.service) || cleanForNotification(requestData?.category) || 'Жаңа тапсырыс';
+
+  if (!cityId || !categoryId || typeof customerId !== 'string') {
+    console.log(`[onNewRequestNotifyProviders] Request ${requestId} missing cityId, categoryId or customerId`);
+    return 0;
+  }
+  if (!['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'].includes(requestData?.status)) return 0;
+
+  // One customer can alert providers for at most 5 new requests an hour (protects providers
+  // from spam and the project from write costs); a repeated delivery is not counted again
+  if (!(await allowCallOnce(`newreq_${customerId}`, requestId, 5, Date.now(), 3600 * 1000))) {
+    console.warn(`[onNewRequestNotifyProviders] Skipped alerts for ${requestId}: customer over the hourly limit`);
+    return 0;
+  }
+
+  // Providers list every group they work in (categoryIds); older profiles have only categoryId
+  const providers = new Map<string, FirebaseFirestore.DocumentData>();
+  const queries = [
+    db.collection('providers').where('cityId', '==', cityId).where('categoryIds', 'array-contains', categoryId),
+    db.collection('providers').where('cityId', '==', cityId).where('categoryId', '==', categoryId),
+  ];
+  for (const base of queries) {
+    let last: FirebaseFirestore.QueryDocumentSnapshot | undefined;
+    for (;;) {
+      const page = await (last ? base.startAfter(last) : base).limit(MATCH_PAGE).get();
+      page.docs.forEach((d) => providers.set(d.id, d.data()));
+      if (page.size < MATCH_PAGE) break;
+      last = page.docs[page.docs.length - 1];
+    }
+  }
+
+  const writer = db.bulkWriter();
+  let written = 0;
+  let failed = 0;
+  writer.onWriteError((err) => {
+    // 6 = ALREADY_EXISTS: delivered before, left as it is (the provider may have read it)
+    if (Number(err.code) === 6) return false;
+    if (err.failedAttempts < 3) return true;
+    failed++;
+    console.error('[onNewRequestNotifyProviders] alert not written', err.documentRef.id, err.message);
+    return false;
+  });
+  const now = new Date().toISOString();
+  for (const [providerId, providerData] of providers) {
+    const providerUserId = providerData.userId || providerId;
+    // Skip the customer themselves, providers the operator blocked or hid, and paused masters
+    if (providerUserId === customerId) continue;
+    if (providerData.blocked === true || providerData.hidden === true) continue;
+    // A master on a break ("not taking orders now") gets no new-request alerts
+    if (providerData.paused === true) continue;
+    const notifId = `notif_new_request_${requestId}_${providerId}`;
+    writer
+      .create(db.collection('notifications').doc(notifId), {
+        id: notifId,
+        recipientUserId: providerUserId,
+        recipientRole: 'provider',
+        type: 'NEW_REQUEST',
+        title: { kz: 'Жаңа сұраныс табылды', ru: 'Новая подходящая заявка' },
+        body: {
+          kz: `Сіздің бағытыңыз бойынша жаңа тапсырыс: ${serviceTitle}`,
+          ru: `Новый запрос по вашему профилю: ${serviceTitle}`,
+        },
+        requestId,
+        targetScreen: 'request_details',
+        isRead: false,
+        readAt: null,
+        createdAt: now,
+        // Kept 60 days (Firestore TTL on expireAt)
+        expireAt: Timestamp.fromMillis(Date.now() + 60 * DAY_MS),
+      })
+      .then(() => {
+        written++;
+      })
+      .catch(() => {
+        // counted in onWriteError
+      });
+  }
+  await writer.close();
+  if (failed > 0) throw new Error(`${failed} new-request alerts for ${requestId} were not written`);
+  if (written > 0) console.log(`[onNewRequestNotifyProviders] Dispatched ${written} notifications for request ${requestId}`);
+  return written;
+}
+
+/**
+ * Triggered on new service request creation in Firestore: alerts the matching providers. Failures
+ * are retried (for up to two hours); repeated deliveries write nothing twice.
  */
 export const onNewRequestNotifyProviders = onDocumentCreated(
   // Firestore triggers run where the database is (asia-south1)
-  { document: 'requests/{id}', region: 'asia-south1', maxInstances: 5 },
+  { document: 'requests/{id}', region: 'asia-south1', maxInstances: 5, retry: true },
   async (event) => {
+    if (tooOldToRetry(event.time)) {
+      console.error(`[onNewRequestNotifyProviders] gave up on ${event.params.id} after retries`);
+      return;
+    }
     const snap = event.data;
     if (!snap) return;
-
-    const requestData = snap.data();
-    const requestId = event.params.id;
-    const cityId = requestData?.cityId;
-    const categoryId = requestData?.categoryId;
-    const customerId = requestData?.customerId;
-    const serviceTitle = cleanForNotification(requestData?.service) || cleanForNotification(requestData?.category) || 'Жаңа тапсырыс';
-
-    if (!cityId || !categoryId || typeof customerId !== 'string') {
-      console.log(`[onNewRequestNotifyProviders] Request ${requestId} missing cityId, categoryId or customerId`);
-      return;
-    }
-    if (!['OPEN', 'NEW', 'MATCHING', 'OFFERS_RECEIVED'].includes(requestData?.status)) return;
-
-    // One customer can alert providers for at most 5 new requests an hour (protects providers
-    // from spam and the project from write costs)
-    if (!(await allowCall(`newreq_${customerId}`, 5, Date.now(), 3600 * 1000))) {
-      console.warn(`[onNewRequestNotifyProviders] Skipped alerts for ${requestId}: customer over the hourly limit`);
-      return;
-    }
-
-    try {
-      // Find matching providers with same cityId and categoryId
-      // Providers list every group they work in (categoryIds); older profiles have only categoryId
-      const [byList, byMain] = await Promise.all([
-        db.collection('providers').where('cityId', '==', cityId).where('categoryIds', 'array-contains', categoryId).limit(300).get(),
-        db.collection('providers').where('cityId', '==', cityId).where('categoryId', '==', categoryId).limit(300).get(),
-      ]);
-      const seen = new Set<string>();
-      const providersSnap = { docs: [...byList.docs, ...byMain.docs].filter((d) => !seen.has(d.id) && (seen.add(d.id), true)) };
-
-      // Events can be delivered more than once: notices that already exist are left as they are
-      // (a provider may have read them)
-      const candidateRefs = providersSnap.docs.map((d) => db.collection('notifications').doc(`notif_new_request_${requestId}_${d.id}`));
-      const existing = new Set<string>();
-      for (let i = 0; i < candidateRefs.length; i += 100) {
-        const snaps = await db.getAll(...candidateRefs.slice(i, i + 100));
-        snaps.forEach((s) => s.exists && existing.add(s.id));
-      }
-
-      // A Firestore batch holds at most 500 writes, so notifications are written in chunks
-      const BATCH_LIMIT = 450;
-      let batch = db.batch();
-      let inBatch = 0;
-      let count = 0;
-      const now = new Date().toISOString();
-
-      for (const doc of providersSnap.docs) {
-        const providerData = doc.data();
-        const providerId = doc.id;
-        const providerUserId = providerData.userId || providerId;
-
-        // Skip the customer themselves, providers the operator blocked or hid, and paused masters
-        if (providerUserId === customerId) continue;
-        if (providerData.blocked === true || providerData.hidden === true) continue;
-        // A master on a break ("not taking orders now") gets no new-request alerts
-        if (providerData.paused === true) continue;
-
-        const notifId = `notif_new_request_${requestId}_${providerId}`;
-        if (existing.has(notifId)) continue;
-        const notifRef = db.collection('notifications').doc(notifId);
-
-        batch.set(
-          notifRef,
-          {
-            id: notifId,
-            recipientUserId: providerUserId,
-            recipientRole: 'provider',
-            type: 'NEW_REQUEST',
-            title: {
-              kz: 'Жаңа сұраныс табылды',
-              ru: 'Новая подходящая заявка',
-            },
-            body: {
-              kz: `Сіздің бағытыңыз бойынша жаңа тапсырыс: ${serviceTitle}`,
-              ru: `Новый запрос по вашему профилю: ${serviceTitle}`,
-            },
-            requestId,
-            targetScreen: 'request_details',
-            isRead: false,
-            readAt: null,
-            createdAt: now,
-            // Kept 60 days (Firestore TTL on expireAt)
-            expireAt: Timestamp.fromMillis(Date.now() + 60 * DAY_MS),
-          }
-        );
-        count++;
-        inBatch++;
-
-        if (inBatch >= BATCH_LIMIT) {
-          await batch.commit();
-          batch = db.batch();
-          inBatch = 0;
-        }
-      }
-
-      if (inBatch > 0) {
-        await batch.commit();
-      }
-      if (count > 0) {
-        console.log(`[onNewRequestNotifyProviders] Dispatched ${count} notifications for request ${requestId}`);
-      }
-    } catch (err) {
-      console.error('[onNewRequestNotifyProviders] Error notifying providers:', err);
-    }
+    await notifyProvidersOfNewRequest(event.params.id, snap.data());
   }
 );

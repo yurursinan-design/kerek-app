@@ -9,6 +9,7 @@ import {
 } from '../src/types';
 import { localRepository } from '../src/services/localRepository';
 import { resilientRepository } from '../src/services/resilientRepository';
+import { offlineQueueService } from '../src/services/offlineQueueService';
 
 console.log('=== STARTING REQUEST 2.0 ATTACHMENTS & LOCATION VERIFICATION ===');
 
@@ -305,7 +306,13 @@ async function runTests() {
   // -------------------------------------------------------------
   console.log('\n[TEST 10] ResilientRepository: Request 2.0 Fallback and Sync');
   // -------------------------------------------------------------
+  // The request lives only on this device: it is shown while it waits in the offline queue (the
+  // cloud copy wins otherwise, so a device-only "ghost" never appears)
+  const realQueue = offlineQueueService.getQueue.bind(offlineQueueService);
+  offlineQueueService.getQueue = () =>
+    [{ id: 'q', idempotencyKey: 'k', type: 'createRequest', payload: { id: requestId }, clientTimestamp: '', authUid: customerId, retryCount: 0, status: 'PENDING' }] as any;
   const resilientReq = await resilientRepository.getRequest(requestId);
+  offlineQueueService.getQueue = realQueue;
   assert(resilientReq !== null);
   assert.strictEqual(resilientReq.attachments?.length, 3);
   assert.strictEqual(resilientReq.location?.latitude, 44.84883);

@@ -158,6 +158,19 @@ const NOTIFICATIONS_LIMIT = 50;
  * index exists (failed-precondition, e.g. while indexes build right after a release) the plain
  * query is used, so the screen still works.
  */
+/** Request statuses of a job that is still running (chosen master, not finished or cancelled) */
+const ACTIVE_JOB_STATUSES = ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'];
+const ACTIVE_JOBS_LIMIT = 200;
+
+/** The documents of a list plus those of a second query that the list doesn't already have. */
+async function withExtraDocs(snap: QuerySnapshot, extra: Query): Promise<QuerySnapshot> {
+  const more = await getDocs(extra).catch(() => null);
+  if (!more) return snap;
+  const seen = new Set(snap.docs.map((d) => d.id));
+  const docs = [...snap.docs, ...more.docs.filter((d) => !seen.has(d.id))];
+  return { ...snap, docs, size: docs.length, empty: docs.length === 0 } as unknown as QuerySnapshot;
+}
+
 async function getDocsNewestFirst(newest: Query, plain: Query): Promise<QuerySnapshot> {
   try {
     return await getDocs(newest);
@@ -764,6 +777,12 @@ export class FirebaseRepository implements Repository {
           query(requestsColl, byCustomer, orderBy('createdAt', 'desc'), limit(CUSTOMER_REQUESTS_LIMIT)),
           query(requestsColl, byCustomer, limit(CUSTOMER_REQUESTS_LIMIT))
         );
+        // Jobs still running are read on their own, so an old active job is never cut off by the
+        // history limit above
+        snap = await withExtraDocs(
+          snap,
+          query(requestsColl, byCustomer, where('status', 'in', ACTIVE_JOB_STATUSES), limit(ACTIVE_JOBS_LIMIT))
+        );
       } else if (targetCityId && targetCatId) {
         // Provider view: query by cityId and categoryId conforming to firestore.rules
         try {
@@ -828,18 +847,19 @@ export class FirebaseRepository implements Repository {
         const q = query(
           requestsColl,
           where('city', '==', filter.city),
-          where('category', '==', filter.category)
+          where('category', '==', filter.category),
+          limit(PROVIDER_FEED_LIMIT)
         );
         snap = await getDocs(q);
       } else if (targetCityId) {
-        const q = query(requestsColl, where('cityId', '==', targetCityId));
+        const q = query(requestsColl, where('cityId', '==', targetCityId), limit(PROVIDER_FEED_LIMIT));
         snap = await getDocs(q);
       } else if (targetCatId) {
-        const q = query(requestsColl, where('categoryId', '==', targetCatId));
+        const q = query(requestsColl, where('categoryId', '==', targetCatId), limit(PROVIDER_FEED_LIMIT));
         snap = await getDocs(q);
         if (targetCatId === 'appliances') {
           try {
-            const qLegacy = query(requestsColl, where('categoryId', '==', 'appliance_repair'));
+            const qLegacy = query(requestsColl, where('categoryId', '==', 'appliance_repair'), limit(PROVIDER_FEED_LIMIT));
             const snapLegacy = await getDocs(qLegacy);
             const existingIds = new Set(snap.docs.map((d) => d.id));
             const extraDocs = snapLegacy.docs.filter((d) => !existingIds.has(d.id));
@@ -847,7 +867,7 @@ export class FirebaseRepository implements Repository {
           } catch {}
         }
       } else {
-        const q = query(requestsColl);
+        const q = query(requestsColl, limit(PROVIDER_FEED_LIMIT));
         snap = await getDocs(q);
       }
       let requests: ServiceRequest[] = (snap ? snap.docs : []).map((d: any) => {
@@ -1487,9 +1507,13 @@ export class FirebaseRepository implements Repository {
       const targetProviderUserId = filter.providerUserId || currentUid;
       if (targetProviderUserId) {
         const byProvider = where('providerUserId', '==', targetProviderUserId);
-        const snap = await getDocsNewestFirst(
-          query(offersColl, byProvider, orderBy('createdAt', 'desc'), limit(PROVIDER_OFFERS_LIMIT)),
-          query(offersColl, byProvider)
+        const snap = await withExtraDocs(
+          await getDocsNewestFirst(
+            query(offersColl, byProvider, orderBy('createdAt', 'desc'), limit(PROVIDER_OFFERS_LIMIT)),
+            query(offersColl, byProvider, limit(PROVIDER_OFFERS_LIMIT))
+          ),
+          // Accepted offers (the master's current jobs) are read on their own, beyond the limit above
+          query(offersColl, byProvider, where('status', '==', 'ACCEPTED'), limit(ACTIVE_JOBS_LIMIT))
         );
         let offers = snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProviderOffer));
 

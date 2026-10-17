@@ -7,7 +7,8 @@
 import { FieldValue, Firestore, getFirestore } from 'firebase-admin/firestore';
 import { onDocumentCreated, onDocumentUpdated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 
-const OPTS = { region: 'asia-south1', maxInstances: 10 };
+// Failures are retried; every handler is idempotent (transaction markers, recomputed ratings)
+const OPTS = { region: 'asia-south1', maxInstances: 10, retry: true };
 /** Answers slower than a week are counted as a week, so one old request doesn't skew the average */
 const MAX_RESPONSE_MINUTES = 7 * 24 * 60;
 /** Prices kept per service: the newest ones */
