@@ -1,14 +1,13 @@
-# main dalına her birleştirmede (Merge) uygulamayı yayına alır:
+# main dalına her birleştirmede (Merge) uygulamayı yayına alır, hepsi birlikte (birbirine uyan
+# sürümler aynı anda canlıya çıkar):
 #   - Web uygulaması → Firebase Hosting (canlı site)
-#   - Firestore güvenlik kuralları
-#   - İsteğe bağlı: Storage kuralları ve Cloud Functions
+#   - Firestore güvenlik kuralları ve indeksleri
+#   - Storage kuralları
+#   - Cloud Functions
+# Önce tüm testler (tests.yml) çalışır; biri bile başarısızsa hiçbir şey yüklenmez.
 #
 # Firebase'e giriş, Workload Identity Federation ile şifresiz yapılır:
 # Google Cloud'daki github-deploy servis hesabını yalnızca bu depo kullanabilir.
-#
-# İsteğe bağlı GitHub variable'ları (Settings → Secrets and variables → Actions → Variables):
-#   DEPLOY_STORAGE   = true  → storage.rules da yüklenir
-#   DEPLOY_FUNCTIONS = true  → Cloud Functions da yüklenir (Blaze planı + ek yetkiler gerekir)
 name: Yayına al
 
 on:
@@ -43,13 +42,12 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
@@ -63,23 +61,17 @@ jobs:
         run: bun run build
 
       - name: Functions bağımlılıklarını kur
-        if: vars.DEPLOY_FUNCTIONS == 'true'
         run: npm --prefix functions ci
 
       - name: Google Cloud'a giriş
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
           workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
           service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
 
       - name: Firebase'e yükle
-        env:
-          DEPLOY_STORAGE: ${{ vars.DEPLOY_STORAGE }}
-          DEPLOY_FUNCTIONS: ${{ vars.DEPLOY_FUNCTIONS }}
         run: |
-          targets="hosting,firestore:rules,firestore:indexes"
-          [ "$DEPLOY_STORAGE" = "true" ] && targets="$targets,storage"
-          [ "$DEPLOY_FUNCTIONS" = "true" ] && targets="$targets,functions"
+          targets="hosting,firestore:rules,firestore:indexes,storage,functions"
           echo "Yüklenenler: $targets → $FIREBASE_PROJECT_ID"
           npx --yes firebase-tools@15.31.0 deploy \
             --only "$targets" \

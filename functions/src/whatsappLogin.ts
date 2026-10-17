@@ -167,6 +167,13 @@ export const verifyLoginCode = onCall<{ phone?: string; code?: string; deviceId?
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Sign-in is required.');
+    // A few checks an hour per account and per network address (every code allows five tries; the
+    // limits on sending codes keep the number of codes small), so the endpoint can't be flooded
+    const now = Date.now();
+    const tooMany = () => new HttpsError('resource-exhausted', 'Too many tries. Please wait and try again.');
+    if (!(await allowCall(`otpv_uid_${callerUid}`, 15, now, 3600 * 1000))) throw tooMany();
+    const ip = clientIp(request.rawRequest);
+    if (ip && !(await allowCall(`otpv_ip_${sha256(ip).slice(0, 32)}`, 40, now, 3600 * 1000))) throw tooMany();
     const phone = normalizeKzPhone(request.data?.phone);
     const code = String(request.data?.code || '').replace(/\D/g, '');
     if (!phone || code.length !== 6) throw new HttpsError('invalid-argument', 'Invalid code.');
@@ -212,7 +219,7 @@ export const verifyLoginCode = onCall<{ phone?: string; code?: string; deviceId?
     }
     const token = await auth.createCustomToken(uid);
     // Which phone and network the account uses, for the review check (signals.ts); never fails the login
-    await recordLoginSignals(uid, request.data?.deviceId, clientIp(request.rawRequest));
+    await recordLoginSignals(uid, request.data?.deviceId, ip);
     return { token };
   }
 );

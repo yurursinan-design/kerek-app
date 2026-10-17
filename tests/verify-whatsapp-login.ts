@@ -165,6 +165,18 @@ async function main() {
   await getFirestore().collection('rateLimits').doc(`otp_phone_min_${createHash('sha256').update(`login:${reviewPhone}`).digest('hex').slice(0, 40)}`).delete();
   assert((await errCode(run(requestLoginCode, uidD, { phone: reviewPhone }, '10.0.0.10'))) === 'ok' && sent[sent.length - 1].to === reviewPhone.slice(1), 'Without the setting the review number is an ordinary number');
 
+  // Checking codes is limited per account and per network address, even when no code exists
+  const noCode = `+7604${tail}`;
+  const uidE = `anonE_${tail}`;
+  const codesE: string[] = [];
+  for (let i = 0; i < 15; i++) codesE.push(await errCode(run(verifyLoginCode, uidE, { phone: noCode, code: '123456' }, '10.0.0.30')));
+  assert(codesE.every((c) => c === 'deadline-exceeded'), 'Fifteen checks an hour are answered normally', codesE.join(','));
+  assert((await errCode(run(verifyLoginCode, uidE, { phone: noCode, code: '123456' }, '10.0.0.31'))) === 'resource-exhausted', 'The 16th check from one account in an hour is refused');
+  const fromOneIp: string[] = [];
+  for (let i = 0; i < 40; i++) fromOneIp.push(await errCode(run(verifyLoginCode, `anonF${Math.floor(i / 14)}_${tail}`, { phone: noCode, code: '123456' }, '10.0.0.31')));
+  assert(fromOneIp.every((c) => c === 'deadline-exceeded'), 'Forty checks an hour from one address are answered normally', fromOneIp.join(','));
+  assert((await errCode(run(verifyLoginCode, `anonG_${tail}`, { phone: noCode, code: '123456' }, '10.0.0.31'))) === 'resource-exhausted', 'More checks from the same address, even from new accounts, are refused');
+
   console.log(failed ? `\nWHATSAPP LOGIN: ${failed} FAILED` : '\nWHATSAPP LOGIN: ALL CHECKS PASSED');
   process.exit(failed ? 1 : 0);
 }

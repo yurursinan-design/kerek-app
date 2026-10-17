@@ -10,7 +10,7 @@ import { firebaseRepository } from '../src/services/firebaseRepository';
 import { offlineQueueService } from '../src/services/offlineQueueService';
 import { auth, db, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { signInAnonymously } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
 import { sendOfferCounted } from './helpers/offers';
 import { getConversationId, getAppointmentId } from '../src/types';
 
@@ -368,6 +368,20 @@ async function runAcceptOfferFixTests() {
       assert(
         isConsistent,
         'TEST 8: Real firebaseRepository.acceptOffer() parallel concurrent transaction execution'
+      );
+
+      // TEST 9: Accepting the chosen offer again later returns the request as it is stored now
+      const winner = winningOfferId === offerAId ? provA : provB;
+      await updateDoc(doc(winner.db, 'requests', emuReqId), { status: 'IN_PROGRESS', updatedAt: new Date().toISOString() });
+      const replayInProgress = await firebaseRepository.acceptOffer(emuReqId, winningOfferId);
+      await updateDoc(doc(db, 'requests', emuReqId), { status: 'COMPLETED', updatedAt: new Date().toISOString() });
+      const replayCompleted = await firebaseRepository.acceptOffer(emuReqId, winningOfferId);
+      assert(
+        replayInProgress.request?.status === 'IN_PROGRESS' &&
+          replayCompleted.request?.status === 'COMPLETED' &&
+          replayCompleted.offer?.status === 'ACCEPTED' &&
+          (await getDoc(doc(db, 'requests', emuReqId))).data()?.status === 'COMPLETED',
+        `TEST 9: Accepting the chosen offer again returns the stored status (got ${replayInProgress.request?.status}, ${replayCompleted.request?.status}) and writes nothing`
       );
     } else {
       assert(true, 'TEST 8: Real cloud Firestore concurrent test skipped in standalone unit mode (runs in npm run test:rules under Firestore Emulator)');

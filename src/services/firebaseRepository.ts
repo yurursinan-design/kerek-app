@@ -1535,10 +1535,11 @@ export class FirebaseRepository implements Repository {
           throw new Error(`Validation Error: Offer ${cleanOfferId} does not belong to request ${cleanReqId}`);
         }
 
-        // Idempotency check: If already accepted for this exact offer, complete idempotently
+        // Idempotency check: if this exact offer is already the chosen one, nothing is written and the
+        // request comes back as it is stored now (it may have moved on to IN_PROGRESS or COMPLETED)
         if (reqData.selectedOfferId === cleanOfferId && offerData.status === 'ACCEPTED') {
-          resultReq = { ...reqData, id: cleanReqId, selectedOfferId: cleanOfferId, status: 'PROVIDER_SELECTED' };
-          resultOffer = { ...offerData, id: cleanOfferId, status: 'ACCEPTED' };
+          resultReq = { ...reqData, id: cleanReqId };
+          resultOffer = { ...offerData, id: cleanOfferId };
           return;
         }
 

@@ -19,6 +19,7 @@ import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { GEMINI_CONFIG } from './config';
 import { isOperator } from './admin';
 import { allowCall, DAY_MS } from './limits';
+import { redactPersonalDetails } from './redact';
 
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
 const REGION = 'asia-south1';
@@ -113,8 +114,9 @@ export function hasContactDetails(text: string): boolean {
   return PHONE.test(t) || LINK.test(t) || DOMAIN.test(t) || HANDLE.test(t);
 }
 
+/** The prompt for the review check; personal details are taken out of the text first (redact.ts). */
 export function buildReviewPrompt(rating: number, text: string): string {
-  const safeText = String(text).replace(/"""/g, '"');
+  const safeText = redactPersonalDetails(String(text)).replace(/"""/g, '"');
   return `You check customer reviews before they are shown on a master's profile in "Tapsyr", a home-services marketplace in Kazakhstan. Reviews are written in Kazakh or Russian, sometimes with mistakes or slang.
 
 Answer "approve" when the text is the customer's own opinion of the work or the master, positive or negative, even if short, harsh in tone or badly written.
