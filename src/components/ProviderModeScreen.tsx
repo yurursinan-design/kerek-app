@@ -176,6 +176,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [sentOffersMap, setSentOffersMap] = useState<Record<string, ProviderOffer>>({});
   // Same map for the live request feed, which keeps one subscription for the whole screen
   const offersMapRef = useRef<Record<string, ProviderOffer>>({});
+  const offersUnsubscribeRef = useRef<(() => void) | null>(null);
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -240,7 +241,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   // Load provider profile and matching requests
   useEffect(() => {
     let isMounted = true;
-    let stopOffers: (() => void) | null = null;
     const watchers = requestWatchersRef.current;
 
     const loadData = async () => {
@@ -260,24 +260,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
           setCategory(myProv.category);
         }
 
-        // The provider's offers, live: an accepted or declined offer shows at once, and each
-        // offered request is watched so a job the customer completes or cancels updates here
         if (!isMounted) return;
-        stopOffers?.();
-        stopOffers = repository.subscribeToOffers(
-          { providerId: myProv.id, providerUserId: myProv.userId || myProv.id },
-          (myOffers) => {
-            if (!isMounted) return;
-            const offersMap: Record<string, ProviderOffer> = {};
-            myOffers.forEach((o) => {
-              offersMap[o.requestId] = o;
-            });
-            offersMapRef.current = offersMap;
-            setSentOffersMap(offersMap);
-            syncRequestWatchers(offersMap);
-          }
-        );
-
+        startOffersFeed(myProv, () => isMounted);
         startRequestFeed(myProv, () => isMounted);
 
         try {
@@ -299,7 +283,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         requestsUnsubscribeRef.current();
         requestsUnsubscribeRef.current = null;
       }
-      stopOffers?.();
+      offersUnsubscribeRef.current?.();
+      offersUnsubscribeRef.current = null;
       watchers.forEach((stop) => stop());
       watchers.clear();
     };
@@ -364,6 +349,26 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   };
 
   // Live list of the provider's city requests (open ones; offered requests are watched separately)
+  // The provider's offers, live: an accepted or declined offer shows at once, and each offered
+  // request is watched so a job the customer completes or cancels updates here. Started on load and
+  // again when a master saves their profile for the first time.
+  const startOffersFeed = (myProv: Provider, isAlive: () => boolean) => {
+    offersUnsubscribeRef.current?.();
+    offersUnsubscribeRef.current = repository.subscribeToOffers(
+      { providerId: myProv.id, providerUserId: myProv.userId || myProv.id },
+      (myOffers) => {
+        if (!isAlive()) return;
+        const offersMap: Record<string, ProviderOffer> = {};
+        myOffers.forEach((o) => {
+          offersMap[o.requestId] = o;
+        });
+        offersMapRef.current = offersMap;
+        setSentOffersMap(offersMap);
+        syncRequestWatchers(offersMap);
+      }
+    );
+  };
+
   const startRequestFeed = (myProv: Provider, isAlive: () => boolean) => {
     // Clean up previous subscription if any
     if (requestsUnsubscribeRef.current) {
@@ -454,6 +459,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       }
 
       // Refresh the request feed for the updated profile (city may have changed)
+      if (!offersUnsubscribeRef.current) startOffersFeed(savedProvider, () => mountedRef.current);
       startRequestFeed(savedProvider, () => mountedRef.current);
     } catch (err) {
       setErrorMessage(getFriendlyErrorMessage(err, language));
