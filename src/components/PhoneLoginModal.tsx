@@ -1,15 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
+import type { ConfirmationResult } from 'firebase/auth';
 import { Loader2, Smartphone, X } from 'lucide-react';
 import { Language } from '../types';
-import {
-  confirmLoginCode,
-  normalizePhone,
-  phoneAuthErrorMessage,
-  resetPhoneVerifier,
-  sendLoginCode,
-  type LoginChannel,
-  type LoginConfirmation,
-} from '../services/phoneAuth';
+import { confirmLoginCode, normalizePhone, phoneAuthErrorMessage, resetPhoneVerifier, sendLoginCode } from '../services/phoneAuth';
 import { recordLegalConsent } from '../services/account';
 import { LegalLinks } from './LegalModal';
 
@@ -47,25 +40,8 @@ const TEXT = {
   },
   phoneLabel: { kz: 'Телефон нөмірі', ru: 'Номер телефона' },
   sendCode: { kz: 'Код жіберу', ru: 'Получить код' },
-  // Where the code went: WhatsApp, Telegram, or a plain text message (test emulator)
-  codeLabel: {
-    whatsapp: { kz: 'WhatsApp-тағы код', ru: 'Код из WhatsApp' },
-    telegram: { kz: 'Telegram-дағы код', ru: 'Код из Telegram' },
-    sms: { kz: 'Код', ru: 'Код' },
-  },
-  codeSentTo: {
-    whatsapp: { kz: 'Код WhatsApp-қа жіберілді:', ru: 'Код отправлен в WhatsApp на' },
-    telegram: { kz: 'Код Telegram-ға жіберілді:', ru: 'Код отправлен в Telegram на' },
-    sms: { kz: 'Код жіберілді:', ru: 'Код отправлен на' },
-  },
-  telegramHint: {
-    kz: 'Telegram-дағы «Verification Codes» чатын ашыңыз.',
-    ru: 'Откройте в Telegram чат «Verification Codes».',
-  },
-  sendVia: {
-    whatsapp: { kz: 'Кодты WhatsApp-қа жіберу', ru: 'Получить код в WhatsApp' },
-    telegram: { kz: 'Кодты Telegram-ға жіберу', ru: 'Получить код в Telegram' },
-  },
+  codeLabel: { kz: 'WhatsApp-тағы код', ru: 'Код из WhatsApp' },
+  codeSentTo: { kz: 'Код WhatsApp-қа жіберілді:', ru: 'Код отправлен в WhatsApp на' },
   confirm: { kz: 'Растау', ru: 'Подтвердить' },
   changeNumber: { kz: 'Нөмірді өзгерту', ru: 'Изменить номер' },
   resendIn: { kz: 'Қайта жіберу:', ru: 'Повторно через' },
@@ -78,8 +54,8 @@ const TEXT = {
   consent: {
     // Plain words for the same consent: processing under the privacy policy, storage in
     // Kazakhstan and the copy processed abroad (cross-border transfer, Law 94-V art. 16)
-    kz: 'Мен Пайдалану шарттарын қабылдаймын және дербес деректерімді Құпиялылық саясатына сай өңдеуге келісемін. Деректерім Қазақстанда сақталады, ал қолданба жұмыс істеуі үшін олардың көшірмесі шетелдегі серверлерде (Google, WhatsApp, Telegram) өңделеді, бұған да келісемін. Маған 18 жас толған.',
-    ru: 'Я принимаю Условия использования и соглашаюсь на обработку моих персональных данных по Политике конфиденциальности. Мои данные хранятся в Казахстане, а для работы приложения их копия обрабатывается на зарубежных серверах (Google, WhatsApp, Telegram), и на это я тоже даю согласие. Мне есть 18 лет.',
+    kz: 'Мен Пайдалану шарттарын қабылдаймын және дербес деректерімді Құпиялылық саясатына сай өңдеуге келісемін. Деректерім Қазақстанда сақталады, ал қолданба жұмыс істеуі үшін олардың көшірмесі шетелдегі серверлерде (Google, WhatsApp) өңделеді, бұған да келісемін. Маған 18 жас толған.',
+    ru: 'Я принимаю Условия использования и соглашаюсь на обработку моих персональных данных по Политике конфиденциальности. Мои данные хранятся в Казахстане, а для работы приложения их копия обрабатывается на зарубежных серверах (Google, WhatsApp), и на это я тоже даю согласие. Мне есть 18 лет.',
   },
   consentRequired: {
     kz: 'Жалғастыру үшін келісім белгісін қойыңыз.',
@@ -93,7 +69,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
 
   const [phone, setPhone] = useState('+7 ');
   const [code, setCode] = useState('');
-  const [confirmation, setConfirmation] = useState<LoginConfirmation | null>(null);
+  const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null);
   const [sentTo, setSentTo] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,11 +99,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
 
   if (!open) return null;
 
-  const channel = confirmation?.channel || 'sms';
-  // The other channel the server offers, for "send the code to WhatsApp / Telegram instead"
-  const otherChannel = (confirmation?.channels || []).find((c) => c !== confirmation?.channel);
-
-  const handleSend = async (e?: React.FormEvent, via?: LoginChannel) => {
+  const handleSend = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!agreed) {
       setError(tx(TEXT.consentRequired));
@@ -141,7 +113,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
     setBusy(true);
     setError(null);
     try {
-      const result = await sendLoginCode(normalized, 'kerek-recaptcha', lang === 'kz' ? 'kz' : 'ru', via || confirmation?.channel);
+      const result = await sendLoginCode(normalized, 'kerek-recaptcha', lang === 'kz' ? 'kz' : 'ru');
       setConfirmation(result);
       setSentTo(normalized);
       setSecondsLeft(RESEND_SECONDS);
@@ -244,11 +216,10 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
         ) : (
           <form onSubmit={handleConfirm} className="space-y-3">
             <p className="text-xs text-slate-500">
-              {tx(TEXT.codeSentTo[channel])} <span className="font-semibold text-slate-800">{sentTo}</span>
+              {tx(TEXT.codeSentTo)} <span className="font-semibold text-slate-800">{sentTo}</span>
             </p>
-            {channel === 'telegram' && <p className="text-xs text-slate-500">{tx(TEXT.telegramHint)}</p>}
             <label htmlFor="phone-login-code" className="block text-xs font-bold text-slate-700">
-              {tx(TEXT.codeLabel[channel])}
+              {tx(TEXT.codeLabel)}
             </label>
             <input
               id="phone-login-code"
@@ -300,16 +271,6 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
                 </button>
               )}
             </div>
-            {otherChannel && secondsLeft <= 0 && (
-              <button
-                type="button"
-                onClick={() => handleSend(undefined, otherChannel)}
-                disabled={busy}
-                className="w-full min-h-[40px] text-xs font-semibold text-sky-700 hover:text-sky-900 disabled:text-slate-400"
-              >
-                {tx(TEXT.sendVia[otherChannel])}
-              </button>
-            )}
           </form>
         )}
 

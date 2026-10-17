@@ -5,12 +5,10 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret, defineString } from 'firebase-functions/params';
 import { allowCall, clientIp, DAY_MS } from './limits';
 import { recordLoginSignals } from './signals';
-import { sendTelegramCode, telegramGatewayToken, telegramReady } from './telegramGateway';
 
 /**
  * Phone login with a one-time code sent to WhatsApp (WhatsApp Business Platform, Cloud API), using
- * an approved authentication template with a copy-code button, or to Telegram (telegramGateway.ts).
- * WhatsApp is used when it is set up, Telegram otherwise or when the app asks for it.
+ * an approved authentication template with a copy-code button.
  *
  * 1. requestLoginCode: the app (signed in anonymously) asks for a code; a 6-digit code goes to the
  *    number's WhatsApp and only its hash is stored in loginCodes/{phone hash} (no client access:
@@ -87,16 +85,6 @@ function reviewCodeFor(phone: string): string | null {
 
 type GraphError = { code?: number; message?: string; error_subcode?: number };
 
-export type LoginChannel = 'whatsapp' | 'telegram';
-
-/** The channels that are set up, in order of preference */
-export function loginChannels(): LoginChannel[] {
-  const out: LoginChannel[] = [];
-  if (whatsappPhoneNumberId.value()) out.push('whatsapp');
-  if (telegramReady()) out.push('telegram');
-  return out;
-}
-
 async function postTemplate(phone: string, code: string, language: string): Promise<GraphError | null> {
   const url = `https://graph.facebook.com/${graphVersion.value()}/${whatsappPhoneNumberId.value()}/messages`;
   const res = await fetch(url, {
@@ -141,11 +129,8 @@ async function sendWhatsAppCode(phone: string, code: string, appLang: unknown): 
   throw new HttpsError('unavailable', 'The code could not be sent. Please try again later.');
 }
 
-export const requestLoginCode = onCall<
-  { phone?: string; lang?: string; channel?: string },
-  Promise<{ ok: true; retryAfter: number; channel: LoginChannel; channels: LoginChannel[] }>
->(
-  { region: REGION, secrets: [whatsappToken, telegramGatewayToken, playReviewLogin], maxInstances: 5, timeoutSeconds: 20 },
+export const requestLoginCode = onCall<{ phone?: string; lang?: string }, Promise<{ ok: true; retryAfter: number }>>(
+  { region: REGION, secrets: [whatsappToken, playReviewLogin], maxInstances: 5, timeoutSeconds: 20 },
   async (request) => {
     if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'Sign-in is required.');
     const phone = normalizeKzPhone(request.data?.phone);
@@ -164,14 +149,6 @@ export const requestLoginCode = onCall<
     if (!(await allowCall('otp_global_day', GLOBAL_DAILY_CODES, now, DAY_MS))) throw tooMany();
 
     const reviewCode = reviewCodeFor(phone);
-    // The channel the app asked for when it is set up, else the preferred one
-    const channels = loginChannels();
-    const wanted = request.data?.channel;
-    const channel = channels.find((c) => c === wanted) || channels[0];
-    if (!channel && !reviewCode) {
-      console.error('[requestLoginCode] Neither WhatsApp nor Telegram is set up');
-      throw new HttpsError('failed-precondition', 'Phone login is not set up yet.');
-    }
     const code = reviewCode || String(crypto.randomInt(0, 1000000)).padStart(6, '0');
     const salt = crypto.randomBytes(16).toString('hex');
     await getFirestore()
@@ -187,11 +164,8 @@ export const requestLoginCode = onCall<
         expireAt: Timestamp.fromMillis(now + DAY_MS),
       });
 
-    if (!reviewCode) {
-      if (channel === 'telegram') await sendTelegramCode(phone, code);
-      else await sendWhatsAppCode(phone, code, request.data?.lang);
-    }
-    return { ok: true, retryAfter: 60, channel: channel || 'whatsapp', channels };
+    if (!reviewCode) await sendWhatsAppCode(phone, code, request.data?.lang);
+    return { ok: true, retryAfter: 60 };
   }
 );
 

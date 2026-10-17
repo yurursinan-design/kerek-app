@@ -675,8 +675,8 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 <p className={`text-[11px] leading-snug ${selectedOffer.providerPhoneVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
                   {selectedOffer.providerPhoneVerified
                     ? language === 'kz'
-                      ? '✓ Нөмір шебердің кіру кодымен расталған нөмірі'
-                      : '✓ Номер подтверждён кодом при входе мастера'
+                      ? '✓ Нөмір шебердің WhatsApp кодымен расталған нөмірі'
+                      : '✓ Номер подтверждён кодом WhatsApp при входе мастера'
                     : language === 'kz'
                       ? 'Бұл нөмірді шебер өзі жазған, ол расталмаған'
                       : 'Этот номер мастер указал сам, он не подтверждён'}

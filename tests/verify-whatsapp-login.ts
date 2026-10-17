@@ -82,6 +82,7 @@ async function main() {
 
   assert(normalizeKzPhone('+7 701 123 45 67') === '+77011234567', 'Kazakhstan number is accepted');
   assert(normalizeKzPhone('+7 912 123 45 67') === null, 'Russian number is refused');
+  assert(normalizeKzPhone('+90 532 123 45 67') === '+905321234567', 'Turkish tester number is accepted during the closed test');
   assert((await errCode(run(requestLoginCode, uidA, { phone: '+79121234567' }))) === 'invalid-argument', 'Request with a non-Kazakhstan number fails');
   assert((await errCode(requestLoginCode.run({ data: { phone }, rawRequest: { headers: {} } } as any))) === 'unauthenticated', 'Request without sign-in fails');
 
