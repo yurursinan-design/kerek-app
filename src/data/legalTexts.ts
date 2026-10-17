@@ -22,7 +22,7 @@ export const LEGAL_OPERATOR = {
   addressKz: 'Қызылорда қ., Сәлихитдин Айтбаев к-сі, 29-үй, 1-пәтер',
   addressRu: 'г. Кызылорда, ул. Салихитдин Айтбаев, д. 29, кв. 1',
   email: 'support.tapsyrapp@gmail.com',
-  whatsapp: '+7 707 969 38 52',
+  whatsapp: '+7 747 969 38 52',
 };
 
 export type LegalDocId = 'privacy' | 'terms' | 'deletion';
