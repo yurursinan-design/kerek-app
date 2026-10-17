@@ -6,6 +6,16 @@ export function toIntlDigits(raw?: string): string | null {
   return digits.length >= 10 && digits.length <= 15 ? digits : null;
 }
 
+/**
+ * Whether a number typed in a profile or offer is the account's own login number, confirmed with
+ * the WhatsApp code (the security rules check the same flag, firestore.rules phoneMatchesToken).
+ */
+export function isSameNumber(raw: string | undefined, verified: string | null | undefined): boolean {
+  const a = toIntlDigits(raw);
+  const b = toIntlDigits(verified || '');
+  return Boolean(a && b && (a.length === 10 ? `7${a}` : a) === b);
+}
+
 export function toTelHref(raw?: string): string | null {
   const digits = toIntlDigits(raw);
   return digits ? `tel:+${digits}` : null;

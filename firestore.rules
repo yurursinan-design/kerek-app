@@ -129,8 +129,22 @@ service cloud.firestore {
     }
 
     // Request statuses in which providers of the city may still see and answer a request
+    // Whether a typed number is the caller's own login number (confirmed with the WhatsApp code):
+    // compared by digits, "+7 701 …", "8 701 …" and "701 …" all match +7701…
+    function phoneMatchesToken(p) {
+      let token = ('phone_number' in request.auth.token && request.auth.token.phone_number is string)
+        ? request.auth.token.phone_number.replace('[^0-9]', '') : '';
+      return p is string && token.size() == 11
+        && p.replace('[^0-9]', '').matches('[78]?' + token.replace('^7', ''));
+    }
+
+    // The "confirmed number" flag of a profile (phone) or offer (providerPhone) tells the truth
+    function phoneFlagOk(m, phoneField, flagField) {
+      return m.get(flagField, false) == phoneMatchesToken(m.get(phoneField, ''));
+    }
+
     function PROVIDER_KEYS() {
-      return ['id', 'userId', 'name', 'phone', 'whatsapp', 'city', 'cityId', 'district', 'category', 'categoryId',
+      return ['id', 'userId', 'name', 'phone', 'phoneVerified', 'whatsapp', 'city', 'cityId', 'district', 'category', 'categoryId',
         'categoryIds', 'serviceIds', 'services', 'priceRange', 'workingHours', 'experienceYears', 'description',
         'availability', 'tradeLicense', 'verified', 'iinVerified', 'hasCertificate', 'isDemo', 'blocked', 'hidden',
         'paused', 'portfolio', 'createdAt', 'updatedAt'];
@@ -294,6 +308,7 @@ service cloud.firestore {
                     && incoming().keys().hasOnly(PROVIDER_KEYS())
                     && noTrustBadges(incoming())
                     && falseOrAbsent(incoming(), 'blocked') && falseOrAbsent(incoming(), 'hidden') && falseOrAbsent(incoming(), 'isDemo')
+                    && phoneFlagOk(incoming(), 'phone', 'phoneVerified')
                     // Operator bans live in bans/{uid} (console only), so deleting and recreating the
                     // profile doesn't lift a block
                     && !exists(/databases/$(database)/documents/bans/$(request.auth.uid))
@@ -315,6 +330,7 @@ service cloud.firestore {
                          && incoming().get('hasCertificate', false) == existing().get('hasCertificate', false)))
                     && incoming().get('blocked', false) == existing().get('blocked', false)
                     && incoming().get('hidden', false) == existing().get('hidden', false)
+                    && phoneFlagOk(incoming(), 'phone', 'phoneVerified')
                     && providerFieldLimits(incoming());
       // Account deletion: a provider can remove their own profile
       allow delete: if isSignedIn() && isValidId(providerId) && providerId == request.auth.uid;
@@ -572,7 +588,7 @@ service cloud.firestore {
                     && incoming().providerName == get(/databases/$(database)/documents/providers/$(request.auth.uid)).data.name
                     && incoming().keys().hasOnly([
                       'id', 'requestId', 'providerId', 'providerUserId', 'providerName', 'providerPhone',
-                      'providerWhatsapp', 'isDemo', 'price', 'priceType', 'availability', 'message', 'status',
+                      'providerPhoneVerified', 'providerWhatsapp', 'isDemo', 'price', 'priceType', 'availability', 'message', 'status',
                       'createdAt', 'updatedAt', 'iinVerified', 'hasCertificate', 'paymentMethods', 'fixPledge',
                       'inspectionFee'
                     ])
@@ -584,6 +600,7 @@ service cloud.firestore {
                     && incoming().price is string && incoming().price.size() <= 50
                     && incoming().status == 'PENDING'
                     && noTrustBadges(incoming())
+                    && phoneFlagOk(incoming(), 'providerPhone', 'providerPhoneVerified')
                     && offerFieldLimits(incoming());
       allow update: if isSignedIn() && isValidId(offerId)
         && changedTimesOk(incoming().diff(existing()).affectedKeys(), ['updatedAt']) && (
@@ -600,8 +617,9 @@ service cloud.firestore {
           incoming().status == 'PENDING' &&
           incoming().diff(existing()).affectedKeys().hasOnly([
             'price', 'priceType', 'availability', 'message', 'paymentMethods', 'fixPledge', 'inspectionFee',
-            'providerPhone', 'providerWhatsapp', 'providerName', 'updatedAt'
+            'providerPhone', 'providerPhoneVerified', 'providerWhatsapp', 'providerName', 'updatedAt'
           ]) &&
+          phoneFlagOk(incoming(), 'providerPhone', 'providerPhoneVerified') &&
           incoming().price is string && incoming().price.size() <= 50 &&
           // The name on an offer is the provider profile's name: it can follow a profile rename, but
           // can't be changed to anything else (no posing as another master or as Tapsyr)

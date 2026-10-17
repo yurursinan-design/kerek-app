@@ -428,10 +428,19 @@ export default function App() {
 
     try {
       const rawText = (updatedNeed.originalQuery || updatedNeed.service || '').trim();
-      // Pilot: requests are only created for an open city (Kyzylorda); anything else falls back to it
+      // Pilot: requests are only created for an open city (Kyzylorda). The confirmation screen already
+      // switches a closed city to Kyzylorda with a visible note; a closed city arriving here is refused
+      // with a clear message instead of being sent to another city's masters without the customer knowing
       const pilotCity = language === 'kz' ? 'Қызылорда' : 'Кызылорда';
-      const askedCity = updatedNeed.city?.trim() || pilotCity;
-      const city = isCityOpen(updatedNeed.cityId || askedCity) ? askedCity : pilotCity;
+      const city = updatedNeed.city?.trim() || pilotCity;
+      if (!isCityOpen(updatedNeed.cityId || city)) {
+        setAppError(
+          language === 'kz'
+            ? 'Tapsyr әзірге тек Қызылордада жұмыс істейді. Қаланы Қызылорда деп таңдаңыз.'
+            : 'Tapsyr пока работает только в Кызылорде. Выберите город Кызылорда.'
+        );
+        return;
+      }
       const cityId = isCityOpen(updatedNeed.cityId) ? updatedNeed.cityId! : normalizeCityId(city);
       const category = updatedNeed.category?.trim() || (language === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники');
       const categoryId = updatedNeed.categoryId || normalizeCategoryId(category);

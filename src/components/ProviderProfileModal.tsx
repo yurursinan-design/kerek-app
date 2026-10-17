@@ -320,6 +320,17 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
               WhatsApp
             </a>
           )}
+          {telHref && (
+            <p className={`w-full text-[11px] leading-snug ${provider.phoneVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
+              {provider.phoneVerified
+                ? language === 'kz'
+                  ? '✓ Нөмір шебердің WhatsApp кодымен расталған нөмірі'
+                  : '✓ Номер подтверждён кодом WhatsApp при входе мастера'
+                : language === 'kz'
+                  ? 'Бұл нөмірді шебер өзі жазған, ол расталмаған'
+                  : 'Этот номер мастер указал сам, он не подтверждён'}
+            </p>
+          )}
           {shareNote && <p className="w-full text-[11px] text-slate-500 break-all">{shareNote}</p>}
         </div>
 

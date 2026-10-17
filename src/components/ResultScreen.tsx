@@ -670,6 +670,18 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 <span>{t.chatWithProviderBtn}</span>
               </button>
 
+              {/* Whether the number is the master's own login number or just typed in the offer */}
+              {!selectedOffer.isDemo && selectedOffer.providerPhone && (
+                <p className={`text-[11px] leading-snug ${selectedOffer.providerPhoneVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {selectedOffer.providerPhoneVerified
+                    ? language === 'kz'
+                      ? '✓ Нөмір шебердің WhatsApp кодымен расталған нөмірі'
+                      : '✓ Номер подтверждён кодом WhatsApp при входе мастера'
+                    : language === 'kz'
+                      ? 'Бұл нөмірді шебер өзі жазған, ол расталмаған'
+                      : 'Этот номер мастер указал сам, он не подтверждён'}
+                </p>
+              )}
               {/* Call & WhatsApp: real providers get working tel:/wa.me links; demo offers keep the demo notice */}
               <div className="grid grid-cols-2 gap-2 pt-1">
                 {!selectedOffer.isDemo && toTelHref(selectedOffer.providerPhone) ? (

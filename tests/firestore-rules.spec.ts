@@ -2562,6 +2562,19 @@ async function runTestSuite() {
       await assertSucceeds(getDoc(doc(adminDb(), 'consents', 'cons_u')));
     });
 
+    await test('Contacts: the "confirmed number" flag is true only for the master\'s own login number', async () => {
+      const prof = (phone: string, phoneVerified?: boolean) => ({
+        id: 'prov_pv', userId: 'prov_pv', name: 'P', phone, city: 'Қызылорда', cityId: 'kyzylorda', category: 'x',
+        ...(phoneVerified === undefined ? {} : { phoneVerified }),
+      });
+      const db = testEnv.authenticatedContext('prov_pv', { phone_number: '+77017654321' }).firestore();
+      await assertFails(setDoc(doc(db, 'providers', 'prov_pv'), prof('+7 701 111 22 33', true)));
+      await assertFails(setDoc(doc(db, 'providers', 'prov_pv'), prof('8 701 765 43 21', false)));
+      await assertSucceeds(setDoc(doc(db, 'providers', 'prov_pv'), prof('8 701 765 43 21', true)));
+      await assertSucceeds(updateDoc(doc(db, 'providers', 'prov_pv'), { phone: '+7 701 111 22 33', phoneVerified: false }));
+      await assertFails(updateDoc(doc(db, 'providers', 'prov_pv'), { phoneVerified: true }));
+    });
+
   } finally {
     // Isolated Emulator Cleanup
     console.log('\n--- CLEANUP: Clearing Emulator Data ---');

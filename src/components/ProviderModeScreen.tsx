@@ -82,6 +82,9 @@ function isSelfRequest(
 }
 
 // The master's usual offer extras and last messages, kept on this phone so the next offer starts with them
+/** Offered requests watched live at most (the newest); older and finished ones are read once */
+const MAX_LIVE_JOBS = 50;
+
 const OFFER_PREFS_KEY = 'kerek_offer_prefs';
 interface OfferPrefs {
   paymentMethods: OfferPaymentMethod[];
@@ -220,6 +223,9 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [debugInfo, setDebugInfo] = useState<string>('');
   const requestsUnsubscribeRef = useRef<(() => void) | null>(null);
   const requestWatchersRef = useRef(new Map<string, () => void>());
+  // Offered requests that are finished (no live watcher any more) and those already read once
+  const finishedRequestsRef = useRef(new Set<string>());
+  const readOnceRef = useRef(new Set<string>());
 
   const handlePriceAmountChange = (val: string) => {
     const digitsOnly = val.replace(/[^\d]/g, '');
@@ -299,29 +305,59 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     };
   }, []);
 
-  // One live watcher per offered request (declined offers lead nowhere and are not watched).
-  // A request the provider can no longer read (another provider chosen, closed) drops out;
-  // nothing is made up in its place.
+  // Live watchers for the offered requests that can still change: declined offers lead nowhere, a
+  // finished or cancelled job is read once and then left alone, and at most MAX_LIVE_JOBS of the
+  // newest offers are watched live (older ones are read once), so a master with hundreds of past
+  // offers doesn't hold hundreds of open connections. A request the provider can no longer read
+  // (another provider chosen, closed) drops out; nothing is made up in its place.
   const syncRequestWatchers = (offersMap: Record<string, ProviderOffer>) => {
-    const wanted = new Set(Object.keys(offersMap).filter((id) => offersMap[id]?.status !== 'REJECTED'));
+    const byNewest = Object.keys(offersMap)
+      .filter((id) => offersMap[id]?.status !== 'REJECTED')
+      .sort((a, b) => String(offersMap[b]?.createdAt || '').localeCompare(String(offersMap[a]?.createdAt || '')));
+    const live = new Set(byNewest.filter((id) => !finishedRequestsRef.current.has(id)).slice(0, MAX_LIVE_JOBS));
     const dropFromOffered = (id: string) =>
       setOfferedRequests((prev) => {
         if (!(id in prev)) return prev;
         const { [id]: _gone, ...rest } = prev;
         return rest;
       });
+    const wanted = new Set(byNewest);
     requestWatchersRef.current.forEach((stop, id) => {
-      if (wanted.has(id)) return;
+      if (live.has(id)) return;
       stop();
       requestWatchersRef.current.delete(id);
-      dropFromOffered(id);
+      if (!wanted.has(id)) dropFromOffered(id);
     });
-    wanted.forEach((id) => {
+    byNewest.forEach((id) => {
       if (requestWatchersRef.current.has(id)) return;
+      if (!live.has(id)) {
+        // Finished, or older than the newest MAX_LIVE_JOBS: read once
+        if (readOnceRef.current.has(id)) return;
+        readOnceRef.current.add(id);
+        repository
+          .getRequest(id)
+          .then((req) => {
+            if (!mountedRef.current) return;
+            if (req) setOfferedRequests((prev) => ({ ...prev, [id]: req }));
+            else dropFromOffered(id);
+          })
+          .catch(() => readOnceRef.current.delete(id));
+        return;
+      }
       const stop = repository.subscribeToRequest(id, (req) => {
         if (!mountedRef.current) return;
-        if (req) setOfferedRequests((prev) => ({ ...prev, [id]: req }));
-        else dropFromOffered(id);
+        if (!req) {
+          dropFromOffered(id);
+          return;
+        }
+        setOfferedRequests((prev) => ({ ...prev, [id]: req }));
+        if (req.status === 'COMPLETED' || req.status === 'CANCELLED') {
+          // Nothing changes any more: stop watching
+          finishedRequestsRef.current.add(id);
+          readOnceRef.current.add(id);
+          requestWatchersRef.current.get(id)?.();
+          requestWatchersRef.current.delete(id);
+        }
       });
       requestWatchersRef.current.set(id, stop);
     });

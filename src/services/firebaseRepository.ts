@@ -85,6 +85,7 @@ import { generateRequestId, providerOfferId } from './ids';
 import { CANONICAL_CITIES, CANONICAL_CATEGORIES, normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 import { cleanImageForUpload } from './imageClean';
 import { countInBatch, explainRefusal } from './dailyUsage';
+import { isSameNumber } from './phoneLinks';
 import { isPortfolioSlot } from './portfolio';
 
 /**
@@ -316,6 +317,8 @@ export class FirebaseRepository implements Repository {
       userId,
       name: providerData.name?.trim() || '',
       phone: providerData.phone?.trim() || '',
+      // Shown as "confirmed number" only when it is the login number (firestore.rules checks it)
+      phoneVerified: isSameNumber(providerData.phone, auth?.currentUser?.phoneNumber),
       whatsapp: (providerData.whatsapp || providerData.phone)?.trim() || '',
       city,
       cityId,
@@ -1424,6 +1427,7 @@ export class FirebaseRepository implements Repository {
       providerUserId,
       providerName: offerData.providerName || '',
       providerPhone: offerData.providerPhone || '',
+      providerPhoneVerified: isSameNumber(offerData.providerPhone, auth?.currentUser?.phoneNumber),
       providerWhatsapp: offerData.providerWhatsapp || '',
       price,
       priceType,

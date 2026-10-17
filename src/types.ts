@@ -228,6 +228,8 @@ export interface ProviderOffer {
   providerName: string;
   providerPhone: string;
   providerWhatsapp: string;
+  /** providerPhone is the master's own login number, confirmed with the WhatsApp code (set by the rules check) */
+  providerPhoneVerified?: boolean;
   isDemo?: boolean;
   price: string;
   priceType?: OfferPriceType;
@@ -488,6 +490,8 @@ export interface Provider {
   userId?: string;
   name: string;
   phone: string;
+  /** phone is the master's own login number, confirmed with the WhatsApp code (checked by the rules) */
+  phoneVerified?: boolean;
   whatsapp: string;
   city: string;
   cityId?: string;
