@@ -184,6 +184,15 @@ async function main() {
   await sg.forgetAccount(master);
   assert(!('providerName' in ((await namedRef.get()).data() || {})), "Deleted master: the master's name leaves the review");
 
+  // --- 6. Operator rights follow the current list, not an old claim (functions/src/admin.ts)
+  const adPath = '../functions/src/admin';
+  const ad = await import(adPath);
+  await db.collection('config').doc('admins').set({ phones: '+7 701 111 22 33, 87022223344' });
+  assert((await ad.isOperator({ admin: true, phone_number: '+77011112233' })) === true, 'A listed operator with the claim is an operator');
+  assert((await ad.isOperator({ admin: true, phone_number: '+77025550000' })) === false, 'A removed operator with an old claim is not');
+  assert((await ad.isOperator({ phone_number: '+77011112233' })) === false, 'A listed number without the claim is not');
+  assert((await ad.isOperator({ admin: true })) === false, 'An account without a phone is not');
+
   console.log(failed ? `\nREVIEW FLOW: ${failed} FAILED` : '\nREVIEW FLOW: ALL CHECKS PASSED');
   process.exit(failed ? 1 : 0);
 }

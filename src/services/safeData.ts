@@ -2,6 +2,7 @@
  * Data written by other users (requests, messages, notifications) is shown on this device. These
  * helpers make sure a malformed value can't crash a screen or point at an outside website.
  */
+import type { ChatAttachment } from '../types';
 
 /** This project's Cloud Storage bucket, set at build time (VITE_FIREBASE_STORAGE_BUCKET). */
 function ownStorageBucket(): string {
@@ -39,6 +40,34 @@ export function safeMediaUrl(url: unknown): string {
 /** A string, or '' for anything else (numbers, objects, missing values). */
 export function safeText(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+/**
+ * Chat attachments as stored by the other participant, cleaned before they are shown: entries that
+ * are not objects or have no id are dropped, text fields become strings and sizes numbers, so a
+ * malformed record (written straight to the database) can't break the chat screen.
+ */
+export function cleanChatAttachments(raw: unknown): ChatAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 10).flatMap((a): ChatAttachment[] => {
+    if (!a || typeof a !== 'object') return [];
+    const x = a as Record<string, unknown>;
+    const id = safeText(x.id);
+    if (!id) return [];
+    const size = typeof x.sizeBytes === 'number' && Number.isFinite(x.sizeBytes) && x.sizeBytes >= 0 ? x.sizeBytes : 0;
+    return [
+      {
+        id,
+        type: x.type === 'image' ? 'image' : 'file',
+        storagePath: safeText(x.storagePath),
+        downloadUrl: safeText(x.downloadUrl),
+        fileName: safeText(x.fileName).slice(0, 200) || 'file',
+        mimeType: safeText(x.mimeType),
+        sizeBytes: size,
+        createdAt: safeText(x.createdAt),
+      },
+    ];
+  });
 }
 
 /** Coordinates as finite numbers, or null when the stored point is not usable. */

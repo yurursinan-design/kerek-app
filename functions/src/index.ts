@@ -19,13 +19,15 @@ export {
   pushOnNotificationCreated,
 } from './notifications';
 // The operator's panel: admin claim for the numbers in config/admins; see admin.ts
-export { claimAdmin } from './admin';
+export { claimAdmin, adminListChanged } from './admin';
 // Jobs done, answer speed and typical prices, counted from real events; see stats.ts
 export { statsOnOfferCreated, statsOnRequestCompleted, ratingsOnReviewWritten } from './stats';
 // Reviews are checked (suspicion signals and Gemini) before they are published; see reviewModeration.ts
 export { moderateReviewSubmission, decideReview, reviewerPhone } from './reviewModeration';
 // Which phone and network accounts log in from, for the review check; see signals.ts
 export { cleanupAccountData } from './signals';
+// Request file links stop working when the request's audience changes; see fileLinks.ts
+export { renewRequestFileLinks } from './fileLinks';
 // Copy of all personal data in Kazakhstan (Law 94-V art. 12 p. 2); see kzMirror.ts
 export {
   kzMirrorUsers,

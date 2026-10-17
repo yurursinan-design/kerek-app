@@ -11,6 +11,8 @@
 import * as crypto from 'crypto';
 import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { onDocumentDeleted } from 'firebase-functions/v2/firestore';
+import { eraseAccountFiles } from './fileLinks';
+import { appBucket } from './kzMirror';
 import './limits';
 
 /** Hashes kept per account: the newest ones */
@@ -99,8 +101,14 @@ export async function forgetAccount(uid: string): Promise<void> {
   }
 }
 
-/** Deleting an account (the app removes users/{uid}) also forgets it in the review check. */
+/**
+ * Deleting an account (the app removes users/{uid}) also forgets it in the review check and removes
+ * its request and portfolio files on the server, so an interrupted deletion in the app leaves none.
+ */
 export const cleanupAccountData = onDocumentDeleted(
-  { document: 'users/{uid}', region: 'asia-south1', maxInstances: 5 },
-  async (event) => forgetAccount(event.params.uid)
+  { document: 'users/{uid}', region: 'asia-south1', maxInstances: 5, timeoutSeconds: 300 },
+  async (event) => {
+    await forgetAccount(event.params.uid);
+    await eraseAccountFiles(appBucket.value(), event.params.uid);
+  }
 );

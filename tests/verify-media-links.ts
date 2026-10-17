@@ -3,7 +3,7 @@
  * when they point at this project's own Cloud Storage bucket or are local previews
  * (src/services/safeData.ts).
  */
-import { isTrustedMediaUrl } from '../src/services/safeData';
+import { cleanChatAttachments, isTrustedMediaUrl } from '../src/services/safeData';
 
 let failed = 0;
 function assert(cond: boolean, name: string) {
@@ -33,6 +33,19 @@ assert(isTrustedMediaUrl('data:image/jpeg;base64,AAAA', OWN), 'A photo preview m
 assert(!isTrustedMediaUrl('data:image/svg+xml;base64,PHN2Zz4=', OWN), 'An SVG "image" (it can carry scripts) is refused');
 assert(!isTrustedMediaUrl('data:text/html,<b>x</b>', OWN), 'A web page packed into a link is refused');
 assert(isTrustedMediaUrl('blob:https://tapsyr.web.app/1234', OWN), 'A local file preview is shown');
+
+// Chat attachments written by the other participant are cleaned before they are shown
+const cleaned = cleanChatAttachments([
+  { id: 'bad', type: 'file', fileName: { unexpected: true }, sizeBytes: 1 },
+  'just text',
+  null,
+  { type: 'image', fileName: 'no-id.jpg' },
+  { id: 'ok', type: 'image', storagePath: 'chat/c/m/a.jpg', fileName: 'a.jpg', mimeType: 'image/jpeg', sizeBytes: 'big' },
+]);
+assert(cleaned.length === 2, 'Entries without an id or not objects are dropped');
+assert(cleaned.every((a) => typeof a.fileName === 'string' && typeof a.sizeBytes === 'number'), 'Names become text and sizes numbers');
+assert(cleaned[0].fileName === 'file' && cleaned[1].fileName === 'a.jpg' && cleaned[1].type === 'image', 'A broken name shows as "file", good ones stay');
+assert(cleanChatAttachments({ not: 'a list' }).length === 0 && cleanChatAttachments(undefined).length === 0, 'Anything but a list gives no attachments');
 
 if (failed > 0) {
   console.error(`\n${failed} media link check(s) failed`);

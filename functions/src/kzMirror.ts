@@ -7,8 +7,11 @@
  * S3-compatible API): documents as JSON under firestore/<path>.json, files under storage/<path>.
  * Deleting a document or file deletes its copy.
  *
- * Each change re-reads the current state from Firestore / Cloud Storage before writing, so a
- * retried or late event can't put back an older version; failures are retried by the platform.
+ * Each change re-reads the current state from Firestore / Cloud Storage before writing, and reads
+ * it once more after writing: if it changed meanwhile (two events handled at the same time, the
+ * slower one writing an older version or putting back a deleted copy), the copy is written again
+ * from the current state. So the copy always ends at the latest version, and a deleted document or
+ * file stays deleted. Failures are retried by the platform.
  */
 import { getFirestore } from 'firebase-admin/firestore';
 import { getStorage } from 'firebase-admin/storage';
@@ -24,7 +27,7 @@ const kzBucket = defineString('KZ_STORAGE_BUCKET', { default: 'kerek-kz-data' })
 const kzEndpoint = defineString('KZ_STORAGE_ENDPOINT', { default: 'https://storage.yandexcloud.kz' });
 const kzRegion = defineString('KZ_STORAGE_REGION', { default: 'kz1' });
 // The app's Cloud Storage bucket, named here because the default-bucket lookup fails for this project
-const appBucket = defineString('APP_STORAGE_BUCKET', { default: 'kerek-9d153.firebasestorage.app' });
+export const appBucket = defineString('APP_STORAGE_BUCKET', { default: 'kerek-9d153.firebasestorage.app' });
 
 /** Collections whose documents contain personal data (all of them except short-lived login codes) */
 export const MIRRORED_PATHS = [
@@ -92,31 +95,61 @@ export function toJson(value: unknown): unknown {
   return value;
 }
 
+/** Rounds of write-then-check before giving up (the platform then retries the event) */
+const MAX_ROUNDS = 5;
+
+/**
+ * Writes the copy from the current state, then checks the state again and repeats while it changed.
+ * read() returns the current version (null when gone) and a write for it.
+ */
+async function converge(read: () => Promise<{ version: string | null; write: () => Promise<'put' | 'removed'> }>): Promise<'put' | 'removed'> {
+  let written: string | null | undefined;
+  let result: 'put' | 'removed' = 'removed';
+  for (let round = 0; round < MAX_ROUNDS; round++) {
+    const current = await read();
+    if (round > 0 && current.version === written) return result;
+    result = await current.write();
+    written = current.version;
+  }
+  throw new Error('kzMirror: the source kept changing while it was copied');
+}
+
 /** Brings the copy of one document in line with its current state. */
 export async function mirrorDocument(path: string, target: MirrorTarget = s3Target()): Promise<'put' | 'removed'> {
-  const snap = await getFirestore().doc(path).get();
   const key = `firestore/${path}.json`;
-  if (!snap.exists) {
-    await target.remove(key);
-    return 'removed';
-  }
-  const body = JSON.stringify({ path, updatedAt: snap.updateTime?.toDate().toISOString() || null, data: toJson(snap.data()) });
-  await target.put(key, body, 'application/json');
-  return 'put';
+  return converge(async () => {
+    const snap = await getFirestore().doc(path).get();
+    if (!snap.exists) {
+      return { version: null, write: async () => (await target.remove(key), 'removed' as const) };
+    }
+    const t = snap.updateTime;
+    const body = JSON.stringify({ path, updatedAt: t?.toDate().toISOString() || null, data: toJson(snap.data()) });
+    return {
+      version: t ? `${t.seconds}.${t.nanoseconds}` : 'unknown',
+      write: async () => (await target.put(key, body, 'application/json'), 'put' as const),
+    };
+  });
 }
 
 /** Brings the copy of one uploaded file in line with Cloud Storage (copied, or removed when gone). */
 export async function mirrorFile(bucket: string, name: string, target: MirrorTarget = s3Target()): Promise<'put' | 'removed'> {
-  const file = getStorage().bucket(bucket).file(name);
-  const [exists] = await file.exists();
   const key = `storage/${name}`;
-  if (!exists) {
-    await target.remove(key);
-    return 'removed';
-  }
-  const [[meta], [contents]] = await Promise.all([file.getMetadata(), file.download()]);
-  await target.put(key, contents, String(meta.contentType || 'application/octet-stream'));
-  return 'put';
+  return converge(async () => {
+    const file = getStorage().bucket(bucket).file(name);
+    const [exists] = await file.exists();
+    if (!exists) return { version: null, write: async () => (await target.remove(key), 'removed' as const) };
+    const [meta] = await file.getMetadata();
+    const generation = String(meta.generation || '');
+    return {
+      version: generation || 'unknown',
+      write: async () => {
+        // The bytes of exactly this version; if it was replaced meanwhile the next round copies the newer one
+        const [contents] = await getStorage().bucket(bucket).file(name, generation ? { generation } : {}).download();
+        await target.put(key, contents, String(meta.contentType || 'application/octet-stream'));
+        return 'put' as const;
+      },
+    };
+  });
 }
 
 // ---------------------------------------------------------------- triggers

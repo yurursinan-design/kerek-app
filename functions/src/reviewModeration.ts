@@ -17,6 +17,7 @@ import { defineSecret } from 'firebase-functions/params';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { HttpsError, onCall } from 'firebase-functions/v2/https';
 import { GEMINI_CONFIG } from './config';
+import { isOperator } from './admin';
 import { allowCall, DAY_MS } from './limits';
 
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
@@ -395,9 +396,9 @@ export const moderateReviewSubmission = onDocumentCreated(
   }
 );
 
-function operatorOnly(request: { auth?: { uid: string; token: Record<string, unknown> } }): string {
+async function operatorOnly(request: { auth?: { uid: string; token: Record<string, unknown> } }): Promise<string> {
   const uid = request.auth?.uid;
-  if (!uid || request.auth?.token?.admin !== true) throw new HttpsError('permission-denied', 'Only the operator can do this.');
+  if (!uid || !(await isOperator(request.auth?.token))) throw new HttpsError('permission-denied', 'Only the operator can do this.');
   return uid;
 }
 
@@ -411,7 +412,7 @@ function reviewIdOf(data: { id?: unknown } | undefined): string {
 export const decideReview = onCall<{ id?: string; action?: string }, Promise<{ status: string }>>(
   { region: REGION, maxInstances: 5, timeoutSeconds: 20 },
   async (request) => {
-    const uid = operatorOnly(request);
+    const uid = await operatorOnly(request);
     if (!(await allowCall(`decide_${uid}`, 200, Date.now(), 3600 * 1000))) {
       throw new HttpsError('resource-exhausted', 'Too many decisions, try again later.');
     }
@@ -433,7 +434,7 @@ export const decideReview = onCall<{ id?: string; action?: string }, Promise<{ s
 export const reviewerPhone = onCall<{ id?: string }, Promise<{ phone: string }>>(
   { region: REGION, maxInstances: 5, timeoutSeconds: 20 },
   async (request) => {
-    const uid = operatorOnly(request);
+    const uid = await operatorOnly(request);
     if (!(await allowCall(`reviewer_phone_${uid}`, 100, Date.now(), 3600 * 1000))) {
       throw new HttpsError('resource-exhausted', 'Too many look-ups, try again later.');
     }

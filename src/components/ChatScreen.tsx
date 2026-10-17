@@ -28,6 +28,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { useMediaUrls } from '../services/storageUrls';
+import { cleanChatAttachments } from '../services/safeData';
 
 // One tap fills the message box with a common phrase; the sender can still edit it before sending
 const QUICK_REPLIES: Record<'customer' | 'provider', { kz: string; ru: string }[]> = {
@@ -74,11 +75,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   // Viewing addresses of the files in the conversation (asked from Cloud Storage when shown)
   const chatMediaUrls = useMediaUrls(
-    messages.flatMap((m) =>
-      (Array.isArray(m.attachments) ? m.attachments : [])
-        .filter((att) => att && typeof att === 'object')
-        .map((att) => ({ ...att, id: `${m.id}/${att.id}` }))
-    )
+    messages.flatMap((m) => cleanChatAttachments(m.attachments).map((att) => ({ ...att, id: `${m.id}/${att.id}` })))
   );
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -523,7 +520,8 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
               msg.senderId === currentUid ||
               (Boolean(msg.senderRole) && msg.senderRole === (isCustomer ? 'customer' : 'provider'));
 
-            const hasAttachments = Boolean(msg.attachments && msg.attachments.length > 0);
+            const attachments = cleanChatAttachments(msg.attachments);
+            const hasAttachments = attachments.length > 0;
             const risk = isMe ? null : chatRisk(msg.text);
 
             return (
@@ -541,7 +539,7 @@ export const ChatScreen: React.FC<ChatScreenProps> = ({
                   {/* Attachments rendering */}
                   {hasAttachments && (
                     <div className="space-y-2 mb-2">
-                      {msg.attachments!.filter((att) => att && typeof att === 'object').map((att) => {
+                      {attachments.map((att) => {
                         if (att.type === 'image') {
                           return (
                             <div key={att.id} className="relative group overflow-hidden rounded-xl bg-slate-900/10">

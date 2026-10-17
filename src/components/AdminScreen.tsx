@@ -8,6 +8,7 @@ import { reviewsCountLabel } from '../services/publicStats';
 import {
   AdminReport,
   blockAccount,
+  checkAdminRole,
   decideReviewCheck,
   HealthNumbers,
   isAccountBlocked,
@@ -54,24 +55,34 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [blocked, setBlocked] = useState<Record<string, boolean>>({});
+  // Opening the panel asks the server again, which also refreshes the operator list the rules check
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    checkAdminRole(true)
+      .catch(() => false)
+      .finally(() => setReady(true));
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
     setError(null);
     const fail = (err: unknown) => setError(getFriendlyErrorMessage(err, language));
     if (tab === 'health' && !health) loadHealthNumbers().then(setHealth).catch(fail);
     if (tab === 'reports' && !reports) loadReports().then(setReports).catch(fail);
     if (tab === 'masters' && !masters) loadMasters().then(setMasters).catch(fail);
     if (tab === 'reviews' && !reviewChecks) loadReviewChecks().then(setReviewChecks).catch(fail);
-  }, [tab, health, reports, masters, reviewChecks, language]);
+  }, [ready, tab, health, reports, masters, reviewChecks, language]);
 
   // Loaded at once so the tab shows how many reviews wait for a decision
   useEffect(() => {
+    if (!ready) return;
     loadReviewChecks()
       .then(setReviewChecks)
       .catch(() => {
         // shown when the tab is opened
       });
-  }, []);
+  }, [ready]);
 
   const visibleReports = useMemo(
     () => (reports || []).filter((r) => showResolved || r.status !== 'resolved'),

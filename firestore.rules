@@ -33,7 +33,12 @@ service cloud.firestore {
     // The operator (owner): an account whose phone is in config/admins gets the admin claim from the
     // claimAdmin function; it can manage badges, hide or block accounts and read reports
     function isAdmin() {
-      return isSignedIn() && request.auth.token.admin == true;
+      // The claim counts only while the phone is still on the operator list (config/adminPhones, kept
+      // by the server from config/admins): removing a number takes the rights away at once
+      return isSignedIn() && request.auth.token.admin == true
+        && ('phone_number' in request.auth.token) && request.auth.token.phone_number is string
+        && exists(/databases/$(database)/documents/config/adminPhones)
+        && request.auth.token.phone_number in get(/databases/$(database)/documents/config/adminPhones).data.get('e164', []);
     }
 
     // An account the operator blocked (bans/{uid}) can't publish requests, offers or a profile
@@ -136,6 +141,35 @@ service cloud.firestore {
         && strMax(m.understanding, 'preferredDate', 100)
         && (!('missingInformation' in m.understanding) || (m.understanding.missingInformation is list && m.understanding.missingInformation.size() <= 10))
         && (!('suggestedQuestions' in m.understanding) || (m.understanding.suggestedQuestions is list && m.understanding.suggestedQuestions.size() <= 10)));
+    }
+
+    // One file attached to a chat message, as the app writes it (path, name, type and size): checked
+    // field by field so a malformed entry can't break the other participant's chat screen
+    function chatAttachmentOk(a, conversationId) {
+      return a is map
+        && a.keys().hasAll(['id', 'type', 'storagePath', 'fileName', 'mimeType', 'sizeBytes'])
+        && a.keys().hasOnly(['id', 'type', 'storagePath', 'downloadUrl', 'fileName', 'mimeType', 'sizeBytes', 'width', 'height', 'createdAt'])
+        && a.id is string && a.id.size() > 0 && a.id.size() <= 100
+        && a.type in ['image', 'file']
+        && a.storagePath is string && a.storagePath.size() <= 300
+        && a.storagePath.matches('chat/' + conversationId + '/[^/]+/[^/]+')
+        && (!('downloadUrl' in a) || a.downloadUrl == '')
+        && a.fileName is string && a.fileName.size() > 0 && a.fileName.size() <= 200
+        && a.mimeType is string && a.mimeType.size() <= 100
+        && a.sizeBytes is number && a.sizeBytes >= 0 && a.sizeBytes <= 25 * 1024 * 1024
+        && (!('width' in a) || a.width is number)
+        && (!('height' in a) || a.height is number)
+        && (!('createdAt' in a) || (a.createdAt is string && a.createdAt.size() <= 40));
+    }
+
+    // A message carries at most three files (the app sends one)
+    function chatAttachmentsOk(m, conversationId) {
+      return !('attachments' in m) || (
+        m.attachments is list && m.attachments.size() <= 3
+        && (m.attachments.size() < 1 || chatAttachmentOk(m.attachments[0], conversationId))
+        && (m.attachments.size() < 2 || chatAttachmentOk(m.attachments[1], conversationId))
+        && (m.attachments.size() < 3 || chatAttachmentOk(m.attachments[2], conversationId))
+      );
     }
 
     function attachmentsOk(m) {
@@ -702,7 +736,7 @@ service cloud.firestore {
                       && incoming().keys().hasOnly(['id', 'conversationId', 'requestId', 'senderId', 'senderRole', 'type', 'text', 'attachments', 'isRead', 'readAt', 'createdAt'])
                       && strMax(incoming(), 'createdAt', 40)
                       && incoming().text is string && incoming().text.size() <= 2000
-                      && (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 10))
+                      && chatAttachmentsOk(incoming(), conversationId)
                       && conversationId == ('conv_' + incoming().requestId)
                       && exists(/databases/$(database)/documents/conversations/$(conversationId))
                       && get(/databases/$(database)/documents/conversations/$(conversationId)).data.requestId == incoming().requestId
@@ -776,9 +810,9 @@ service cloud.firestore {
       allow get: if isSignedIn() && isValidId(reportId) && (
         (resource == null && reportId.matches('REPORT-' + request.auth.uid + '-.+')) ||
         (resource != null && resource.data.reporterId == request.auth.uid) ||
-        request.auth.token.admin == true
+        isAdmin()
       );
-      allow list: if isSignedIn() && request.auth.token.admin == true;
+      allow list: if isAdmin();
       allow create: if hasVerifiedPhone()
                     && isValidId(reportId)
                     && incoming().keys().hasOnly(['id', 'reporterId', 'targetType', 'targetId', 'requestId', 'reason', 'details', 'createdAt'])

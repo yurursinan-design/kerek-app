@@ -95,6 +95,12 @@ async function runTestSuite() {
     return batch.commit();
   };
 
+  // Operators: the admin claim counts only while the phone is on the current operator list, which the
+  // server keeps in config/adminPhones (functions/src/admin.ts)
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'config', 'adminPhones'), { e164: ['+77000000001', '+77000000007', '+77000000008', '+77000000009'] });
+  });
+
   console.log('2. Test environment ready. Running isolated security scenarios...\n');
 
   try {
@@ -1910,6 +1916,27 @@ async function runTestSuite() {
       }));
     });
 
+    await test('Chat attachments must have the expected shape (a malformed one could break the chat screen)', async () => {
+      const msg = (id: string, attachments: unknown[]) => ({
+        id, conversationId: 'conv_req_a', requestId: 'req_a', senderId: 'cust_a', senderRole: 'customer', type: 'file', text: '',
+        attachments, isRead: false, readAt: null, createdAt: new Date().toISOString(),
+      });
+      const good = {
+        id: 'att1', type: 'file', storagePath: 'chat/conv_req_a/m_ok/doc.pdf', downloadUrl: '', fileName: 'doc.pdf',
+        mimeType: 'application/pdf', sizeBytes: 1200, createdAt: new Date().toISOString(),
+      };
+      const ref = (id: string) => doc(custA(), 'conversations', 'conv_req_a', 'messages', id);
+      await assertSucceeds(setDoc(ref('m_ok'), msg('m_ok', [good])));
+      await assertFails(setDoc(ref('m_bad1'), msg('m_bad1', [{ id: 'bad', type: 'file', fileName: { unexpected: true }, sizeBytes: 1 }])));
+      await assertFails(setDoc(ref('m_bad2'), msg('m_bad2', [{ ...good, fileName: { unexpected: true } }])));
+      await assertFails(setDoc(ref('m_bad3'), msg('m_bad3', ['just text'])));
+      await assertFails(setDoc(ref('m_bad4'), msg('m_bad4', [{ ...good, storagePath: 'chat/conv_other/x/doc.pdf' }])));
+      await assertFails(setDoc(ref('m_bad5'), msg('m_bad5', [{ ...good, downloadUrl: 'https://evil.example/x' }])));
+      await assertFails(setDoc(ref('m_bad6'), msg('m_bad6', [{ ...good, extra: 'x' }])));
+      await assertFails(setDoc(ref('m_bad7'), msg('m_bad7', [good, { ...good, id: 'att2', sizeBytes: 'big' }])));
+      await assertFails(setDoc(ref('m_bad8'), msg('m_bad8', [good, good, good, good])));
+    });
+
     await test('Appointment is created as a proposal only (no self-confirmed or completed work)', async () => {
       const base = {
         id: 'appointment_req_a', requestId: 'req_a', customerId: 'cust_a', providerId: 'prov_a', providerUserId: 'prov_a',
@@ -2007,6 +2034,22 @@ async function runTestSuite() {
       await assertFails(getDocs(collection(phoneUser('rep_a').firestore(), 'reports')));
       const admin = testEnv.authenticatedContext('op_1', { admin: true, phone_number: '+77000000001' }).firestore();
       await assertSucceeds(getDocs(collection(admin, 'reports')));
+    });
+
+    await test('An operator removed from the list loses admin rights at once, even with an old claim', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'providers', 'prov_rev'), { id: 'prov_rev', userId: 'prov_rev', name: 'Мастер', city: 'Кызылорда' });
+      });
+      const removed = testEnv.authenticatedContext('op_removed', { admin: true, phone_number: '+77000000555' }).firestore();
+      await assertFails(updateDoc(doc(removed, 'providers', 'prov_rev'), { verified: true, updatedAt: new Date().toISOString() }));
+      await assertFails(getDocs(collection(removed, 'reports')));
+      const noPhone = testEnv.authenticatedContext('op_nophone', { admin: true }).firestore();
+      await assertFails(getDocs(collection(noPhone, 'reports')));
+      const current = testEnv.authenticatedContext('op_1', { admin: true, phone_number: '+77000000001' }).firestore();
+      await assertSucceeds(updateDoc(doc(current, 'providers', 'prov_rev'), { verified: true, updatedAt: new Date().toISOString() }));
+      // A listed phone without the claim is not an operator either
+      const unclaimed = testEnv.authenticatedContext('op_unclaimed', { phone_number: '+77000000001' }).firestore();
+      await assertFails(getDocs(collection(unclaimed, 'reports')));
     });
 
     // ---------------- 18. Account deletion clean-up ----------------
