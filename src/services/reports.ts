@@ -1,4 +1,5 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, writeBatch } from 'firebase/firestore';
+import { countInBatch, explainRefusal } from './dailyUsage';
 import { auth, db, isFirebaseConfigured } from './firebase';
 
 export type ReportTargetType = 'provider' | 'offer' | 'request' | 'conversation';
@@ -23,7 +24,9 @@ export async function submitReport(input: ReportInput): Promise<'sent' | 'alread
   const ref = doc(db, 'reports', id);
   if ((await getDoc(ref)).exists()) return 'already';
   const details = (input.details || '').trim().slice(0, 1000);
-  await setDoc(ref, {
+  // Counted in today's report limit in the same write (firestore.rules)
+  const batch = writeBatch(db);
+  batch.set(ref, {
     id,
     reporterId: user.uid,
     targetType: input.targetType,
@@ -33,6 +36,8 @@ export async function submitReport(input: ReportInput): Promise<'sent' | 'alread
     ...(details ? { details } : {}),
     createdAt: new Date().toISOString(),
   });
+  countInBatch(batch, db, user.uid, 'reports');
+  await batch.commit().catch((err) => explainRefusal(err, db!, user.uid, 'reports'));
   return 'sent';
 }
 

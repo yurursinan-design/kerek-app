@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // Firebase Storage Security Rules for KEREK
-//   chat/{conversationId}/{messageId}/{fileName}  — files shared in a conversation
+//   chat/{conversationId}/{uploadId}/{fileName}   — files shared in a conversation
 //   requests/{requestId}/{fileName}               — photos, videos and voice notes of a request
 //   providers/{uid}/portfolio/{slot}              — a master's work photos (slots p0 … p7)
 //
@@ -41,8 +41,18 @@ service firebase.storage {
         && request.resource.size <= maxBytes;
     }
 
+    // A chat file needs its ticket (chatUploads/{uploadId} in Firestore, counted in the uploader's
+    // daily file limit) naming this conversation and exactly this file name: one ticket, one file
+    function chatTicketOk(conversationId, uploadId, fileName) {
+      let path = /databases/(default)/documents/chatUploads/$(uploadId);
+      return firestore.exists(path)
+        && firestore.get(path).data.uid == request.auth.uid
+        && firestore.get(path).data.conversationId == conversationId
+        && firestore.get(path).data.fileName == fileName;
+    }
+
     // Chat files: images, or PDF documents such as estimates and invoices
-    match /chat/{conversationId}/{messageId}/{fileName} {
+    match /chat/{conversationId}/{uploadId}/{fileName} {
       allow read: if isConversationParticipant(conversationId);
 
       // resource is the file already stored at this path: uploads never replace an existing file.
@@ -50,6 +60,7 @@ service firebase.storage {
       allow create: if resource == null
                     && isConversationParticipant(conversationId)
                     && notBanned()
+                    && chatTicketOk(conversationId, uploadId, fileName)
                     && requestDoc(conversationDoc(conversationId).get('requestId', '-')).get('status', '') in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS']
                     && request.resource.size > 0
                     && (isImage(10 * 1024 * 1024)

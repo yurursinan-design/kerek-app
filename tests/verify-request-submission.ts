@@ -10,6 +10,8 @@ import { doc, getDoc } from 'firebase/firestore';
 import { db, storage } from '../src/services/firebase';
 import { firebaseRepository } from '../src/services/firebaseRepository';
 import { generateRequestId } from '../src/services/ids';
+import { DAILY_LIMITS, usageDayKey } from '../src/services/dailyUsage';
+import { getFriendlyErrorMessage } from '../src/services/errorHandler';
 import { actAs } from './helpers/actors';
 
 if (typeof globalThis.localStorage === 'undefined') {
@@ -106,6 +108,24 @@ async function main() {
   const other = await firebaseRepository.uploadRequestAttachment(id1, { ...photo, name: 'rakovina.jpg' }, customer, 0);
   assert(other.storagePath === `requests/${id1}/att1`, 'A different file moves on to the next free slot', other.storagePath);
   await deleteObject(ref(storage!, `requests/${id1}/att0`)).catch(() => {});
+
+  // 6. The day's request limit: the app explains it instead of a generic error
+  {
+    const { createRequire } = await import('node:module');
+    const requireFromFunctions = createRequire(new URL('../functions/package.json', import.meta.url));
+    const adminApp = requireFromFunctions('firebase-admin/app');
+    if (!adminApp.getApps().length) adminApp.initializeApp({ projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'demo-kerek' });
+    const adminDb = requireFromFunctions('firebase-admin/firestore').getFirestore();
+    await adminDb.doc(`usage/${customer}_${usageDayKey()}`).set({ uid: customer, requests: DAILY_LIMITS.requests }, { merge: true });
+    let limitError: unknown = null;
+    try {
+      await firebaseRepository.createRequest({ ...base, id: generateRequestId(), customerId: customer });
+    } catch (err) {
+      limitError = err;
+    }
+    const shown = getFriendlyErrorMessage(limitError, 'ru');
+    assert(/дневной лимит/.test(shown), 'The 11th request of the day is refused with the daily-limit message', shown);
+  }
 
   console.log(failed ? `\nREQUEST SUBMISSION: ${failed} FAILED` : '\nREQUEST SUBMISSION: ALL CHECKS PASSED');
   process.exit(failed ? 1 : 0);

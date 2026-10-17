@@ -49,6 +49,27 @@ service cloud.firestore {
       return !exists(/databases/$(database)/documents/bans/$(request.auth.uid));
     }
 
+    // ---- Daily limits per account (usage/{uid}_{yyyymmdd}, UTC day) ----
+    // Requests, messages, reports and chat file uploads are each counted in the caller's usage
+    // document for today, in the same batch as the write (increment(1)); the write is refused when
+    // it isn't counted or the day's limit is reached. Protects people from spam and the project
+    // from cost, whatever client sends the writes.
+    function todayKey() {
+      return string(request.time.year() * 10000 + request.time.month() * 100 + request.time.day());
+    }
+    function usagePath() {
+      return /databases/$(database)/documents/usage/$(request.auth.uid + '_' + todayKey());
+    }
+    function countedToday(field, max) {
+      let before = exists(usagePath()) ? get(usagePath()).data.get(field, 0) : 0;
+      let after = getAfter(usagePath()).data.get(field, 0);
+      return after == before + 1 && after <= max;
+    }
+    function DAILY_REQUESTS() { return 10; }
+    function DAILY_MESSAGES() { return 300; }
+    function DAILY_REPORTS() { return 20; }
+    function DAILY_CHAT_FILES() { return 30; }
+
     // Optional string field: absent, or a string of at most n characters
     function strMax(m, k, n) {
       return !(k in m) || (m[k] is string && m[k].size() <= n);
@@ -357,6 +378,7 @@ service cloud.firestore {
                     && isValidId(requestId)
                     && incoming().id == requestId
                     && incoming().customerId == request.auth.uid
+                    && countedToday('requests', DAILY_REQUESTS())
                     && incoming().city is string && incoming().city.size() <= 50
                     && incoming().category is string && incoming().category.size() <= 100
                     && ('service' in incoming()) && incoming()['service'] is string && incoming()['service'].size() <= 150
@@ -779,6 +801,7 @@ service cloud.firestore {
                       );
         allow create: if isSignedIn()
                       && notBanned()
+                      && countedToday('messages', DAILY_MESSAGES())
                       && isValidId(messageId)
                       && incoming().id == messageId
                       && incoming().conversationId == conversationId
@@ -857,6 +880,42 @@ service cloud.firestore {
     // =================== Reports Collection ===================
     // "Report" button: a phone-verified user flags a provider, offer, request or chat. One report per
     // user and target (the id is bound to both), write-once; only operators (admin claim) read them.
+    // Today's counters of the account (see countedToday): only ever one up, only its own, only today
+    match /usage/{usageId} {
+      allow get: if isSignedIn() && usageId.matches(request.auth.uid + '_[0-9]{8}');
+      allow list: if false;
+      allow create, update: if isSignedIn()
+                    && usageId == request.auth.uid + '_' + todayKey()
+                    && incoming().keys().hasOnly(['uid', 'requests', 'messages', 'reports', 'files', 'expireAt'])
+                    && incoming().uid == request.auth.uid
+                    && incoming().expireAt is timestamp
+                    && usageStepOk('requests') && usageStepOk('messages') && usageStepOk('reports') && usageStepOk('files');
+      allow delete: if false;
+    }
+    function usageStepOk(field) {
+      let before = resource == null ? 0 : resource.data.get(field, 0);
+      let after = incoming().get(field, 0);
+      return after is int && (after == before || after == before + 1);
+    }
+
+    // A ticket for one chat file: storage.rules lets exactly this file name be uploaded under this
+    // ticket's folder, and the ticket is counted in the uploader's daily file limit
+    match /chatUploads/{uploadId} {
+      allow get: if isSignedIn() && resource != null && resource.data.uid == request.auth.uid;
+      allow list: if false;
+      allow create: if hasVerifiedPhone()
+                    && notBanned()
+                    && isValidId(uploadId)
+                    && incoming().keys().hasOnly(['uid', 'conversationId', 'fileName', 'createdAt', 'expireAt'])
+                    && incoming().uid == request.auth.uid
+                    && incoming().conversationId is string && isValidId(incoming().conversationId)
+                    && incoming().fileName is string && incoming().fileName.size() > 0 && incoming().fileName.size() <= 200
+                    && incoming().createdAt is string && incoming().createdAt.size() <= 40
+                    && incoming().expireAt is timestamp
+                    && countedToday('files', DAILY_CHAT_FILES());
+      allow update, delete: if false;
+    }
+
     match /reports/{reportId} {
       allow get: if isSignedIn() && isValidId(reportId) && (
         (resource == null && reportId.matches('REPORT-' + request.auth.uid + '-.+')) ||
@@ -875,7 +934,20 @@ service cloud.firestore {
                     && incoming().reason in ['fraud', 'spam', 'rude', 'fake', 'no_show', 'other']
                     && (!('requestId' in incoming()) || isValidId(incoming().requestId))
                     && strMax(incoming(), 'details', 1000)
-                    && incoming().createdAt is string && incoming().createdAt.size() >= 10 && incoming().createdAt.size() <= 40;
+                    && incoming().createdAt is string && incoming().createdAt.size() >= 10 && incoming().createdAt.size() <= 40
+                    && countedToday('reports', DAILY_REPORTS())
+                    // The target exists; a conversation is reported only by one of its two participants
+                    && (
+                      (incoming().targetType == 'provider' && exists(/databases/$(database)/documents/providers/$(incoming().targetId))) ||
+                      (incoming().targetType == 'offer' && exists(/databases/$(database)/documents/offers/$(incoming().targetId))) ||
+                      (incoming().targetType == 'request' && exists(/databases/$(database)/documents/requests/$(incoming().targetId))) ||
+                      (incoming().targetType == 'conversation'
+                        && exists(/databases/$(database)/documents/conversations/$(incoming().targetId))
+                        && request.auth.uid in [
+                          get(/databases/$(database)/documents/conversations/$(incoming().targetId)).data.get('customerId', ''),
+                          get(/databases/$(database)/documents/conversations/$(incoming().targetId)).data.get('providerUserId', '')
+                        ])
+                    );
       // The operator marks a report handled
       allow update: if isAdmin()
                     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'resolution', 'resolvedAt'])

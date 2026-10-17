@@ -28,6 +28,8 @@ export { moderateReviewSubmission, decideReview, reviewerPhone } from './reviewM
 export { cleanupAccountData } from './signals';
 // Request file links stop working when the request's audience changes; see fileLinks.ts
 export { renewRequestFileLinks } from './fileLinks';
+// Uploaded files must be what their type says; photos lose hidden metadata; see uploadCheck.ts
+export { checkUploadedFile } from './uploadCheck';
 // Copy of all personal data in Kazakhstan (Law 94-V art. 12 p. 2); see kzMirror.ts
 export {
   kzMirrorUsers,

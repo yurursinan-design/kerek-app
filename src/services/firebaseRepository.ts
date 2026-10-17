@@ -18,6 +18,7 @@ import {
   limit,
   onSnapshot,
   increment,
+  Timestamp,
   type Firestore,
   type Query,
   type QuerySnapshot,
@@ -83,6 +84,7 @@ import { getCurrentUserId } from './localRepository';
 import { generateRequestId, providerOfferId } from './ids';
 import { CANONICAL_CITIES, CANONICAL_CATEGORIES, normalizeCategoryId, normalizeCityId, isCategoryMatch } from './taxonomy';
 import { cleanImageForUpload } from './imageClean';
+import { countInBatch, explainRefusal } from './dailyUsage';
 import { isPortfolioSlot } from './portfolio';
 
 /**
@@ -528,6 +530,7 @@ export class FirebaseRepository implements Repository {
       // checks the contacts against the request written in the same batch)
       const batch = writeBatch(firestore);
       batch.set(reqRef, sanitizeForFirestore(sharedRequest));
+      countInBatch(batch, firestore, customerId, 'requests');
       if (customerPhone || newRequest.location || realName) {
         batch.set(
           doc(firestore, 'requestContacts', id),
@@ -541,7 +544,8 @@ export class FirebaseRepository implements Repository {
           })
         );
       }
-      await batch.commit();
+
+      await batch.commit().catch((err) => explainRefusal(err, firestore, customerId, 'requests'));
 
       return {
         ...newRequest,
@@ -2249,6 +2253,7 @@ export class FirebaseRepository implements Repository {
       const convRef = doc(firestore, 'conversations', cleanId);
 
       batch.set(msgRef, sanitizeForFirestore(newMsg));
+      countInBatch(batch, firestore, authUid, 'messages');
       batch.update(
         convRef,
         sanitizeForFirestore({
@@ -2261,7 +2266,7 @@ export class FirebaseRepository implements Repository {
         })
       );
 
-      await batch.commit();
+      await batch.commit().catch((err) => explainRefusal(err, firestore, authUid, 'messages'));
 
       // Non-blocking notification to peer (chat delivery never blocked by notification errors)
       notificationService.notifyNewMessage(conv, newMsg).catch(() => {});
@@ -2316,12 +2321,25 @@ export class FirebaseRepository implements Repository {
 
     const sanitizedName = sanitizeFileName(file.name);
     const attachmentId = `att_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const messageId = `msg_pending_${Date.now()}`;
-    const storagePath = `chat/${cleanId}/${messageId}/${attachmentId}_${sanitizedName}`;
+    // One ticket per file (chatUploads/{id}, counted in today's file limit): storage.rules accepts
+    // exactly this file name in this ticket's folder
+    const storagePath = `chat/${cleanId}/${attachmentId}/${sanitizedName}`;
 
     if (!storage) {
       throw new Error('Firebase Storage is not configured or unavailable');
     }
+    const firestore = this.ensureDb();
+    const ticket = writeBatch(firestore);
+    ticket.set(doc(firestore, 'chatUploads', attachmentId), {
+      uid: authUid,
+      conversationId: cleanId,
+      fileName: sanitizedName,
+      createdAt: new Date().toISOString(),
+      // A Firestore TTL policy on chatUploads.expireAt removes used tickets (firestore.indexes.json)
+      expireAt: Timestamp.fromMillis(Date.now() + 7 * 24 * 3600 * 1000),
+    });
+    countInBatch(ticket, firestore, authUid, 'files');
+    await ticket.commit().catch((err) => explainRefusal(err, firestore, authUid, 'files'));
 
     // Determine binary payload
     let blobPayload: Blob | Uint8Array | ArrayBuffer;

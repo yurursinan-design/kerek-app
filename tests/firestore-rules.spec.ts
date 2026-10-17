@@ -24,6 +24,10 @@ import {
   where,
   writeBatch,
   deleteField,
+  increment,
+  Timestamp,
+  type DocumentReference,
+  type SetOptions,
 } from 'firebase/firestore';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -31,6 +35,7 @@ import { firebaseRepository } from '../src/services/firebaseRepository';
 import { ensureFirebaseAuth, auth } from '../src/services/firebase';
 import { setCurrentUserId } from '../src/services/localRepository';
 import { scheduleValueAt } from '../src/services/dateFormat';
+import { usageDayKey } from '../src/services/dailyUsage';
 
 /** A valid visit time some hours from now, as the app stores it ("2026-10-18T10:00+05:00") */
 const visitIn = (hours: number) => scheduleValueAt(Date.now() + hours * 3600 * 1000);
@@ -39,6 +44,25 @@ const PROJECT_ID = 'kerek-emulator-security-test';
 const RULES_PATH = path.resolve(process.cwd(), 'firestore.rules');
 
 let testEnv: RulesTestEnvironment;
+
+/** Who each signed-in test Firestore belongs to (filled in by the authenticatedContext wrapper) */
+const uidOf = new WeakMap<object, string>();
+const COUNTED: Record<string, string> = { requests: 'requests', messages: 'messages', reports: 'reports' };
+
+/**
+ * setDoc as the app writes it: a new request, message or report by a signed-in user goes together
+ * with today's usage count (firestore.rules, countedToday). Other writes, and writes with the rules
+ * switched off, are plain setDoc.
+ */
+function countedSet(ref: DocumentReference, data: any, options?: SetOptions): Promise<void> {
+  const uid = uidOf.get(ref.firestore);
+  const field = COUNTED[ref.parent.id];
+  if (!uid || !field || options) return options ? setDoc(ref, data, options) : setDoc(ref, data);
+  const b = writeBatch(ref.firestore);
+  b.set(ref, data);
+  b.set(doc(ref.firestore, 'usage', `${uid}_${usageDayKey()}`), { uid, [field]: increment(1), expireAt: Timestamp.fromMillis(Date.now() + 86400000) }, { merge: true });
+  return b.commit();
+}
 
 async function runTestSuite() {
   console.log('===============================================================');
@@ -77,6 +101,21 @@ async function runTestSuite() {
     },
   });
 
+  // Every signed-in context remembers its user, so countedSet can count writes like the app does
+  const plainContext = testEnv.authenticatedContext.bind(testEnv);
+  (testEnv as any).authenticatedContext = (uid: string, claims?: any) => {
+    const ctx = plainContext(uid, claims);
+    const plainFirestore = ctx.firestore.bind(ctx);
+    (ctx as any).firestore = (...args: any[]) => {
+      const f = (plainFirestore as any)(...args);
+      uidOf.set(f, uid);
+      // doc() works on the modular Firestore inside the compat one the test library returns
+      if (f?._delegate) uidOf.set(f._delegate, uid);
+      return f;
+    };
+    return ctx;
+  };
+
   // Publishing (requests, offers, provider profiles) requires a phone-verified account, so test users
   // carry a phone_number claim unless a test deliberately uses anonymousUser().
   const phoneUser = (uid: string) => testEnv.authenticatedContext(uid, { phone_number: '+77000000000' });
@@ -85,7 +124,7 @@ async function runTestSuite() {
   // An offer is written together with the request's offer count, as the app does (the rules require both)
   const sendOffer = async (db: any, offerId: string, data: Record<string, unknown>) => {
     const requestId = String(data.requestId || '');
-    if (!requestId) return setDoc(doc(db, 'offers', offerId), data);
+    if (!requestId) return countedSet(doc(db, 'offers', offerId), data);
     let count = 0;
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const snap = await getDoc(doc(ctx.firestore(), 'requests', requestId));
@@ -102,7 +141,7 @@ async function runTestSuite() {
   // Operators: the admin claim counts only while the phone is on the current operator list, which the
   // server keeps in config/adminPhones (functions/src/admin.ts)
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
-    await setDoc(doc(ctx.firestore(), 'config', 'adminPhones'), { e164: ['+77000000001', '+77000000007', '+77000000008', '+77000000009'] });
+    await countedSet(doc(ctx.firestore(), 'config', 'adminPhones'), { e164: ['+77000000001', '+77000000007', '+77000000008', '+77000000009'] });
   });
 
   console.log('2. Test environment ready. Running isolated security scenarios...\n');
@@ -121,7 +160,7 @@ async function runTestSuite() {
     await test('Unauthenticated user cannot create request', async () => {
       const unauthDb = testEnv.unauthenticatedContext().firestore();
       await assertFails(
-        setDoc(doc(unauthDb, 'requests', 'req_unauth'), {
+        countedSet(doc(unauthDb, 'requests', 'req_unauth'), {
           id: 'req_unauth',
           customerId: 'unauth_user',
           city: 'Almaty',
@@ -134,7 +173,7 @@ async function runTestSuite() {
 
     await test('Unauthenticated user cannot write to arbitrary collection (Default Deny)', async () => {
       const unauthDb = testEnv.unauthenticatedContext().firestore();
-      await assertFails(setDoc(doc(unauthDb, 'admin_secrets', 'secret_1'), { secret: '123' }));
+      await assertFails(countedSet(doc(unauthDb, 'admin_secrets', 'secret_1'), { secret: '123' }));
     });
 
     // =========================================================================
@@ -145,7 +184,7 @@ async function runTestSuite() {
     await test('Authenticated user can create and read their own profile', async () => {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
-        setDoc(doc(aliceDb, 'users', 'user_alice'), {
+        countedSet(doc(aliceDb, 'users', 'user_alice'), {
           id: 'user_alice',
           name: 'Alice',
           createdAt: new Date().toISOString(),
@@ -160,7 +199,7 @@ async function runTestSuite() {
       await assertFails(getDoc(doc(bobDb, 'users', 'user_alice')));
       // Write / spoof Alice's profile
       await assertFails(
-        setDoc(doc(bobDb, 'users', 'user_alice'), {
+        countedSet(doc(bobDb, 'users', 'user_alice'), {
           id: 'user_alice',
           name: 'Attacker Bob',
           createdAt: new Date().toISOString(),
@@ -176,7 +215,7 @@ async function runTestSuite() {
     await test('Provider can create their own profile with matching UID', async () => {
       const masterDb = phoneUser('prov_master1').firestore();
       await assertSucceeds(
-        setDoc(doc(masterDb, 'providers', 'prov_master1'), {
+        countedSet(doc(masterDb, 'providers', 'prov_master1'), {
           id: 'prov_master1',
           userId: 'prov_master1',
           name: 'Master Ruslan',
@@ -190,7 +229,7 @@ async function runTestSuite() {
     await test('Provider cannot create profile under another user ID or spoof userId', async () => {
       const attackerDb = phoneUser('user_attacker').firestore();
       await assertFails(
-        setDoc(doc(attackerDb, 'providers', 'prov_master2'), {
+        countedSet(doc(attackerDb, 'providers', 'prov_master2'), {
           id: 'prov_master2',
           userId: 'user_attacker',
           name: 'Fake Master',
@@ -199,7 +238,7 @@ async function runTestSuite() {
         })
       );
       await assertFails(
-        setDoc(doc(attackerDb, 'providers', 'user_attacker'), {
+        countedSet(doc(attackerDb, 'providers', 'user_attacker'), {
           id: 'user_attacker',
           userId: 'prov_master1', // Spoofing master1's userId
           name: 'Fake Master',
@@ -217,7 +256,7 @@ async function runTestSuite() {
     await test('Customer can create OPEN request with matching customerId', async () => {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
-        setDoc(doc(aliceDb, 'requests', 'req_alice_01'), {
+        countedSet(doc(aliceDb, 'requests', 'req_alice_01'), {
           id: 'req_alice_01',
           customerId: 'user_alice',
           city: 'almaty',
@@ -232,7 +271,7 @@ async function runTestSuite() {
     await test('User cannot create request on behalf of another customer', async () => {
       const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
-        setDoc(doc(bobDb, 'requests', 'req_bob_spoof'), {
+        countedSet(doc(bobDb, 'requests', 'req_bob_spoof'), {
           id: 'req_bob_spoof',
           customerId: 'user_alice', // Spoofing Alice as customer
           city: 'almaty',
@@ -260,7 +299,7 @@ async function runTestSuite() {
     // Seed a second provider for competitive / negative scenario tests
     await testEnv.withSecurityRulesDisabled(async (adminContext) => {
       const adminDb = adminContext.firestore();
-      await setDoc(doc(adminDb, 'providers', 'prov_master2'), {
+      await countedSet(doc(adminDb, 'providers', 'prov_master2'), {
         id: 'prov_master2',
         userId: 'prov_master2',
         name: 'Master Sergey',
@@ -323,7 +362,7 @@ async function runTestSuite() {
     // Seed a CANCELLED request to verify closed request check
     await testEnv.withSecurityRulesDisabled(async (adminContext) => {
       const adminDb = adminContext.firestore();
-      await setDoc(doc(adminDb, 'requests', 'req_closed_01'), {
+      await countedSet(doc(adminDb, 'requests', 'req_closed_01'), {
         id: 'req_closed_01',
         customerId: 'user_alice',
         city: 'almaty',
@@ -385,12 +424,12 @@ async function runTestSuite() {
     await test('An offer can carry payment methods and the 14-day free-fix pledge', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
         const adminDb = ctx.firestore();
-        await setDoc(doc(adminDb, 'requests', 'req_extras'), {
+        await countedSet(doc(adminDb, 'requests', 'req_extras'), {
           id: 'req_extras', customerId: 'user_alice', city: 'almaty', cityId: 'almaty',
           category: 'appliances', service: 'Fridge repair', status: 'OPEN',
         });
         for (const uid of ['prov_extras', 'prov_extras2']) {
-          await setDoc(doc(adminDb, 'providers', uid), {
+          await countedSet(doc(adminDb, 'providers', uid), {
             id: uid, userId: uid, name: 'Master ' + uid, city: 'almaty', cityId: 'almaty', category: 'appliance_repair',
           });
         }
@@ -436,7 +475,7 @@ async function runTestSuite() {
 
     await test('A provider from another city cannot send an offer', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
-        await setDoc(doc(ctx.firestore(), 'providers', 'prov_astana'), {
+        await countedSet(doc(ctx.firestore(), 'providers', 'prov_astana'), {
           id: 'prov_astana', userId: 'prov_astana', name: 'Astana Master', city: 'astana', cityId: 'astana', category: 'appliance_repair',
         });
       });
@@ -446,7 +485,7 @@ async function runTestSuite() {
 
     await test('Customer cannot send an offer on their own request', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
-        await setDoc(doc(ctx.firestore(), 'providers', 'user_alice'), {
+        await countedSet(doc(ctx.firestore(), 'providers', 'user_alice'), {
           id: 'user_alice', userId: 'user_alice', name: 'Alice Pro', city: 'almaty', cityId: 'almaty', category: 'appliance_repair',
         });
       });
@@ -467,13 +506,13 @@ async function runTestSuite() {
 
     // Later scenarios use a fixed offer id for the first provider
     await testEnv.withSecurityRulesDisabled(async (adminContext) => {
-      await setDoc(doc(adminContext.firestore(), 'offers', 'offer_m1_01'), validOffer('offer_m1_01', 'prov_master1', 'Master Ruslan'));
+      await countedSet(doc(adminContext.firestore(), 'offers', 'offer_m1_01'), validOffer('offer_m1_01', 'prov_master1', 'Master Ruslan'));
     });
 
     // Seed a second offer by prov_master2 for cross-offer exploit testing
     await testEnv.withSecurityRulesDisabled(async (adminContext) => {
       const adminDb = adminContext.firestore();
-      await setDoc(doc(adminDb, 'offers', 'offer_m2_01'), {
+      await countedSet(doc(adminDb, 'offers', 'offer_m2_01'), {
         id: 'offer_m2_01',
         requestId: 'req_alice_01',
         providerId: 'prov_master2',
@@ -543,11 +582,11 @@ async function runTestSuite() {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const adminDb = ctx.firestore();
       const base = { customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances', service: 'Repair', status: 'OPEN' };
-      await setDoc(doc(adminDb, 'requests', 'req_full'), { id: 'req_full', ...base, status: 'OFFERS_RECEIVED', offerCount: 5 });
-      await setDoc(doc(adminDb, 'requests', 'req_four'), { id: 'req_four', ...base, status: 'OFFERS_RECEIVED', offerCount: 4 });
-      await setDoc(doc(adminDb, 'requests', 'req_expired'), { id: 'req_expired', ...base, expiresAtMs: Date.now() - 60000 });
-      await setDoc(doc(adminDb, 'requests', 'req_fresh'), { id: 'req_fresh', ...base, expiresAtMs: Date.now() + 86400000 });
-      await setDoc(doc(adminDb, 'providers', 'prov_lim'), {
+      await countedSet(doc(adminDb, 'requests', 'req_full'), { id: 'req_full', ...base, status: 'OFFERS_RECEIVED', offerCount: 5 });
+      await countedSet(doc(adminDb, 'requests', 'req_four'), { id: 'req_four', ...base, status: 'OFFERS_RECEIVED', offerCount: 4 });
+      await countedSet(doc(adminDb, 'requests', 'req_expired'), { id: 'req_expired', ...base, expiresAtMs: Date.now() - 60000 });
+      await countedSet(doc(adminDb, 'requests', 'req_fresh'), { id: 'req_fresh', ...base, expiresAtMs: Date.now() + 86400000 });
+      await countedSet(doc(adminDb, 'providers', 'prov_lim'), {
         id: 'prov_lim', userId: 'prov_lim', name: 'Master Lim', city: 'almaty', cityId: 'almaty', category: 'appliance_repair',
       });
     });
@@ -558,7 +597,7 @@ async function runTestSuite() {
 
     await test('An offer must be counted on the request: a plain offer write is rejected', async () => {
       const db = phoneUser('prov_lim').firestore();
-      await assertFails(setDoc(doc(db, 'offers', 'OFFER-req_four-prov_lim'), limOffer('req_four')));
+      await assertFails(countedSet(doc(db, 'offers', 'OFFER-req_four-prov_lim'), limOffer('req_four')));
     });
 
     await test('The counter goes up by exactly one with the offer', async () => {
@@ -585,7 +624,7 @@ async function runTestSuite() {
 
     await test('Sending an offer cannot plant junk in the customer request (updatedAt stays a short text)', async () => {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
-        await setDoc(doc(ctx.firestore(), 'requests', 'req_junk'), {
+        await countedSet(doc(ctx.firestore(), 'requests', 'req_junk'), {
           id: 'req_junk', customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances', service: 'Repair', status: 'OPEN',
         });
       });
@@ -615,11 +654,11 @@ async function runTestSuite() {
       const req = (id: string, extra: Record<string, unknown>) => ({
         id, customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances', service: 'Repair', status: 'OPEN', ...extra,
       });
-      await assertSucceeds(setDoc(doc(aliceDb, 'requests', 'req_exp_ok'), req('req_exp_ok', { expiresAtMs: Date.now() + 3 * 86400000 })));
-      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_exp_long'), req('req_exp_long', { expiresAtMs: Date.now() + 10 * 86400000 })));
-      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_exp_past'), req('req_exp_past', { expiresAtMs: Date.now() - 1000 })));
-      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_exp_str'), req('req_exp_str', { expiresAtMs: 'tomorrow' })));
-      await assertFails(setDoc(doc(aliceDb, 'requests', 'req_cnt'), req('req_cnt', { offerCount: 0 })));
+      await assertSucceeds(countedSet(doc(aliceDb, 'requests', 'req_exp_ok'), req('req_exp_ok', { expiresAtMs: Date.now() + 3 * 86400000 })));
+      await assertFails(countedSet(doc(aliceDb, 'requests', 'req_exp_long'), req('req_exp_long', { expiresAtMs: Date.now() + 10 * 86400000 })));
+      await assertFails(countedSet(doc(aliceDb, 'requests', 'req_exp_past'), req('req_exp_past', { expiresAtMs: Date.now() - 1000 })));
+      await assertFails(countedSet(doc(aliceDb, 'requests', 'req_exp_str'), req('req_exp_str', { expiresAtMs: 'tomorrow' })));
+      await assertFails(countedSet(doc(aliceDb, 'requests', 'req_cnt'), req('req_cnt', { offerCount: 0 })));
       const ref = doc(aliceDb, 'requests', 'req_expired');
       await assertSucceeds(updateDoc(ref, { expiresAtMs: Date.now() + 3 * 86400000, updatedAt: new Date().toISOString() }));
       await assertFails(updateDoc(ref, { expiresAtMs: Date.now() + 10 * 86400000, updatedAt: new Date().toISOString() }));
@@ -764,7 +803,7 @@ async function runTestSuite() {
 
     await testEnv.withSecurityRulesDisabled(async (adminContext) => {
       const adminDb = adminContext.firestore();
-      await setDoc(doc(adminDb, 'requests', 'req_concurrent_01'), {
+      await countedSet(doc(adminDb, 'requests', 'req_concurrent_01'), {
         id: 'req_concurrent_01',
         customerId: 'user_alice',
         city: 'almaty',
@@ -772,7 +811,7 @@ async function runTestSuite() {
         service: 'Repair',
         status: 'OPEN',
       });
-      await setDoc(doc(adminDb, 'offers', 'offer_conc_A'), {
+      await countedSet(doc(adminDb, 'offers', 'offer_conc_A'), {
         id: 'offer_conc_A',
         requestId: 'req_concurrent_01',
         providerId: 'prov_master1',
@@ -780,7 +819,7 @@ async function runTestSuite() {
         price: '10 000 ₸',
         status: 'PENDING',
       });
-      await setDoc(doc(adminDb, 'offers', 'offer_conc_B'), {
+      await countedSet(doc(adminDb, 'offers', 'offer_conc_B'), {
         id: 'offer_conc_B',
         requestId: 'req_concurrent_01',
         providerId: 'prov_master2',
@@ -842,7 +881,7 @@ async function runTestSuite() {
     await test('Customer can create their private contact info', async () => {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
-        setDoc(doc(aliceDb, 'requestContacts', 'req_alice_01'), {
+        countedSet(doc(aliceDb, 'requestContacts', 'req_alice_01'), {
           requestId: 'req_alice_01',
           customerId: 'user_alice',
           customerPhone: '+7 701 555 1234',
@@ -867,13 +906,13 @@ async function runTestSuite() {
       const adminDb = adminContext.firestore();
 
       // Scenario 3: Request with a PENDING offer
-      await setDoc(doc(adminDb, 'requests', 'req_pending_contact'), {
+      await countedSet(doc(adminDb, 'requests', 'req_pending_contact'), {
         id: 'req_pending_contact',
         customerId: 'user_alice',
         status: 'OFFERS_RECEIVED',
         selectedOfferId: 'offer_pending_contact',
       });
-      await setDoc(doc(adminDb, 'offers', 'offer_pending_contact'), {
+      await countedSet(doc(adminDb, 'offers', 'offer_pending_contact'), {
         id: 'offer_pending_contact',
         requestId: 'req_pending_contact',
         providerUserId: 'prov_master2',
@@ -881,19 +920,19 @@ async function runTestSuite() {
         status: 'PENDING',
         createdAt: new Date().toISOString(),
       });
-      await setDoc(doc(adminDb, 'requestContacts', 'req_pending_contact'), {
+      await countedSet(doc(adminDb, 'requestContacts', 'req_pending_contact'), {
         customerId: 'user_alice',
         phone: '+7 701 555 2222',
       });
 
       // Scenario 4: Request with a REJECTED offer
-      await setDoc(doc(adminDb, 'requests', 'req_rejected_contact'), {
+      await countedSet(doc(adminDb, 'requests', 'req_rejected_contact'), {
         id: 'req_rejected_contact',
         customerId: 'user_alice',
         status: 'OPEN',
         selectedOfferId: 'offer_rejected_contact',
       });
-      await setDoc(doc(adminDb, 'offers', 'offer_rejected_contact'), {
+      await countedSet(doc(adminDb, 'offers', 'offer_rejected_contact'), {
         id: 'offer_rejected_contact',
         requestId: 'req_rejected_contact',
         providerUserId: 'prov_master2',
@@ -901,42 +940,42 @@ async function runTestSuite() {
         status: 'REJECTED',
         createdAt: new Date().toISOString(),
       });
-      await setDoc(doc(adminDb, 'requestContacts', 'req_rejected_contact'), {
+      await countedSet(doc(adminDb, 'requestContacts', 'req_rejected_contact'), {
         customerId: 'user_alice',
         phone: '+7 701 555 3333',
       });
 
       // Scenario 6: Request with missing selectedOfferId
-      await setDoc(doc(adminDb, 'requests', 'req_no_selection'), {
+      await countedSet(doc(adminDb, 'requests', 'req_no_selection'), {
         id: 'req_no_selection',
         customerId: 'user_alice',
         status: 'OPEN',
       });
-      await setDoc(doc(adminDb, 'requestContacts', 'req_no_selection'), {
+      await countedSet(doc(adminDb, 'requestContacts', 'req_no_selection'), {
         customerId: 'user_alice',
         phone: '+7 701 555 4444',
       });
 
       // Scenario 6: Request with invalid selectedOfferId (non-existent offer)
-      await setDoc(doc(adminDb, 'requests', 'req_invalid_selection'), {
+      await countedSet(doc(adminDb, 'requests', 'req_invalid_selection'), {
         id: 'req_invalid_selection',
         customerId: 'user_alice',
         status: 'PROVIDER_SELECTED',
         selectedOfferId: 'offer_nonexistent_xyz',
       });
-      await setDoc(doc(adminDb, 'requestContacts', 'req_invalid_selection'), {
+      await countedSet(doc(adminDb, 'requestContacts', 'req_invalid_selection'), {
         customerId: 'user_alice',
         phone: '+7 701 555 5555',
       });
 
       // Scenario 6: Request where selectedOfferId belongs to a DIFFERENT request
-      await setDoc(doc(adminDb, 'requests', 'req_mismatched_offer'), {
+      await countedSet(doc(adminDb, 'requests', 'req_mismatched_offer'), {
         id: 'req_mismatched_offer',
         customerId: 'user_alice',
         status: 'PROVIDER_SELECTED',
         selectedOfferId: 'offer_m1_01', // offer_m1_01 has requestId == 'req_alice_01'
       });
-      await setDoc(doc(adminDb, 'requestContacts', 'req_mismatched_offer'), {
+      await countedSet(doc(adminDb, 'requestContacts', 'req_mismatched_offer'), {
         customerId: 'user_alice',
         phone: '+7 701 555 6666',
       });
@@ -999,7 +1038,7 @@ async function runTestSuite() {
     await test('Customer can create conversation with selected provider', async () => {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
-        setDoc(doc(aliceDb, 'conversations', convId), {
+        countedSet(doc(aliceDb, 'conversations', convId), {
           id: convId,
           requestId: 'req_alice_01',
           customerId: 'user_alice',
@@ -1017,7 +1056,7 @@ async function runTestSuite() {
     await test('Participant can send message in conversation', async () => {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
-        setDoc(doc(aliceDb, `conversations/${convId}/messages`, 'msg_001'), {
+        countedSet(doc(aliceDb, `conversations/${convId}/messages`, 'msg_001'), {
           id: 'msg_001',
           conversationId: convId,
           requestId: 'req_alice_01',
@@ -1033,7 +1072,7 @@ async function runTestSuite() {
     await test('Unrelated user cannot send message into conversation', async () => {
       const bobDb = phoneUser('user_bob').firestore();
       await assertFails(
-        setDoc(doc(bobDb, `conversations/${convId}/messages`, 'msg_attacker'), {
+        countedSet(doc(bobDb, `conversations/${convId}/messages`, 'msg_attacker'), {
           id: 'msg_attacker',
           conversationId: convId,
           requestId: 'req_alice_01',
@@ -1057,7 +1096,7 @@ async function runTestSuite() {
     await test('Customer can create appointment with proposedBy = customer', async () => {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
-        setDoc(doc(aliceDb, 'appointments', apptId), {
+        countedSet(doc(aliceDb, 'appointments', apptId), {
           id: apptId,
           requestId: 'req_alice_01',
           customerId: 'user_alice',
@@ -1172,7 +1211,7 @@ async function runTestSuite() {
     await test('Customer cannot submit review while request is not COMPLETED', async () => {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
-        setDoc(doc(aliceDb, 'reviewSubmissions', 'req_alice_01'), {
+        countedSet(doc(aliceDb, 'reviewSubmissions', 'req_alice_01'), {
           id: 'req_alice_01',
           requestId: 'req_alice_01',
           customerId: 'user_alice',
@@ -1200,7 +1239,7 @@ async function runTestSuite() {
     await test('Customer cannot publish a review directly: it goes through the review check', async () => {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertFails(
-        setDoc(doc(aliceDb, 'reviews', 'req_alice_01'), {
+        countedSet(doc(aliceDb, 'reviews', 'req_alice_01'), {
           id: 'req_alice_01', requestId: 'req_alice_01', customerId: 'user_alice', providerId: 'prov_master1',
           rating: 5, comment: 'Great job!', createdAt: new Date().toISOString(),
         })
@@ -1210,7 +1249,7 @@ async function runTestSuite() {
     await test('Customer can submit review for COMPLETED request with accepted provider', async () => {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
-        setDoc(doc(aliceDb, 'reviewSubmissions', 'req_alice_01'), {
+        countedSet(doc(aliceDb, 'reviewSubmissions', 'req_alice_01'), {
           id: 'req_alice_01',
           requestId: 'req_alice_01',
           customerId: 'user_alice',
@@ -1241,7 +1280,7 @@ async function runTestSuite() {
 
     // The review check publishes the review (the server writes with full access)
     await testEnv.withSecurityRulesDisabled(async (adminContext) => {
-      await setDoc(doc(adminContext.firestore(), 'reviews', 'req_alice_01'), {
+      await countedSet(doc(adminContext.firestore(), 'reviews', 'req_alice_01'), {
         id: 'req_alice_01', requestId: 'req_alice_01', customerId: 'user_alice', customerName: 'Alice',
         providerId: 'prov_master1', providerName: 'Master Ruslan', rating: 5, comment: 'Great job!', createdAt: new Date().toISOString(),
       });
@@ -1251,7 +1290,7 @@ async function runTestSuite() {
     await testEnv.withSecurityRulesDisabled(async (adminContext) => {
       const adminDb = adminContext.firestore();
       // Create a fresh completed request without an existing review document
-      await setDoc(doc(adminDb, 'requests', 'req_self_audit_01'), {
+      await countedSet(doc(adminDb, 'requests', 'req_self_audit_01'), {
         id: 'req_self_audit_01',
         customerId: 'user_charlie',
         city: 'almaty',
@@ -1260,7 +1299,7 @@ async function runTestSuite() {
         status: 'COMPLETED',
         selectedOfferId: 'offer_charlie_m1',
       });
-      await setDoc(doc(adminDb, 'offers', 'offer_charlie_m1'), {
+      await countedSet(doc(adminDb, 'offers', 'offer_charlie_m1'), {
         id: 'offer_charlie_m1',
         requestId: 'req_self_audit_01',
         providerId: 'prov_master1',
@@ -1274,7 +1313,7 @@ async function runTestSuite() {
       const masterDb = phoneUser('prov_master1').firestore();
       // prov_master1 tries to create reviews/req_self_audit_01 for their own service
       await assertFails(
-        setDoc(doc(masterDb, 'reviewSubmissions', 'req_self_audit_01'), {
+        countedSet(doc(masterDb, 'reviewSubmissions', 'req_self_audit_01'), {
           id: 'req_self_audit_01',
           requestId: 'req_self_audit_01',
           customerId: 'prov_master1',
@@ -1289,7 +1328,7 @@ async function runTestSuite() {
     await test('Legitimate customer can review provider on the fresh completed request', async () => {
       const charlieDb = phoneUser('user_charlie').firestore();
       await assertSucceeds(
-        setDoc(doc(charlieDb, 'reviewSubmissions', 'req_self_audit_01'), {
+        countedSet(doc(charlieDb, 'reviewSubmissions', 'req_self_audit_01'), {
           id: 'req_self_audit_01',
           requestId: 'req_self_audit_01',
           customerId: 'user_charlie',
@@ -1314,19 +1353,19 @@ async function runTestSuite() {
     await test('A published review cannot be submitted again', async () => {
       await testEnv.withSecurityRulesDisabled(async (adminContext) => {
         const db = adminContext.firestore();
-        await setDoc(doc(db, 'requests', 'req_published_01'), {
+        await countedSet(doc(db, 'requests', 'req_published_01'), {
           id: 'req_published_01', customerId: 'user_dana', city: 'almaty', category: 'appliances', service: 'Repair',
           status: 'COMPLETED', selectedOfferId: 'offer_dana_m1',
         });
-        await setDoc(doc(db, 'offers', 'offer_dana_m1'), {
+        await countedSet(doc(db, 'offers', 'offer_dana_m1'), {
           id: 'offer_dana_m1', requestId: 'req_published_01', providerId: 'prov_master1', providerUserId: 'prov_master1', price: '9 000 ₸', status: 'ACCEPTED',
         });
-        await setDoc(doc(db, 'reviews', 'req_published_01'), {
+        await countedSet(doc(db, 'reviews', 'req_published_01'), {
           id: 'req_published_01', requestId: 'req_published_01', customerId: 'user_dana', providerId: 'prov_master1', rating: 4, createdAt: new Date().toISOString(),
         });
       });
       await assertFails(
-        setDoc(doc(phoneUser('user_dana').firestore(), 'reviewSubmissions', 'req_published_01'), {
+        countedSet(doc(phoneUser('user_dana').firestore(), 'reviewSubmissions', 'req_published_01'), {
           id: 'req_published_01', requestId: 'req_published_01', customerId: 'user_dana', providerId: 'prov_master1',
           rating: 5, createdAt: new Date().toISOString(),
         })
@@ -1344,7 +1383,7 @@ async function runTestSuite() {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore();
       const now = new Date().toISOString();
-      await setDoc(doc(db, 'requests', 'req_n'), {
+      await countedSet(doc(db, 'requests', 'req_n'), {
         id: 'req_n', customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances',
         service: 'Repair', status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-req_n-prov_master1', createdAt: now,
       });
@@ -1352,24 +1391,24 @@ async function runTestSuite() {
         id: `OFFER-req_n-${uid}`, requestId: 'req_n', providerId: uid, providerUserId: uid, providerName: uid,
         price: '1000', status, createdAt: now,
       });
-      await setDoc(doc(db, 'offers', 'OFFER-req_n-prov_master1'), offer('prov_master1', 'ACCEPTED'));
-      await setDoc(doc(db, 'offers', 'OFFER-req_n-prov_master2'), offer('prov_master2', 'PENDING'));
-      await setDoc(doc(db, 'offers', 'OFFER-req_n-prov_rej'), offer('prov_rej', 'REJECTED'));
-      await setDoc(doc(db, 'conversations', 'conv_req_n'), {
+      await countedSet(doc(db, 'offers', 'OFFER-req_n-prov_master1'), offer('prov_master1', 'ACCEPTED'));
+      await countedSet(doc(db, 'offers', 'OFFER-req_n-prov_master2'), offer('prov_master2', 'PENDING'));
+      await countedSet(doc(db, 'offers', 'OFFER-req_n-prov_rej'), offer('prov_rej', 'REJECTED'));
+      await countedSet(doc(db, 'conversations', 'conv_req_n'), {
         id: 'conv_req_n', requestId: 'req_n', customerId: 'user_alice', providerId: 'prov_master1',
         providerUserId: 'prov_master1', status: 'ACTIVE', createdAt: now, updatedAt: now,
       });
-      await setDoc(doc(db, 'conversations', 'conv_req_n', 'messages', 'msg_p1'), {
+      await countedSet(doc(db, 'conversations', 'conv_req_n', 'messages', 'msg_p1'), {
         id: 'msg_p1', conversationId: 'conv_req_n', requestId: 'req_n', senderId: 'prov_master1', senderRole: 'provider', type: 'text', text: 'Hi', createdAt: now,
       });
-      await setDoc(doc(db, 'conversations', 'conv_req_n', 'messages', 'msg_c1'), {
+      await countedSet(doc(db, 'conversations', 'conv_req_n', 'messages', 'msg_c1'), {
         id: 'msg_c1', conversationId: 'conv_req_n', requestId: 'req_n', senderId: 'user_alice', senderRole: 'customer', type: 'text', text: 'Hello', createdAt: now,
       });
-      await setDoc(doc(db, 'requests', 'req_nc'), {
+      await countedSet(doc(db, 'requests', 'req_nc'), {
         id: 'req_nc', customerId: 'user_alice', city: 'almaty', cityId: 'almaty', category: 'appliances',
         service: 'Repair', status: 'CANCELLED', selectedOfferId: 'OFFER-req_nc-prov_master1', createdAt: now,
       });
-      await setDoc(doc(db, 'offers', 'OFFER-req_nc-prov_master1'), {
+      await countedSet(doc(db, 'offers', 'OFFER-req_nc-prov_master1'), {
         id: 'OFFER-req_nc-prov_master1', requestId: 'req_nc', providerId: 'prov_master1', providerUserId: 'prov_master1',
         providerName: 'Master Ruslan', price: '1000', status: 'ACCEPTED', createdAt: now,
       });
@@ -1392,7 +1431,7 @@ async function runTestSuite() {
     const m1N = () => phoneUser('prov_master1').firestore();
     const m2N = () => phoneUser('prov_master2').firestore();
     const rejN = () => phoneUser('prov_rej').firestore();
-    const put = (db: any, id: string, extra: Record<string, unknown>) => setDoc(doc(db, 'notifications', id), notif(id, extra));
+    const put = (db: any, id: string, extra: Record<string, unknown>) => countedSet(doc(db, 'notifications', id), notif(id, extra));
 
     await test('Nobody in the app can create a notification (the server makes them from real events)', async () => {
       await assertFails(put(aliceN(), 'notif_offer_accepted_cust_OFFER-req_n-prov_master1',
@@ -1411,7 +1450,7 @@ async function runTestSuite() {
 
     await test('The recipient marks their notification read; others cannot touch it', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
-        await setDoc(doc(c.firestore(), 'notifications', 'notif_done_cust_req_n'), notif('notif_done_cust_req_n', { ...toCustomer, type: 'CUSTOMER_WORK_COMPLETED' }));
+        await countedSet(doc(c.firestore(), 'notifications', 'notif_done_cust_req_n'), notif('notif_done_cust_req_n', { ...toCustomer, type: 'CUSTOMER_WORK_COMPLETED' }));
       });
       await assertFails(updateDoc(doc(m1N(), 'notifications', 'notif_done_cust_req_n'), { isRead: true }));
       await assertFails(updateDoc(doc(aliceN(), 'notifications', 'notif_done_cust_req_n'), { title: { kz: 'x', ru: 'x' } }));
@@ -1421,12 +1460,12 @@ async function runTestSuite() {
     await test('A phone is registered for push messages only under its own user; tokens are not readable', async () => {
       const token = 'fcm_token_' + 'a'.repeat(40);
       const reg = { platform: 'android', lang: 'kz', updatedAt: new Date().toISOString() };
-      await assertFails(setDoc(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'prov_master1' }));
-      await assertSucceeds(setDoc(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'user_alice' }));
+      await assertFails(countedSet(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'prov_master1' }));
+      await assertSucceeds(countedSet(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'user_alice' }));
       await assertFails(getDoc(doc(aliceN(), 'pushTokens', token)));
-      await assertFails(setDoc(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'user_alice', extra: 'x' }));
+      await assertFails(countedSet(doc(aliceN(), 'pushTokens', token), { ...reg, uid: 'user_alice', extra: 'x' }));
       // The same phone signed in by someone else is taken over; only the owner removes it
-      await assertSucceeds(setDoc(doc(m1N(), 'pushTokens', token), { ...reg, uid: 'prov_master1' }));
+      await assertSucceeds(countedSet(doc(m1N(), 'pushTokens', token), { ...reg, uid: 'prov_master1' }));
       await assertFails(deleteDoc(doc(aliceN(), 'pushTokens', token)));
       await assertSucceeds(deleteDoc(doc(m1N(), 'pushTokens', token)));
     });
@@ -1444,7 +1483,7 @@ async function runTestSuite() {
 
     await testEnv.withSecurityRulesDisabled(async (adminContext) => {
       const adminDb = adminContext.firestore();
-      await setDoc(doc(adminDb, 'requests', 'req_h_open'), {
+      await countedSet(doc(adminDb, 'requests', 'req_h_open'), {
         id: 'req_h_open',
         customerId: 'user_alice',
         city: 'almaty',
@@ -1453,7 +1492,7 @@ async function runTestSuite() {
         service: 'Repair',
         status: 'OPEN',
       });
-      await setDoc(doc(adminDb, 'providers', 'prov_trusted'), {
+      await countedSet(doc(adminDb, 'providers', 'prov_trusted'), {
         id: 'prov_trusted',
         userId: 'prov_trusted',
         name: 'Trusted Master',
@@ -1461,7 +1500,7 @@ async function runTestSuite() {
         cityId: 'almaty',
         category: 'appliances',
       });
-      await setDoc(doc(adminDb, 'providers', 'mallory'), {
+      await countedSet(doc(adminDb, 'providers', 'mallory'), {
         id: 'mallory',
         userId: 'mallory',
         name: 'Mallory',
@@ -1469,7 +1508,7 @@ async function runTestSuite() {
         cityId: 'almaty',
         category: 'appliances',
       });
-      await setDoc(doc(adminDb, 'offers', 'offer_h_mallory'), {
+      await countedSet(doc(adminDb, 'offers', 'offer_h_mallory'), {
         id: 'offer_h_mallory',
         requestId: 'req_h_open',
         providerId: 'mallory',
@@ -1477,7 +1516,7 @@ async function runTestSuite() {
         price: '10 000 ₸',
         status: 'PENDING',
       });
-      await setDoc(doc(adminDb, 'conversations', 'conv_req_h_sel'), {
+      await countedSet(doc(adminDb, 'conversations', 'conv_req_h_sel'), {
         id: 'conv_req_h_sel',
         requestId: 'req_h_sel',
         customerId: 'user_alice',
@@ -1542,10 +1581,10 @@ async function runTestSuite() {
     await test('Provider cannot create a profile with self-assigned verified / IIN / certificate badges', async () => {
       const eveDb = phoneUser('eve').firestore();
       const base = { id: 'eve', userId: 'eve', name: 'Eve', city: 'almaty', cityId: 'almaty', category: 'appliances' };
-      await assertFails(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, iinVerified: true }));
-      await assertFails(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, verified: true }));
-      await assertFails(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, hasCertificate: true }));
-      await assertSucceeds(setDoc(doc(eveDb, 'providers', 'eve'), { ...base, verified: false, iinVerified: false, hasCertificate: false }));
+      await assertFails(countedSet(doc(eveDb, 'providers', 'eve'), { ...base, iinVerified: true }));
+      await assertFails(countedSet(doc(eveDb, 'providers', 'eve'), { ...base, verified: true }));
+      await assertFails(countedSet(doc(eveDb, 'providers', 'eve'), { ...base, hasCertificate: true }));
+      await assertSucceeds(countedSet(doc(eveDb, 'providers', 'eve'), { ...base, verified: false, iinVerified: false, hasCertificate: false }));
     });
 
     await test('Provider cannot add trust badges to an existing profile', async () => {
@@ -1569,17 +1608,17 @@ async function runTestSuite() {
     });
 
     await test('Customer can create a normal request', async () => {
-      await assertSucceeds(setDoc(doc(aliceDb(), 'requests', 'req_h_ok'), baseRequest('req_h_ok', { requestText: 'Тоңазытқыш суытпайды' })));
+      await assertSucceeds(countedSet(doc(aliceDb(), 'requests', 'req_h_ok'), baseRequest('req_h_ok', { requestText: 'Тоңазытқыш суытпайды' })));
     });
 
     await test('Customer cannot create a request with pre-set payment or selection state', async () => {
-      await assertFails(setDoc(doc(aliceDb(), 'requests', 'req_h_pay'), baseRequest('req_h_pay', { paymentStatus: 'held_in_escrow' })));
-      await assertFails(setDoc(doc(aliceDb(), 'requests', 'req_h_esc'), baseRequest('req_h_esc', { escrowAmount: 15000 })));
-      await assertFails(setDoc(doc(aliceDb(), 'requests', 'req_h_sel2'), baseRequest('req_h_sel2', { selectedOfferId: 'offer_h_mallory' })));
+      await assertFails(countedSet(doc(aliceDb(), 'requests', 'req_h_pay'), baseRequest('req_h_pay', { paymentStatus: 'held_in_escrow' })));
+      await assertFails(countedSet(doc(aliceDb(), 'requests', 'req_h_esc'), baseRequest('req_h_esc', { escrowAmount: 15000 })));
+      await assertFails(countedSet(doc(aliceDb(), 'requests', 'req_h_sel2'), baseRequest('req_h_sel2', { selectedOfferId: 'offer_h_mallory' })));
     });
 
     await test('Request text longer than 5000 characters is rejected', async () => {
-      await assertFails(setDoc(doc(aliceDb(), 'requests', 'req_h_long'), baseRequest('req_h_long', { requestText: 'x'.repeat(5001) })));
+      await assertFails(countedSet(doc(aliceDb(), 'requests', 'req_h_long'), baseRequest('req_h_long', { requestText: 'x'.repeat(5001) })));
     });
 
     await test('Chat participant cannot change the conversation providerId to add a third person', async () => {
@@ -1605,7 +1644,7 @@ async function runTestSuite() {
 
     await testEnv.withSecurityRulesDisabled(async (adminContext) => {
       const adminDb = adminContext.firestore();
-      await setDoc(doc(adminDb, 'requests', 'req_v_almaty'), {
+      await countedSet(doc(adminDb, 'requests', 'req_v_almaty'), {
         id: 'req_v_almaty',
         customerId: 'cust_v',
         customerName: 'Клиент',
@@ -1617,17 +1656,17 @@ async function runTestSuite() {
         status: 'MATCHING',
         location: { latitude: 43.24, longitude: 76.95 },
       });
-      await setDoc(doc(adminDb, 'providers', 'prov_v_almaty'), {
+      await countedSet(doc(adminDb, 'providers', 'prov_v_almaty'), {
         id: 'prov_v_almaty', userId: 'prov_v_almaty', name: 'Almaty Master', city: 'Алматы', cityId: 'almaty', category: 'appliances', categoryId: 'appliances',
       });
-      await setDoc(doc(adminDb, 'providers', 'prov_v_astana'), {
+      await countedSet(doc(adminDb, 'providers', 'prov_v_astana'), {
         id: 'prov_v_astana', userId: 'prov_v_astana', name: 'Astana Master', city: 'Астана', cityId: 'astana', category: 'appliances', categoryId: 'appliances',
       });
       // A request in Almaty whose selected provider is based in Astana
-      await setDoc(doc(adminDb, 'offers', 'offer_v_sel'), {
+      await countedSet(doc(adminDb, 'offers', 'offer_v_sel'), {
         id: 'offer_v_sel', requestId: 'req_v_sel', providerId: 'prov_v_astana', providerUserId: 'prov_v_astana', price: '1', status: 'ACCEPTED',
       });
-      await setDoc(doc(adminDb, 'requests', 'req_v_sel'), {
+      await countedSet(doc(adminDb, 'requests', 'req_v_sel'), {
         id: 'req_v_sel', customerId: 'cust_v', city: 'Алматы', cityId: 'almaty', category: 'appliances', categoryId: 'appliances',
         service: 'x', status: 'PROVIDER_SELECTED', selectedOfferId: 'offer_v_sel',
       });
@@ -1675,15 +1714,15 @@ async function runTestSuite() {
     await test('A request without a recognised city is not visible to providers with no city', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
         const db = c.firestore();
-        await setDoc(doc(db, 'requests', 'req_v_nocity'), { id: 'req_v_nocity', customerId: 'cust_v', city: '?', cityId: '', category: 'x', service: 'x', status: 'MATCHING' });
-        await setDoc(doc(db, 'providers', 'prov_v_nocity'), { id: 'prov_v_nocity', userId: 'prov_v_nocity', name: 'X', city: '', cityId: '', category: 'x' });
+        await countedSet(doc(db, 'requests', 'req_v_nocity'), { id: 'req_v_nocity', customerId: 'cust_v', city: '?', cityId: '', category: 'x', service: 'x', status: 'MATCHING' });
+        await countedSet(doc(db, 'providers', 'prov_v_nocity'), { id: 'prov_v_nocity', userId: 'prov_v_nocity', name: 'X', city: '', cityId: '', category: 'x' });
       });
       await assertFails(getDoc(doc(ctx('prov_v_nocity'), 'requests', 'req_v_nocity')));
     });
 
     await test('A blocked provider sees no requests', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
-        await setDoc(doc(c.firestore(), 'providers', 'prov_v_blocked'), { id: 'prov_v_blocked', userId: 'prov_v_blocked', name: 'B', city: 'Алматы', cityId: 'almaty', category: 'appliances', blocked: true });
+        await countedSet(doc(c.firestore(), 'providers', 'prov_v_blocked'), { id: 'prov_v_blocked', userId: 'prov_v_blocked', name: 'B', city: 'Алматы', cityId: 'almaty', category: 'appliances', blocked: true });
       });
       await assertFails(getDoc(doc(ctx('prov_v_blocked'), 'requests', 'req_v_almaty')));
       await assertFails(cityQuery(ctx('prov_v_blocked'), 'almaty'));
@@ -1696,15 +1735,15 @@ async function runTestSuite() {
 
     await test('Counted numbers (master stats, typical prices) are read-only for the app', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
-        await setDoc(doc(c.firestore(), 'providerStats', 'prov_v_almaty'), { completedJobs: 3, offersSent: 5 });
-        await setDoc(doc(c.firestore(), 'priceStats', 'almaty_tap_repair'), { prices: [5000, 7000, 9000], count: 3 });
+        await countedSet(doc(c.firestore(), 'providerStats', 'prov_v_almaty'), { completedJobs: 3, offersSent: 5 });
+        await countedSet(doc(c.firestore(), 'priceStats', 'almaty_tap_repair'), { prices: [5000, 7000, 9000], count: 3 });
       });
       await assertSucceeds(getDoc(doc(ctx('user_alice'), 'providerStats', 'prov_v_almaty')));
       await assertFails(getDoc(doc(anonymousUser('anon_s').firestore(), 'providerStats', 'prov_v_almaty')));
       await assertFails(updateDoc(doc(ctx('prov_v_almaty'), 'providerStats', 'prov_v_almaty'), { completedJobs: 99 }));
       await assertFails(getDocs(collection(ctx('user_alice'), 'providerStats')));
       await assertSucceeds(getDoc(doc(anonymousUser('anon_s').firestore(), 'priceStats', 'almaty_tap_repair')));
-      await assertFails(setDoc(doc(ctx('user_alice'), 'priceStats', 'almaty_tap_repair'), { prices: [1], count: 1 }));
+      await assertFails(countedSet(doc(ctx('user_alice'), 'priceStats', 'almaty_tap_repair'), { prices: [1], count: 1 }));
     });
 
     await test('A provider pauses new orders and lists work photos in the fixed slots only', async () => {
@@ -1727,25 +1766,25 @@ async function runTestSuite() {
     console.log('\n--- SECTION 13: Phone verification required to publish ---');
 
     await testEnv.withSecurityRulesDisabled(async (adminContext) => {
-      await setDoc(doc(adminContext.firestore(), 'requests', 'req_p_open'), {
+      await countedSet(doc(adminContext.firestore(), 'requests', 'req_p_open'), {
         id: 'req_p_open', customerId: 'cust_p', city: 'Алматы', cityId: 'almaty', category: 'appliances', categoryId: 'appliances', service: 'x', status: 'MATCHING',
       });
     });
 
     await test('Anonymous account cannot create a request', async () => {
-      await assertFails(setDoc(doc(anonymousUser('anon_p').firestore(), 'requests', 'req_p_anon'), {
+      await assertFails(countedSet(doc(anonymousUser('anon_p').firestore(), 'requests', 'req_p_anon'), {
         id: 'req_p_anon', customerId: 'anon_p', city: 'Алматы', category: 'appliances', service: 'x', status: 'MATCHING',
       }));
     });
 
     await test('Phone-verified account can create a request', async () => {
-      await assertSucceeds(setDoc(doc(phoneUser('cust_p2').firestore(), 'requests', 'req_p_phone'), {
+      await assertSucceeds(countedSet(doc(phoneUser('cust_p2').firestore(), 'requests', 'req_p_phone'), {
         id: 'req_p_phone', customerId: 'cust_p2', city: 'Алматы', category: 'appliances', service: 'x', status: 'MATCHING',
       }));
     });
 
     await test('Anonymous account cannot create a provider profile', async () => {
-      await assertFails(setDoc(doc(anonymousUser('anon_p').firestore(), 'providers', 'anon_p'), {
+      await assertFails(countedSet(doc(anonymousUser('anon_p').firestore(), 'providers', 'anon_p'), {
         id: 'anon_p', userId: 'anon_p', name: 'Anon', city: 'Алматы', category: 'appliances',
       }));
     });
@@ -1765,10 +1804,10 @@ async function runTestSuite() {
     const seedJob = async (id: string, status: string) => {
       await testEnv.withSecurityRulesDisabled(async (adminContext) => {
         const db = adminContext.firestore();
-        await setDoc(doc(db, 'offers', `offer_${id}`), {
+        await countedSet(doc(db, 'offers', `offer_${id}`), {
           id: `offer_${id}`, requestId: id, providerId: 'prov_job', providerUserId: 'prov_job', status: 'ACCEPTED',
         });
-        await setDoc(doc(db, 'requests', id), {
+        await countedSet(doc(db, 'requests', id), {
           id, customerId: 'cust_job', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status, selectedOfferId: `offer_${id}`,
         });
       });
@@ -1823,11 +1862,11 @@ async function runTestSuite() {
 
     await testEnv.withSecurityRulesDisabled(async (adminContext) => {
       const db = adminContext.firestore();
-      await setDoc(doc(db, 'users', 'del_user'), { id: 'del_user', createdAt: '2026-10-12T00:00:00Z' });
-      await setDoc(doc(db, 'providers', 'del_user'), { id: 'del_user', userId: 'del_user', name: 'X', city: 'Алматы', category: 'x' });
-      await setDoc(doc(db, 'requests', 'req_del'), { id: 'req_del', customerId: 'del_user', city: 'Алматы', category: 'x', service: 'x', status: 'OPEN' });
-      await setDoc(doc(db, 'requestContacts', 'req_del'), { customerId: 'del_user', customerPhone: '+77010000000' });
-      await setDoc(doc(db, 'users', 'other_user'), { id: 'other_user', createdAt: '2026-10-12T00:00:00Z' });
+      await countedSet(doc(db, 'users', 'del_user'), { id: 'del_user', createdAt: '2026-10-12T00:00:00Z' });
+      await countedSet(doc(db, 'providers', 'del_user'), { id: 'del_user', userId: 'del_user', name: 'X', city: 'Алматы', category: 'x' });
+      await countedSet(doc(db, 'requests', 'req_del'), { id: 'req_del', customerId: 'del_user', city: 'Алматы', category: 'x', service: 'x', status: 'OPEN' });
+      await countedSet(doc(db, 'requestContacts', 'req_del'), { customerId: 'del_user', customerPhone: '+77010000000' });
+      await countedSet(doc(db, 'users', 'other_user'), { id: 'other_user', createdAt: '2026-10-12T00:00:00Z' });
     });
 
     await test("Another user cannot delete someone's user record", async () => {
@@ -1860,15 +1899,15 @@ async function runTestSuite() {
     await testEnv.withSecurityRulesDisabled(async (c) => {
       const db = c.firestore();
       const now = new Date().toISOString();
-      await setDoc(doc(db, 'requests', 'req_a'), {
+      await countedSet(doc(db, 'requests', 'req_a'), {
         id: 'req_a', customerId: 'cust_a', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x',
         status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-req_a-prov_a', createdAt: now,
       });
-      await setDoc(doc(db, 'offers', 'OFFER-req_a-prov_a'), {
+      await countedSet(doc(db, 'offers', 'OFFER-req_a-prov_a'), {
         id: 'OFFER-req_a-prov_a', requestId: 'req_a', providerId: 'prov_a', providerUserId: 'prov_a', providerName: 'A', price: '1', status: 'ACCEPTED',
       });
-      await setDoc(doc(db, 'requestContacts', 'req_a'), { requestId: 'req_a', customerId: 'cust_a', customerPhone: '+77010000001' });
-      await setDoc(doc(db, 'conversations', 'conv_req_a_existing'), {
+      await countedSet(doc(db, 'requestContacts', 'req_a'), { requestId: 'req_a', customerId: 'cust_a', customerPhone: '+77010000001' });
+      await countedSet(doc(db, 'conversations', 'conv_req_a_existing'), {
         id: 'conv_req_a_existing', requestId: 'req_a', customerId: 'cust_a', providerId: 'prov_a', providerUserId: 'prov_a', status: 'ACTIVE',
       });
     });
@@ -1880,12 +1919,12 @@ async function runTestSuite() {
     };
 
     await test('Conversation cannot be created with a third person as providerId', async () => {
-      await assertFails(setDoc(doc(custA(), 'conversations', 'conv_req_a'), { ...convBase, providerId: 'accomplice' }));
-      await assertFails(setDoc(doc(provA(), 'conversations', 'conv_req_a'), { ...convBase, providerId: 'accomplice' }));
+      await assertFails(countedSet(doc(custA(), 'conversations', 'conv_req_a'), { ...convBase, providerId: 'accomplice' }));
+      await assertFails(countedSet(doc(provA(), 'conversations', 'conv_req_a'), { ...convBase, providerId: 'accomplice' }));
     });
 
     await test('Conversation is created with the selected provider', async () => {
-      await assertSucceeds(setDoc(doc(custA(), 'conversations', 'conv_req_a'), { ...convBase, providerId: 'prov_a' }));
+      await assertSucceeds(countedSet(doc(custA(), 'conversations', 'conv_req_a'), { ...convBase, providerId: 'prov_a' }));
     });
 
     await test('Participants cannot change conversation status or add junk fields', async () => {
@@ -1913,10 +1952,10 @@ async function runTestSuite() {
     });
 
     await test('Messages accept only the known fields', async () => {
-      await assertFails(setDoc(doc(custA(), 'conversations', 'conv_req_a', 'messages', 'm1'), {
+      await assertFails(countedSet(doc(custA(), 'conversations', 'conv_req_a', 'messages', 'm1'), {
         id: 'm1', conversationId: 'conv_req_a', requestId: 'req_a', senderId: 'cust_a', senderRole: 'customer', type: 'text', text: 'x', createdAt: new Date().toISOString(), extra: 'x',
       }));
-      await assertSucceeds(setDoc(doc(custA(), 'conversations', 'conv_req_a', 'messages', 'm2'), {
+      await assertSucceeds(countedSet(doc(custA(), 'conversations', 'conv_req_a', 'messages', 'm2'), {
         id: 'm2', conversationId: 'conv_req_a', requestId: 'req_a', senderId: 'cust_a', senderRole: 'customer', type: 'text', text: 'Сәлем', isRead: false, readAt: null, createdAt: new Date().toISOString(),
       }));
     });
@@ -1931,15 +1970,15 @@ async function runTestSuite() {
         mimeType: 'application/pdf', sizeBytes: 1200, createdAt: new Date().toISOString(),
       };
       const ref = (id: string) => doc(custA(), 'conversations', 'conv_req_a', 'messages', id);
-      await assertSucceeds(setDoc(ref('m_ok'), msg('m_ok', [good])));
-      await assertFails(setDoc(ref('m_bad1'), msg('m_bad1', [{ id: 'bad', type: 'file', fileName: { unexpected: true }, sizeBytes: 1 }])));
-      await assertFails(setDoc(ref('m_bad2'), msg('m_bad2', [{ ...good, fileName: { unexpected: true } }])));
-      await assertFails(setDoc(ref('m_bad3'), msg('m_bad3', ['just text'])));
-      await assertFails(setDoc(ref('m_bad4'), msg('m_bad4', [{ ...good, storagePath: 'chat/conv_other/x/doc.pdf' }])));
-      await assertFails(setDoc(ref('m_bad5'), msg('m_bad5', [{ ...good, downloadUrl: 'https://evil.example/x' }])));
-      await assertFails(setDoc(ref('m_bad6'), msg('m_bad6', [{ ...good, extra: 'x' }])));
-      await assertFails(setDoc(ref('m_bad7'), msg('m_bad7', [good, { ...good, id: 'att2', sizeBytes: 'big' }])));
-      await assertFails(setDoc(ref('m_bad8'), msg('m_bad8', [good, good, good, good])));
+      await assertSucceeds(countedSet(ref('m_ok'), msg('m_ok', [good])));
+      await assertFails(countedSet(ref('m_bad1'), msg('m_bad1', [{ id: 'bad', type: 'file', fileName: { unexpected: true }, sizeBytes: 1 }])));
+      await assertFails(countedSet(ref('m_bad2'), msg('m_bad2', [{ ...good, fileName: { unexpected: true } }])));
+      await assertFails(countedSet(ref('m_bad3'), msg('m_bad3', ['just text'])));
+      await assertFails(countedSet(ref('m_bad4'), msg('m_bad4', [{ ...good, storagePath: 'chat/conv_other/x/doc.pdf' }])));
+      await assertFails(countedSet(ref('m_bad5'), msg('m_bad5', [{ ...good, downloadUrl: 'https://evil.example/x' }])));
+      await assertFails(countedSet(ref('m_bad6'), msg('m_bad6', [{ ...good, extra: 'x' }])));
+      await assertFails(countedSet(ref('m_bad7'), msg('m_bad7', [good, { ...good, id: 'att2', sizeBytes: 'big' }])));
+      await assertFails(countedSet(ref('m_bad8'), msg('m_bad8', [good, good, good, good])));
     });
 
     await test('Appointment is created as a proposal only (no self-confirmed or completed work)', async () => {
@@ -1947,9 +1986,9 @@ async function runTestSuite() {
         id: 'appointment_req_a', requestId: 'req_a', customerId: 'cust_a', providerId: 'prov_a', providerUserId: 'prov_a',
         proposedBy: 'customer', scheduledAt: visitIn(72), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
-      await assertFails(setDoc(doc(custA(), 'appointments', 'appointment_req_a'), { ...base, status: 'CONFIRMED' }));
-      await assertFails(setDoc(doc(custA(), 'appointments', 'appointment_req_a'), { ...base, status: 'PROPOSED', workStatus: 'WORK_COMPLETED' }));
-      await assertSucceeds(setDoc(doc(custA(), 'appointments', 'appointment_req_a'), { ...base, status: 'PROPOSED' }));
+      await assertFails(countedSet(doc(custA(), 'appointments', 'appointment_req_a'), { ...base, status: 'CONFIRMED' }));
+      await assertFails(countedSet(doc(custA(), 'appointments', 'appointment_req_a'), { ...base, status: 'PROPOSED', workStatus: 'WORK_COMPLETED' }));
+      await assertSucceeds(countedSet(doc(custA(), 'appointments', 'appointment_req_a'), { ...base, status: 'PROPOSED' }));
     });
 
     await test('Selected provider reads the customer contacts while the job is active', async () => {
@@ -1966,73 +2005,76 @@ async function runTestSuite() {
 
     await test('Request location must be numbers; understanding and fields are bounded', async () => {
       const base = { id: 'req_b', customerId: 'cust_a', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'MATCHING' };
-      await assertFails(setDoc(doc(custA(), 'requests', 'req_b'), { ...base, location: { latitude: 'x', longitude: 'x' } }));
-      await assertFails(setDoc(doc(custA(), 'requests', 'req_b'), { ...base, understanding: { description: 'x'.repeat(5001) } }));
-      await assertFails(setDoc(doc(custA(), 'requests', 'req_b'), { ...base, rating: 5 }));
-      await assertSucceeds(setDoc(doc(custA(), 'requests', 'req_b'), { ...base, location: { latitude: 43.24, longitude: 76.95, approximate: true } }));
+      await assertFails(countedSet(doc(custA(), 'requests', 'req_b'), { ...base, location: { latitude: 'x', longitude: 'x' } }));
+      await assertFails(countedSet(doc(custA(), 'requests', 'req_b'), { ...base, understanding: { description: 'x'.repeat(5001) } }));
+      await assertFails(countedSet(doc(custA(), 'requests', 'req_b'), { ...base, rating: 5 }));
+      await assertSucceeds(countedSet(doc(custA(), 'requests', 'req_b'), { ...base, location: { latitude: 43.24, longitude: 76.95, approximate: true } }));
     });
 
     await test('Reviews accept only the known fields with bounded sizes', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
         const db = c.firestore();
-        await setDoc(doc(db, 'requests', 'req_r'), {
+        await countedSet(doc(db, 'requests', 'req_r'), {
           id: 'req_r', customerId: 'cust_a', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'COMPLETED', selectedOfferId: 'OFFER-req_r-prov_a',
         });
-        await setDoc(doc(db, 'offers', 'OFFER-req_r-prov_a'), {
+        await countedSet(doc(db, 'offers', 'OFFER-req_r-prov_a'), {
           id: 'OFFER-req_r-prov_a', requestId: 'req_r', providerId: 'prov_a', providerUserId: 'prov_a', providerName: 'A', price: '1', status: 'ACCEPTED',
         });
       });
       const review = { id: 'req_r', requestId: 'req_r', customerId: 'cust_a', providerId: 'prov_a', rating: 5, createdAt: new Date().toISOString() };
-      await assertFails(setDoc(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, comment: 'x'.repeat(1001) }));
-      await assertFails(setDoc(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, providerName: 'x'.repeat(101) }));
-      await assertFails(setDoc(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, verifiedPurchase: true }));
-      await assertFails(setDoc(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, comment: 'Жақсы', status: 'published' }));
-      await assertSucceeds(setDoc(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, comment: 'Жақсы' }));
+      await assertFails(countedSet(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, comment: 'x'.repeat(1001) }));
+      await assertFails(countedSet(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, providerName: 'x'.repeat(101) }));
+      await assertFails(countedSet(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, verifiedPurchase: true }));
+      await assertFails(countedSet(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, comment: 'Жақсы', status: 'published' }));
+      await assertSucceeds(countedSet(doc(custA(), 'reviewSubmissions', 'req_r'), { ...review, comment: 'Жақсы' }));
     });
 
     await test('A blocked account cannot submit a review until the block is lifted', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
         const db = c.firestore();
-        await setDoc(doc(db, 'requests', 'req_rb'), {
+        await countedSet(doc(db, 'requests', 'req_rb'), {
           id: 'req_rb', customerId: 'cust_rb', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'COMPLETED', selectedOfferId: 'OFFER-req_rb-prov_a',
         });
-        await setDoc(doc(db, 'offers', 'OFFER-req_rb-prov_a'), {
+        await countedSet(doc(db, 'offers', 'OFFER-req_rb-prov_a'), {
           id: 'OFFER-req_rb-prov_a', requestId: 'req_rb', providerId: 'prov_a', providerUserId: 'prov_a', providerName: 'A', price: '1', status: 'ACCEPTED',
         });
-        await setDoc(doc(db, 'bans', 'cust_rb'), { uid: 'cust_rb', reason: 'fraud', createdAt: new Date().toISOString() });
+        await countedSet(doc(db, 'bans', 'cust_rb'), { uid: 'cust_rb', reason: 'fraud', createdAt: new Date().toISOString() });
       });
       const sub = { id: 'req_rb', requestId: 'req_rb', customerId: 'cust_rb', providerId: 'prov_a', rating: 5, createdAt: new Date().toISOString() };
       const ref = doc(phoneUser('cust_rb').firestore(), 'reviewSubmissions', 'req_rb');
-      await assertFails(setDoc(ref, sub));
+      await assertFails(countedSet(ref, sub));
       await testEnv.withSecurityRulesDisabled(async (c) => deleteDoc(doc(c.firestore(), 'bans', 'cust_rb')));
-      await assertSucceeds(setDoc(ref, sub));
+      await assertSucceeds(countedSet(ref, sub));
     });
 
     await test('Account suspicion signals are server-only: no app can read or write them', async () => {
       await assertFails(getDoc(doc(custA(), 'accountSignals', 'cust_a')));
-      await assertFails(setDoc(doc(custA(), 'accountSignals', 'cust_a'), { devices: ['x'] }));
+      await assertFails(countedSet(doc(custA(), 'accountSignals', 'cust_a'), { devices: ['x'] }));
       const operator = testEnv.authenticatedContext('op_signals', { phone_number: '+77000000007', admin: true }).firestore();
       await assertFails(getDoc(doc(operator, 'accountSignals', 'cust_a')));
     });
 
     // ---------------- 17. Reports ----------------
     await test('Reports: a verified user files one report per target; only operators can read them', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'providers', 'prov_x'), { id: 'prov_x', userId: 'prov_x', name: 'X', cityId: 'almaty' });
+      });
       const db = phoneUser('rep_a').firestore();
       const id = 'REPORT-rep_a-provider-prov_x';
       const base = { id, reporterId: 'rep_a', targetType: 'provider', targetId: 'prov_x', reason: 'fraud', createdAt: new Date().toISOString() };
       // Anonymous accounts cannot report
-      await assertFails(setDoc(doc(anonymousUser('rep_a').firestore(), 'reports', id), base));
+      await assertFails(countedSet(doc(anonymousUser('rep_a').firestore(), 'reports', id), base));
       // Id must be bound to reporter and target, reporter must be the caller, reason from the list
-      await assertFails(setDoc(doc(db, 'reports', 'REPORT-rep_a-provider-other'), base));
-      await assertFails(setDoc(doc(db, 'reports', id), { ...base, reporterId: 'someone' }));
-      await assertFails(setDoc(doc(db, 'reports', id), { ...base, reason: 'whatever' }));
-      await assertFails(setDoc(doc(db, 'reports', id), { ...base, details: 'x'.repeat(1001) }));
-      await assertFails(setDoc(doc(db, 'reports', id), { ...base, status: 'RESOLVED' }));
+      await assertFails(countedSet(doc(db, 'reports', 'REPORT-rep_a-provider-other'), base));
+      await assertFails(countedSet(doc(db, 'reports', id), { ...base, reporterId: 'someone' }));
+      await assertFails(countedSet(doc(db, 'reports', id), { ...base, reason: 'whatever' }));
+      await assertFails(countedSet(doc(db, 'reports', id), { ...base, details: 'x'.repeat(1001) }));
+      await assertFails(countedSet(doc(db, 'reports', id), { ...base, status: 'RESOLVED' }));
       // Checking for an existing report before writing is allowed
       await assertSucceeds(getDoc(doc(db, 'reports', id)));
-      await assertSucceeds(setDoc(doc(db, 'reports', id), { ...base, details: 'Алдады' }));
+      await assertSucceeds(countedSet(doc(db, 'reports', id), { ...base, details: 'Алдады' }));
       // Write-once
-      await assertFails(setDoc(doc(db, 'reports', id), { ...base, reason: 'spam' }));
+      await assertFails(countedSet(doc(db, 'reports', id), { ...base, reason: 'spam' }));
       await assertFails(deleteDoc(doc(db, 'reports', id)));
       // Others cannot read it or list reports; an operator can
       await assertFails(getDoc(doc(phoneUser('prov_x').firestore(), 'reports', id)));
@@ -2043,7 +2085,7 @@ async function runTestSuite() {
 
     await test('An operator removed from the list loses admin rights at once, even with an old claim', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
-        await setDoc(doc(c.firestore(), 'providers', 'prov_rev'), { id: 'prov_rev', userId: 'prov_rev', name: 'Мастер', city: 'Кызылорда' });
+        await countedSet(doc(c.firestore(), 'providers', 'prov_rev'), { id: 'prov_rev', userId: 'prov_rev', name: 'Мастер', city: 'Кызылорда' });
       });
       const removed = testEnv.authenticatedContext('op_removed', { admin: true, phone_number: '+77000000555' }).firestore();
       await assertFails(updateDoc(doc(removed, 'providers', 'prov_rev'), { verified: true, updatedAt: new Date().toISOString() }));
@@ -2061,11 +2103,11 @@ async function runTestSuite() {
     await test('Account deletion: customer strips personal data from own request in any status; others cannot', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
         const db = c.firestore();
-        await setDoc(doc(db, 'requests', 'req_del'), {
+        await countedSet(doc(db, 'requests', 'req_del'), {
           id: 'req_del', customerId: 'cust_d', customerName: 'Айгүл', requestText: 'Кран ағады', description: 'd', city: 'Алматы', cityId: 'almaty',
           category: 'x', service: 'x', status: 'COMPLETED', selectedOfferId: 'OFFER-req_del-prov_d', attachments: [], location: { latitude: 43, longitude: 76 },
         });
-        await setDoc(doc(db, 'offers', 'OFFER-req_del-prov_d'), {
+        await countedSet(doc(db, 'offers', 'OFFER-req_del-prov_d'), {
           id: 'OFFER-req_del-prov_d', requestId: 'req_del', providerId: 'prov_d', providerUserId: 'prov_d', providerName: 'D', price: '1',
           providerPhone: '+77011112233', providerWhatsapp: '+77011112233', status: 'ACCEPTED',
         });
@@ -2088,13 +2130,13 @@ async function runTestSuite() {
     await test('Appointments: the side that proposed a time cannot confirm it; the other side can', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
         const db = c.firestore();
-        await setDoc(doc(db, 'requests', 'req_ap'), {
+        await countedSet(doc(db, 'requests', 'req_ap'), {
           id: 'req_ap', customerId: 'cust_ap', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-req_ap-prov_ap',
         });
-        await setDoc(doc(db, 'offers', 'OFFER-req_ap-prov_ap'), {
+        await countedSet(doc(db, 'offers', 'OFFER-req_ap-prov_ap'), {
           id: 'OFFER-req_ap-prov_ap', requestId: 'req_ap', providerId: 'prov_ap', providerUserId: 'prov_ap', providerName: 'P', price: '1', status: 'ACCEPTED',
         });
-        await setDoc(doc(db, 'appointments', 'appointment_req_ap'), {
+        await countedSet(doc(db, 'appointments', 'appointment_req_ap'), {
           id: 'appointment_req_ap', requestId: 'req_ap', customerId: 'cust_ap', providerId: 'prov_ap', providerUserId: 'prov_ap',
           proposedBy: 'customer', scheduledAt: '2026-10-20T10:00:00.000Z', status: 'PROPOSED', workStatus: 'NOT_STARTED',
           createdAt: '2026-10-13T10:00:00.000Z', updatedAt: '2026-10-13T10:00:00.000Z',
@@ -2108,16 +2150,16 @@ async function runTestSuite() {
     // ---------------- 20. Second audit ----------------
     await test('Audit 2: banned user cannot recreate a provider profile', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
-        await setDoc(doc(c.firestore(), 'bans', 'prov_banned'), { reason: 'fraud' });
+        await countedSet(doc(c.firestore(), 'bans', 'prov_banned'), { reason: 'fraud' });
       });
       const profile = { id: 'prov_banned', userId: 'prov_banned', name: 'B', phone: '+77011112233', city: 'Алматы', cityId: 'almaty', category: 'x', categoryId: 'plumbing' };
-      await assertFails(setDoc(doc(phoneUser('prov_banned').firestore(), 'providers', 'prov_banned'), profile));
+      await assertFails(countedSet(doc(phoneUser('prov_banned').firestore(), 'providers', 'prov_banned'), profile));
       await assertFails(getDoc(doc(phoneUser('prov_banned').firestore(), 'bans', 'prov_banned')));
     });
 
     await test('Audit 2: request title must be text', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
-        await setDoc(doc(c.firestore(), 'requests', 'req_svc'), {
+        await countedSet(doc(c.firestore(), 'requests', 'req_svc'), {
           id: 'req_svc', customerId: 'cust_svc', city: 'Алматы', cityId: 'almaty', category: 'Сантехника', service: 'Кран', status: 'OPEN',
         });
       });
@@ -2127,7 +2169,7 @@ async function runTestSuite() {
 
     await test('Audit 2: account deletion may replace the title with the category, nothing else', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
-        await setDoc(doc(c.firestore(), 'requests', 'req_del2'), {
+        await countedSet(doc(c.firestore(), 'requests', 'req_del2'), {
           id: 'req_del2', customerId: 'cust_d2', customerName: 'А', city: 'Алматы', cityId: 'almaty', category: 'Сантехника', service: 'Айгүлдің краны', status: 'CANCELLED',
         });
       });
@@ -2139,16 +2181,16 @@ async function runTestSuite() {
     await test('Audit 2: a confirmed time changes only through a new proposal; a cancelled appointment can be proposed again', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
         const db = c.firestore();
-        await setDoc(doc(db, 'requests', 'req_ap2'), {
+        await countedSet(doc(db, 'requests', 'req_ap2'), {
           id: 'req_ap2', customerId: 'cust_ap2', city: 'Алматы', cityId: 'almaty', category: 'x', service: 'x', status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-req_ap2-prov_ap2',
         });
-        await setDoc(doc(db, 'offers', 'OFFER-req_ap2-prov_ap2'), {
+        await countedSet(doc(db, 'offers', 'OFFER-req_ap2-prov_ap2'), {
           id: 'OFFER-req_ap2-prov_ap2', requestId: 'req_ap2', providerId: 'prov_ap2', providerUserId: 'prov_ap2', providerName: 'P', price: '1', status: 'ACCEPTED',
         });
         const base = { id: 'appointment_req_ap2', requestId: 'req_ap2', customerId: 'cust_ap2', providerId: 'prov_ap2', providerUserId: 'prov_ap2',
           proposedBy: 'customer', scheduledAt: '2026-10-20T10:00:00.000Z', workStatus: 'NOT_STARTED', createdAt: '2026-10-13T10:00:00.000Z', updatedAt: '2026-10-13T10:00:00.000Z' };
-        await setDoc(doc(db, 'appointments', 'appointment_req_ap2'), { ...base, status: 'CONFIRMED' });
-        await setDoc(doc(db, 'appointments', 'appointment_req_ap3'), { ...base, id: 'appointment_req_ap3', status: 'CANCELLED' });
+        await countedSet(doc(db, 'appointments', 'appointment_req_ap2'), { ...base, status: 'CONFIRMED' });
+        await countedSet(doc(db, 'appointments', 'appointment_req_ap3'), { ...base, id: 'appointment_req_ap3', status: 'CANCELLED' });
       });
       const cust = phoneUser('cust_ap2').firestore();
       const later = visitIn(96);
@@ -2167,21 +2209,21 @@ async function runTestSuite() {
     const nowIso = new Date().toISOString();
     await testEnv.withSecurityRulesDisabled(async (c) => {
       const db = c.firestore();
-      await setDoc(doc(db, 'providers', 'prov_op'), { id: 'prov_op', userId: 'prov_op', name: 'Op Master', city: 'almaty', cityId: 'almaty', category: 'appliances' });
-      await setDoc(doc(db, 'providers', 'prov_cr2'), { id: 'prov_cr2', userId: 'prov_cr2', name: 'Other Master', city: 'almaty', cityId: 'almaty', category: 'appliances' });
-      await setDoc(doc(db, 'reports', 'REPORT-cust_r-provider-prov_op'), {
+      await countedSet(doc(db, 'providers', 'prov_op'), { id: 'prov_op', userId: 'prov_op', name: 'Op Master', city: 'almaty', cityId: 'almaty', category: 'appliances' });
+      await countedSet(doc(db, 'providers', 'prov_cr2'), { id: 'prov_cr2', userId: 'prov_cr2', name: 'Other Master', city: 'almaty', cityId: 'almaty', category: 'appliances' });
+      await countedSet(doc(db, 'reports', 'REPORT-cust_r-provider-prov_op'), {
         id: 'REPORT-cust_r-provider-prov_op', reporterId: 'cust_r', targetType: 'provider', targetId: 'prov_op', reason: 'rude', createdAt: nowIso,
       });
       // A finished job of prov_op for cust_cr, with the customer's review of the master
-      await setDoc(doc(db, 'requests', 'req_cr'), {
+      await countedSet(doc(db, 'requests', 'req_cr'), {
         id: 'req_cr', customerId: 'cust_cr', city: 'almaty', cityId: 'almaty', category: 'x', service: 'x', status: 'COMPLETED', selectedOfferId: 'OFFER-req_cr-prov_op',
       });
-      await setDoc(doc(db, 'requests', 'req_cr_open'), {
+      await countedSet(doc(db, 'requests', 'req_cr_open'), {
         id: 'req_cr_open', customerId: 'cust_cr', city: 'almaty', cityId: 'almaty', category: 'x', service: 'x', status: 'IN_PROGRESS', selectedOfferId: 'OFFER-req_cr_open-prov_op',
       });
-      await setDoc(doc(db, 'offers', 'OFFER-req_cr-prov_op'), { id: 'OFFER-req_cr-prov_op', requestId: 'req_cr', providerId: 'prov_op', providerUserId: 'prov_op', status: 'ACCEPTED' });
-      await setDoc(doc(db, 'offers', 'OFFER-req_cr_open-prov_op'), { id: 'OFFER-req_cr_open-prov_op', requestId: 'req_cr_open', providerId: 'prov_op', providerUserId: 'prov_op', status: 'ACCEPTED' });
-      await setDoc(doc(db, 'reviews', 'req_cr'), {
+      await countedSet(doc(db, 'offers', 'OFFER-req_cr-prov_op'), { id: 'OFFER-req_cr-prov_op', requestId: 'req_cr', providerId: 'prov_op', providerUserId: 'prov_op', status: 'ACCEPTED' });
+      await countedSet(doc(db, 'offers', 'OFFER-req_cr_open-prov_op'), { id: 'OFFER-req_cr_open-prov_op', requestId: 'req_cr_open', providerId: 'prov_op', providerUserId: 'prov_op', status: 'ACCEPTED' });
+      await countedSet(doc(db, 'reviews', 'req_cr'), {
         id: 'req_cr', requestId: 'req_cr', customerId: 'cust_cr', customerName: 'Cust', providerId: 'prov_op', providerName: 'Op Master', rating: 4, createdAt: nowIso,
       });
     });
@@ -2214,12 +2256,12 @@ async function runTestSuite() {
 
     await test('A blocked account cannot publish requests or offers until the operator lifts the block', async () => {
       const banRef = doc(adminDb(), 'bans', 'cust_ban');
-      await assertFails(setDoc(doc(phoneUser('cust_r').firestore(), 'bans', 'cust_ban'), { uid: 'cust_ban', createdAt: nowIso }));
-      await assertSucceeds(setDoc(banRef, { uid: 'cust_ban', reason: 'fraud', createdAt: nowIso }));
+      await assertFails(countedSet(doc(phoneUser('cust_r').firestore(), 'bans', 'cust_ban'), { uid: 'cust_ban', createdAt: nowIso }));
+      await assertSucceeds(countedSet(banRef, { uid: 'cust_ban', reason: 'fraud', createdAt: nowIso }));
       const req = { id: 'req_ban', customerId: 'cust_ban', city: 'almaty', cityId: 'almaty', category: 'x', service: 'x', status: 'OPEN' };
-      await assertFails(setDoc(doc(phoneUser('cust_ban').firestore(), 'requests', 'req_ban'), req));
+      await assertFails(countedSet(doc(phoneUser('cust_ban').firestore(), 'requests', 'req_ban'), req));
       await assertSucceeds(deleteDoc(banRef));
-      await assertSucceeds(setDoc(doc(phoneUser('cust_ban').firestore(), 'requests', 'req_ban'), req));
+      await assertSucceeds(countedSet(doc(phoneUser('cust_ban').firestore(), 'requests', 'req_ban'), req));
     });
 
     await test('The reviewed master answers a review; nobody else, and the rating stays', async () => {
@@ -2235,11 +2277,11 @@ async function runTestSuite() {
       const rating = (requestId: string, extra: Record<string, unknown> = {}) => ({
         id: requestId, requestId, customerId: 'cust_cr', providerId: 'prov_op', rating: 5, comment: 'Вежливый заказчик', createdAt: nowIso, ...extra,
       });
-      await assertFails(setDoc(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr_open'), rating('req_cr_open')));
-      await assertFails(setDoc(doc(phoneUser('prov_cr2').firestore(), 'customerReviews', 'req_cr'), rating('req_cr', { providerId: 'prov_cr2' })));
-      await assertFails(setDoc(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr'), rating('req_cr', { rating: 6 })));
-      await assertFails(setDoc(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr'), rating('req_cr', { customerId: 'someone_else' })));
-      await assertSucceeds(setDoc(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr'), rating('req_cr')));
+      await assertFails(countedSet(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr_open'), rating('req_cr_open')));
+      await assertFails(countedSet(doc(phoneUser('prov_cr2').firestore(), 'customerReviews', 'req_cr'), rating('req_cr', { providerId: 'prov_cr2' })));
+      await assertFails(countedSet(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr'), rating('req_cr', { rating: 6 })));
+      await assertFails(countedSet(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr'), rating('req_cr', { customerId: 'someone_else' })));
+      await assertSucceeds(countedSet(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr'), rating('req_cr')));
       await assertFails(updateDoc(doc(phoneUser('prov_op').firestore(), 'customerReviews', 'req_cr'), { rating: 1 }));
     });
 
@@ -2261,18 +2303,18 @@ async function runTestSuite() {
       await testEnv.withSecurityRulesDisabled(async (c) => {
         const db = c.firestore();
         const offerId = `OFFER-${id}-prov_${id}`;
-        await setDoc(doc(db, 'requests', id), {
+        await countedSet(doc(db, 'requests', id), {
           id, customerId: `cust_${id}`, city: 'Қызылорда', cityId: 'kyzylorda', category: 'x', service: 'x',
           status: 'IN_PROGRESS', selectedOfferId: offerId, createdAt: '2026-10-16T10:00:00.000Z', ...reqExtra,
         });
-        await setDoc(doc(db, 'offers', offerId), {
+        await countedSet(doc(db, 'offers', offerId), {
           id: offerId, requestId: id, providerId: `prov_${id}`, providerUserId: `prov_${id}`, providerName: 'P', price: '1', status: 'ACCEPTED',
         });
-        await setDoc(doc(db, 'conversations', `conv_${id}`), {
+        await countedSet(doc(db, 'conversations', `conv_${id}`), {
           id: `conv_${id}`, requestId: id, customerId: `cust_${id}`, providerUserId: `prov_${id}`, providerId: `prov_${id}`, status: 'ACTIVE',
         });
         if (appt) {
-          await setDoc(doc(db, 'appointments', `appointment_${id}`), {
+          await countedSet(doc(db, 'appointments', `appointment_${id}`), {
             id: `appointment_${id}`, requestId: id, customerId: `cust_${id}`, providerId: `prov_${id}`, providerUserId: `prov_${id}`,
             proposedBy: 'customer', scheduledAt: visitIn(24), createdAt: '2026-10-16T10:00:00.000Z', updatedAt: '2026-10-16T10:00:00.000Z',
             ...appt,
@@ -2282,12 +2324,12 @@ async function runTestSuite() {
     };
     const ban = (uid: string) =>
       testEnv.withSecurityRulesDisabled(async (c) => {
-        await setDoc(doc(c.firestore(), 'bans', uid), { uid, reason: 'test', createdAt: new Date().toISOString() });
+        await countedSet(doc(c.firestore(), 'bans', uid), { uid, reason: 'test', createdAt: new Date().toISOString() });
       });
 
     await test('S04: a blocked master cannot edit a pending offer; before the block they could', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
-        await setDoc(doc(c.firestore(), 'offers', 'OFFER-req_bo-prov_bo'), {
+        await countedSet(doc(c.firestore(), 'offers', 'OFFER-req_bo-prov_bo'), {
           id: 'OFFER-req_bo-prov_bo', requestId: 'req_bo', providerId: 'prov_bo', providerUserId: 'prov_bo', providerName: 'P', price: '1000', status: 'PENDING',
         });
       });
@@ -2304,16 +2346,16 @@ async function runTestSuite() {
         id, conversationId: 'conv_req_bm', requestId: 'req_bm', senderId: 'prov_req_bm', senderRole: 'provider', type: 'text', text: 'Сәлем', createdAt: new Date().toISOString(),
       });
       const pdb = () => phoneUser('prov_req_bm').firestore();
-      await assertSucceeds(setDoc(doc(pdb(), 'conversations', 'conv_req_bm', 'messages', 'm1'), msg('m1')));
+      await assertSucceeds(countedSet(doc(pdb(), 'conversations', 'conv_req_bm', 'messages', 'm1'), msg('m1')));
       await ban('prov_req_bm');
-      await assertFails(setDoc(doc(pdb(), 'conversations', 'conv_req_bm', 'messages', 'm2'), msg('m2')));
+      await assertFails(countedSet(doc(pdb(), 'conversations', 'conv_req_bm', 'messages', 'm2'), msg('m2')));
       await assertFails(updateDoc(doc(pdb(), 'conversations', 'conv_req_bm'), { lastMessageText: 'call me', lastMessageSenderId: 'prov_req_bm', updatedAt: new Date().toISOString() }));
       await assertSucceeds(updateDoc(doc(pdb(), 'conversations', 'conv_req_bm'), { providerLastReadAt: new Date().toISOString() }));
     });
 
     await test('S04: a blocked master cannot change their profile', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
-        await setDoc(doc(c.firestore(), 'providers', 'prov_bp'), { id: 'prov_bp', userId: 'prov_bp', name: 'B', city: 'Қызылорда', cityId: 'kyzylorda', category: 'x' });
+        await countedSet(doc(c.firestore(), 'providers', 'prov_bp'), { id: 'prov_bp', userId: 'prov_bp', name: 'B', city: 'Қызылорда', cityId: 'kyzylorda', category: 'x' });
       });
       const rename = (name: string) => updateDoc(doc(phoneUser('prov_bp').firestore(), 'providers', 'prov_bp'), { name });
       await assertSucceeds(rename('B2'));
@@ -2324,9 +2366,9 @@ async function runTestSuite() {
     await test('S04: a hidden or blocked profile is readable only by its master and the operator', async () => {
       await testEnv.withSecurityRulesDisabled(async (c) => {
         const db = c.firestore();
-        await setDoc(doc(db, 'providers', 'prov_hid'), { id: 'prov_hid', userId: 'prov_hid', name: 'H', phone: '+77010000001', cityId: 'kyzylorda', hidden: true });
-        await setDoc(doc(db, 'providers', 'prov_blk'), { id: 'prov_blk', userId: 'prov_blk', name: 'K', phone: '+77010000002', cityId: 'kyzylorda', blocked: true });
-        await setDoc(doc(db, 'providers', 'prov_vis'), { id: 'prov_vis', userId: 'prov_vis', name: 'V', phone: '+77010000003', cityId: 'kyzylorda' });
+        await countedSet(doc(db, 'providers', 'prov_hid'), { id: 'prov_hid', userId: 'prov_hid', name: 'H', phone: '+77010000001', cityId: 'kyzylorda', hidden: true });
+        await countedSet(doc(db, 'providers', 'prov_blk'), { id: 'prov_blk', userId: 'prov_blk', name: 'K', phone: '+77010000002', cityId: 'kyzylorda', blocked: true });
+        await countedSet(doc(db, 'providers', 'prov_vis'), { id: 'prov_vis', userId: 'prov_vis', name: 'V', phone: '+77010000003', cityId: 'kyzylorda' });
       });
       const other = phoneUser('cust_reader').firestore();
       await assertFails(getDoc(doc(other, 'providers', 'prov_hid')));
@@ -2342,11 +2384,11 @@ async function runTestSuite() {
         createdAt: new Date().toISOString(),
       };
       const db = phoneUser('cust_nm').firestore();
-      await assertFails(setDoc(doc(db, 'requests', 'req_nm'), { ...base, customerName: 'Айгүл Серікова' }));
-      await assertSucceeds(setDoc(doc(db, 'requests', 'req_nm'), base));
+      await assertFails(countedSet(doc(db, 'requests', 'req_nm'), { ...base, customerName: 'Айгүл Серікова' }));
+      await assertSucceeds(countedSet(doc(db, 'requests', 'req_nm'), base));
       await assertFails(updateDoc(doc(db, 'requests', 'req_nm'), { customerName: 'Айгүл', updatedAt: new Date().toISOString() }));
-      await assertFails(setDoc(doc(db, 'requestContacts', 'req_nm'), { requestId: 'req_nm', customerId: 'cust_nm', customerName: 'Айгүл', secret: 'x' }));
-      await assertSucceeds(setDoc(doc(db, 'requestContacts', 'req_nm'), { requestId: 'req_nm', customerId: 'cust_nm', customerName: 'Айгүл', customerPhone: '+77011234567' }));
+      await assertFails(countedSet(doc(db, 'requestContacts', 'req_nm'), { requestId: 'req_nm', customerId: 'cust_nm', customerName: 'Айгүл', secret: 'x' }));
+      await assertSucceeds(countedSet(doc(db, 'requestContacts', 'req_nm'), { requestId: 'req_nm', customerId: 'cust_nm', customerName: 'Айгүл', customerPhone: '+77011234567' }));
     });
 
     await test('B03: the master cannot mark a visit COMPLETED without the work and the request (audit probe)', async () => {
@@ -2402,17 +2444,97 @@ async function runTestSuite() {
       });
       const ref = doc(cdb, 'appointments', 'appointment_req_tm');
       const nextYear = new Date().getUTCFullYear() + 1;
-      await assertFails(setDoc(ref, appt(visitIn(24).replace('T', ' ').replace('+05:00', ''))));
-      await assertFails(setDoc(ref, appt(visitIn(24).replace('+05:00', 'Z'))));
-      await assertFails(setDoc(ref, appt('ертең кешке')));
-      await assertFails(setDoc(ref, appt(visitIn(-5))));
-      await assertFails(setDoc(ref, appt(visitIn(24 * 400))));
-      await assertFails(setDoc(ref, appt(`${nextYear}-02-30T10:00+05:00`)));
-      await assertFails(setDoc(ref, appt(`${nextYear}-03-10T24:00+05:00`)));
-      await assertSucceeds(setDoc(ref, appt(visitIn(24))));
+      await assertFails(countedSet(ref, appt(visitIn(24).replace('T', ' ').replace('+05:00', ''))));
+      await assertFails(countedSet(ref, appt(visitIn(24).replace('+05:00', 'Z'))));
+      await assertFails(countedSet(ref, appt('ертең кешке')));
+      await assertFails(countedSet(ref, appt(visitIn(-5))));
+      await assertFails(countedSet(ref, appt(visitIn(24 * 400))));
+      await assertFails(countedSet(ref, appt(`${nextYear}-02-30T10:00+05:00`)));
+      await assertFails(countedSet(ref, appt(`${nextYear}-03-10T24:00+05:00`)));
+      await assertSucceeds(countedSet(ref, appt(visitIn(24))));
       // Moving it: the new time is checked too
       await assertFails(updateDoc(ref, { scheduledAt: visitIn(-48), status: 'RESCHEDULED', updatedAt: new Date().toISOString() }));
       await assertSucceeds(updateDoc(ref, { scheduledAt: visitIn(48), status: 'RESCHEDULED', updatedAt: new Date().toISOString() }));
+    });
+
+    // =========================================================================
+    // SECTION 22: Daily limits (S06): requests, messages, reports and chat files are counted
+    // =========================================================================
+    console.log('\n--- SECTION 22: Daily limits (S06) ---');
+    const usageId = (uid: string) => `${uid}_${usageDayKey()}`;
+    const seedUsage = (uid: string, counts: Record<string, number>) =>
+      testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'usage', usageId(uid)), { uid, ...counts, expireAt: Timestamp.fromMillis(Date.now() + 86400000) });
+      });
+    const reqDoc = (id: string, uid: string) => ({
+      id, customerId: uid, city: 'Қызылорда', cityId: 'kyzylorda', category: 'Сантехника', service: 'Кран', status: 'OPEN', createdAt: new Date().toISOString(),
+    });
+
+    await test('S06: a request written without being counted is refused (direct SDK write, audit probe)', async () => {
+      const db = phoneUser('cust_q1').firestore();
+      await assertFails(setDoc(doc(db, 'requests', 'req_q1'), reqDoc('req_q1', 'cust_q1')));
+      await assertSucceeds(countedSet(doc(db, 'requests', 'req_q1'), reqDoc('req_q1', 'cust_q1')));
+    });
+
+    await test('S06: the 11th request of the day is refused', async () => {
+      await seedUsage('cust_q2', { requests: 9 });
+      const db = phoneUser('cust_q2').firestore();
+      await assertSucceeds(countedSet(doc(db, 'requests', 'req_q2a'), reqDoc('req_q2a', 'cust_q2')));
+      await assertFails(countedSet(doc(db, 'requests', 'req_q2b'), reqDoc('req_q2b', 'cust_q2')));
+    });
+
+    await test('S06: messages are counted; the 301st of the day is refused', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const d = c.firestore();
+        await setDoc(doc(d, 'requests', 'req_qm'), { id: 'req_qm', customerId: 'cust_qm', cityId: 'kyzylorda', status: 'IN_PROGRESS', selectedOfferId: 'OFFER-req_qm-prov_qm' });
+        await setDoc(doc(d, 'conversations', 'conv_req_qm'), { id: 'conv_req_qm', requestId: 'req_qm', customerId: 'cust_qm', providerUserId: 'prov_qm', providerId: 'prov_qm', status: 'ACTIVE' });
+      });
+      const db = phoneUser('cust_qm').firestore();
+      const msg = (id: string) => ({ id, conversationId: 'conv_req_qm', requestId: 'req_qm', senderId: 'cust_qm', senderRole: 'customer', type: 'text', text: 'Сәлем', createdAt: new Date().toISOString() });
+      await assertFails(setDoc(doc(db, 'conversations', 'conv_req_qm', 'messages', 'q0'), msg('q0')));
+      await assertSucceeds(countedSet(doc(db, 'conversations', 'conv_req_qm', 'messages', 'q1'), msg('q1')));
+      await seedUsage('cust_qm', { messages: 300 });
+      await assertFails(countedSet(doc(db, 'conversations', 'conv_req_qm', 'messages', 'q2'), msg('q2')));
+    });
+
+    await test('S06: reports are counted, need an existing target, and a chat only by its participants', async () => {
+      const db = phoneUser('rep_q').firestore();
+      const rep = (type: string, target: string) => ({
+        id: `REPORT-rep_q-${type}-${target}`, reporterId: 'rep_q', targetType: type, targetId: target, reason: 'spam', createdAt: new Date().toISOString(),
+      });
+      await assertFails(countedSet(doc(db, 'reports', 'REPORT-rep_q-provider-nobody'), rep('provider', 'nobody')));
+      await assertFails(countedSet(doc(db, 'reports', 'REPORT-rep_q-conversation-conv_req_qm'), rep('conversation', 'conv_req_qm')));
+      await assertFails(setDoc(doc(db, 'reports', 'REPORT-rep_q-provider-prov_x'), rep('provider', 'prov_x')));
+      await assertSucceeds(countedSet(doc(db, 'reports', 'REPORT-rep_q-provider-prov_x'), rep('provider', 'prov_x')));
+      const cdb = phoneUser('cust_qm').firestore();
+      await assertSucceeds(countedSet(doc(cdb, 'reports', 'REPORT-cust_qm-conversation-conv_req_qm'), {
+        ...rep('conversation', 'conv_req_qm'), id: 'REPORT-cust_qm-conversation-conv_req_qm', reporterId: 'cust_qm',
+      }));
+    });
+
+    await test('S06: counters only go up by one, only for yourself and only for today', async () => {
+      const db = phoneUser('cust_qc').firestore();
+      const exp = Timestamp.fromMillis(Date.now() + 86400000);
+      await assertFails(setDoc(doc(db, 'usage', usageId('cust_qc')), { uid: 'cust_qc', requests: 5, expireAt: exp }));
+      await assertFails(setDoc(doc(db, 'usage', usageId('someone')), { uid: 'someone', requests: 1, expireAt: exp }));
+      await assertFails(setDoc(doc(db, 'usage', 'cust_qc_20200101'), { uid: 'cust_qc', requests: 1, expireAt: exp }));
+      await assertSucceeds(setDoc(doc(db, 'usage', usageId('cust_qc')), { uid: 'cust_qc', requests: increment(1), expireAt: exp }, { merge: true }));
+      await assertFails(updateDoc(doc(db, 'usage', usageId('cust_qc')), { requests: 0 }));
+    });
+
+    await test('S06: a chat file ticket is counted; the 31st of the day is refused', async () => {
+      const db = phoneUser('cust_qf').firestore();
+      const ticket = { uid: 'cust_qf', conversationId: 'conv_req_qm', fileName: 'a.jpg', createdAt: new Date().toISOString(), expireAt: Timestamp.fromMillis(Date.now() + 86400000) };
+      const counted = (id: string) => {
+        const b = writeBatch(db);
+        b.set(doc(db, 'chatUploads', id), ticket);
+        b.set(doc(db, 'usage', usageId('cust_qf')), { uid: 'cust_qf', files: increment(1), expireAt: ticket.expireAt }, { merge: true });
+        return b.commit();
+      };
+      await assertFails(setDoc(doc(db, 'chatUploads', 'up0'), ticket));
+      await assertSucceeds(counted('up1'));
+      await seedUsage('cust_qf', { files: 30 });
+      await assertFails(counted('up2'));
     });
 
   } finally {

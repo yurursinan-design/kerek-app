@@ -79,6 +79,10 @@ const MESSAGES = {
     kz: 'Бұл ұсыныс енді белсенді емес.',
     ru: 'Это предложение больше не активно.',
   },
+  dailyLimit: {
+    kz: 'Бүгінгі шектеуге жеттіңіз. Ертең қайталаңыз.',
+    ru: 'Достигнут дневной лимит. Попробуйте завтра.',
+  },
   offerLimit: {
     kz: 'Бұл өтінімге 5 ұсыныс түсіп қойды. Басқа өтінімдерді қараңыз.',
     ru: 'На эту заявку уже пришло 5 предложений. Посмотрите другие заявки.',
@@ -119,6 +123,7 @@ export function getFriendlyErrorMessage(error: unknown, lang: Language = 'ru'): 
     if (/[\u0400-\u04FF]/.test(specific)) return specific;
   }
 
+  if (/daily-limit-reached/.test(msg)) return pick(MESSAGES.dailyLimit, lang);
   if (/offer-limit-reached/.test(msg)) return pick(MESSAGES.offerLimit, lang);
   if (/request-expired/.test(msg)) return pick(MESSAGES.requestExpired, lang);
   if (/already been accepted/i.test(msg)) return pick(MESSAGES.alreadyAccepted, lang);

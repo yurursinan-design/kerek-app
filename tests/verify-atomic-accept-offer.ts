@@ -5,6 +5,7 @@
  */
 
 import { localRepository } from '../src/services/localRepository';
+import { countedSet } from './helpers/counted';
 import { resilientRepository } from '../src/services/resilientRepository';
 import { firebaseRepository } from '../src/services/firebaseRepository';
 import { offlineQueueService } from '../src/services/offlineQueueService';
@@ -289,7 +290,7 @@ async function runAcceptOfferFixTests() {
 
       const currentUid = (await ensureFirebaseAuth()) || 'cust-emu-uid';
 
-      await setDoc(doc(db, 'requests', emuReqId), {
+      await countedSet(doc(db, 'requests', emuReqId), {
         id: emuReqId,
         customerId: currentUid,
         city: 'Almaty',

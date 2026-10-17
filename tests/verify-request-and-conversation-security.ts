@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import { countedSet } from './helpers/counted';
 import { db, auth, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { deleteApp } from 'firebase/app';
 import { signInAnonymously } from 'firebase/auth';
@@ -65,7 +66,7 @@ async function runSecurityAudit() {
     // SETUP: Create base open request by customer
     // ------------------------------------------------------------------------
     console.log('\n--- SETUP: Creating test requests and offers ---');
-    await setDoc(reqRef, {
+    await countedSet(reqRef, {
       id: testReqId,
       customerId: customerUid,
       city: 'Қызылорда',
@@ -78,7 +79,7 @@ async function runSecurityAudit() {
     });
     console.log('✓ Created base request:', testReqId);
 
-    await setDoc(otherReqRef, {
+    await countedSet(otherReqRef, {
       id: otherReqId,
       customerId: customerUid,
       city: 'Қызылорда',
@@ -281,7 +282,7 @@ async function runSecurityAudit() {
     console.log('\n--- LEGITIMATE 4: Messaging between customer and selected provider ---');
     try {
       const msgId = `msg_${Date.now()}`;
-      await setDoc(doc(db!, 'conversations', testConvId, 'messages', msgId), {
+      await countedSet(doc(db!, 'conversations', testConvId, 'messages', msgId), {
         id: msgId,
         conversationId: testConvId,
         requestId: testReqId,
