@@ -1,8 +1,9 @@
 # One-time setup for phone login (codes sent to WhatsApp), pasted into Google Cloud Shell by the project owner:
 # - roles that let GitHub (github-deploy) upload Cloud Functions, storage rules and Firestore indexes
 # - lets the functions' service account sign login tokens (custom tokens)
-# - makes the WhatsApp Business access token's place in Secret Manager (a placeholder until Meta's
-#   token exists; cloudshell-whatsapp-token.sh stores the real one), so nothing here asks for input
+# - makes the WhatsApp Business and Telegram Gateway access tokens' places in Secret Manager
+#   (placeholders until the real tokens exist; cloudshell-whatsapp-token.sh and
+#   cloudshell-telegram-token.sh store them), so nothing here asks for input
 #   and it can be pasted in one go
 # - makes the Google Play reviewers' sign-in (fixed number and a random code, no WhatsApp message)
 # - lets the functions send push messages to phones (Firebase Cloud Messaging)
@@ -21,6 +22,7 @@ gcloud projects add-iam-policy-binding $P --member=serviceAccount:$RT --role=rol
 # Google Play reviewers sign in with this number and code (Play Console → App access); made once
 if ! gcloud secrets describe PLAY_REVIEW_LOGIN >/dev/null 2>&1; then printf '+77000000000:%06d' $(( $(od -An -N4 -tu4 /dev/urandom) % 1000000 )) | gcloud secrets create PLAY_REVIEW_LOGIN --data-file=- -q >/dev/null; fi
 if ! gcloud secrets describe WHATSAPP_TOKEN >/dev/null 2>&1; then printf 'henuz-yok' | gcloud secrets create WHATSAPP_TOKEN --data-file=- -q >/dev/null; fi && echo "WhatsApp anahtari: yeri hazir"
+if ! gcloud secrets describe TELEGRAM_GATEWAY_TOKEN >/dev/null 2>&1; then printf 'henuz-yok' | gcloud secrets create TELEGRAM_GATEWAY_TOKEN --data-file=- -q >/dev/null; fi && echo "Telegram anahtari: yeri hazir"
 gcloud firestore fields ttls update expireAt --collection-group=loginCodes --enable-ttl --async -q >/dev/null 2>&1; gcloud firestore fields ttls update expireAt --collection-group=rateLimits --enable-ttl --async -q >/dev/null 2>&1; gcloud firestore fields ttls update expireAt --collection-group=notifications --enable-ttl --async -q >/dev/null 2>&1; echo "Otomatik temizlik: tamam"
 echo "Google inceleme girisi (numara:kod): $(gcloud secrets versions access latest --secret=PLAY_REVIEW_LOGIN)"
 echo "KEREK_GIRIS_TAMAM"

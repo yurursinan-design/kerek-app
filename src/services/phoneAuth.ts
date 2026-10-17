@@ -23,8 +23,8 @@ import { LEGAL_VERSION } from '../data/legalTexts';
  * number later signs in to the same account on any device. Publishing (requests, offers, provider
  * profiles) requires a verified phone; the Firestore rules enforce that as well.
  *
- * The code is sent to the number's WhatsApp by the requestLoginCode / verifyLoginCode cloud
- * functions. Against the Auth emulator (tests) Firebase's phone sign-in is used, as the emulator
+ * The code is sent to the number's WhatsApp or Telegram by the requestLoginCode / verifyLoginCode
+ * cloud functions. Against the Auth emulator (tests) Firebase's phone sign-in is used, as the emulator
  * prints the codes.
  */
 
@@ -72,14 +72,25 @@ function resetVerifier() {
   verifier = null;
 }
 
+export type LoginChannel = 'whatsapp' | 'telegram';
+
+/** A sent code: where it went (WhatsApp or Telegram) and which channels the server offers */
+export type LoginConfirmation = ConfirmationResult & { channel?: LoginChannel; channels?: LoginChannel[] };
+
 /**
  * Sends a login code. `containerId` hosts the invisible reCAPTCHA of the emulator flow; `lang` picks
- * the language of the WhatsApp message.
+ * the language of the WhatsApp message; `channel` asks for WhatsApp or Telegram (the server falls
+ * back to the one that is set up).
  */
-export async function sendLoginCode(phoneE164: string, containerId: string, lang: Lang = 'ru'): Promise<ConfirmationResult> {
+export async function sendLoginCode(
+  phoneE164: string,
+  containerId: string,
+  lang: Lang = 'ru',
+  channel?: LoginChannel
+): Promise<LoginConfirmation> {
   if (!auth) throw new Error('Firebase Auth is not configured');
   await ensureFirebaseAuth();
-  if (!auth.emulatorConfig) return sendCodeViaWhatsApp(phoneE164, lang);
+  if (!auth.emulatorConfig) return sendCodeByMessage(phoneE164, lang, channel);
   if (auth.emulatorConfig) {
     // The Auth emulator has no reCAPTCHA
     auth.settings.appVerificationDisabledForTesting = true;
@@ -100,18 +111,24 @@ export async function sendLoginCode(phoneE164: string, containerId: string, lang
 }
 
 /**
- * Code texted by the requestLoginCode function. Confirming it returns a custom token for the
+ * Code sent by the requestLoginCode function to WhatsApp or Telegram. Confirming it returns a custom token for the
  * account that now carries this number (the caller's own, or the one already registered with it);
  * signing in with it is a fresh sign-in, so the phone_number claim is there right away.
  */
-async function sendCodeViaWhatsApp(phoneE164: string, lang: Lang): Promise<ConfirmationResult> {
+async function sendCodeByMessage(phoneE164: string, lang: Lang, channel?: LoginChannel): Promise<LoginConfirmation> {
   const functions = getFunctions(app!, 'asia-south1');
-  await httpsCallable<{ phone: string; lang: Lang }, { ok: true; retryAfter: number }>(functions, 'requestLoginCode')({
+  const { data: sent } = await httpsCallable<
+    { phone: string; lang: Lang; channel?: LoginChannel },
+    { ok: true; retryAfter: number; channel?: LoginChannel; channels?: LoginChannel[] }
+  >(functions, 'requestLoginCode')({
     phone: phoneE164,
     lang,
+    ...(channel ? { channel } : {}),
   });
   return {
-    verificationId: 'whatsapp-code',
+    verificationId: 'message-code',
+    channel: sent?.channel || 'whatsapp',
+    channels: sent?.channels || [],
     confirm: async (code: string) => {
       if (!auth) throw new Error('Firebase Auth is not configured');
       const deviceId = await getDeviceId();
@@ -127,7 +144,7 @@ async function sendCodeViaWhatsApp(phoneE164: string, lang: Lang): Promise<Confi
       });
       return signInWithCustomToken(auth, data.token);
     },
-  } as ConfirmationResult;
+  } as LoginConfirmation;
 }
 
 /**
@@ -180,9 +197,14 @@ export function phoneAuthErrorMessage(err: any, lang: Lang): string {
       return m('Тым көп әрекет. Бір минуттан кейін қайталаңыз.', 'Слишком много попыток. Попробуйте через минуту.');
     case 'functions/unavailable':
     case 'functions/internal':
-      return m('Кодты WhatsApp-қа жіберу мүмкін болмады. Біраз уақыттан кейін қайталаңыз.', 'Не удалось отправить код в WhatsApp. Попробуйте чуть позже.');
+      return m('Кодты жіберу мүмкін болмады. Біраз уақыттан кейін қайталаңыз.', 'Не удалось отправить код. Попробуйте чуть позже.');
+    case 'functions/not-found':
+      return m(
+        'Бұл нөмірде Telegram жоқ. Telegram орнатып, осы нөмірмен тіркеліңіз де, кодты қайта сұраңыз.',
+        'На этом номере нет Telegram. Установите Telegram, зарегистрируйтесь с этим номером и запросите код снова.'
+      );
     case 'functions/failed-precondition':
-      return m('WhatsApp арқылы кіру әлі қосылмаған.', 'Вход через WhatsApp ещё не включён.');
+      return m('Телефон арқылы кіру әлі қосылмаған.', 'Вход по номеру телефона ещё не включён.');
     case 'auth/invalid-phone-number':
     case 'auth/missing-phone-number':
       return m('Телефон нөмірі қате. Мысалы: +7 701 123 45 67', 'Неверный номер. Например: +7 701 123 45 67');
