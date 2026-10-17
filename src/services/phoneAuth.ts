@@ -28,6 +28,12 @@ import { LEGAL_VERSION } from '../data/legalTexts';
  * prints the codes.
  */
 
+/**
+ * Turkish mobile numbers (+90 5xx) are accepted too while the closed test on Google Play runs, so
+ * testers in Turkey can sign in. Set to false (here and in functions/src/whatsappLogin.ts) after it.
+ */
+const ALLOW_TURKISH_TESTERS = true;
+
 /** Normalizes Kazakhstan numbers typed as "+7 701 …", "8 701 …" or "701 …" to E.164 (+77011234567). */
 export function normalizePhone(raw: string): string | null {
   const trimmed = (raw || '').trim();
@@ -38,6 +44,7 @@ export function normalizePhone(raw: string): string | null {
   }
   // Kazakhstan numbers only (+7 7xx / +7 6xx). +7 is shared with Russia, and limiting codes to
   // Kazakhstan also keeps the login from being abused to send paid messages abroad.
+  if (ALLOW_TURKISH_TESTERS && trimmed.startsWith('+') && /^905\d{9}$/.test(digits)) return `+${digits}`;
   if (!/^7[67]\d{9}$/.test(digits)) return null;
   return `+${digits}`;
 }

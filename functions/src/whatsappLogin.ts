@@ -51,10 +51,17 @@ const TEMPLATE_LANG: Record<string, string> = { kz: 'kk', ru: 'ru' };
 const TEMPLATE_MISSING = 132001;
 const RATE_LIMITED = new Set([4, 80007, 130429, 131048, 131056]);
 
-/** Kazakhstan mobile numbers only (+7 7xx / +7 6xx), the same check as the app. */
+/**
+ * Turkish mobile numbers (+90 5xx) are accepted too while the closed test on Google Play runs, so
+ * testers in Turkey can sign in. Set to false (here and in src/services/phoneAuth.ts) after it.
+ */
+export const ALLOW_TURKISH_TESTERS = true;
+
+/** Kazakhstan mobile numbers (+7 7xx / +7 6xx), and Turkish ones during the test; the same check as the app. */
 export function normalizeKzPhone(raw: unknown): string | null {
   const digits = String(typeof raw === 'string' ? raw : '').replace(/\D/g, '');
-  return /^7[67]\d{9}$/.test(digits) ? `+${digits}` : null;
+  if (/^7[67]\d{9}$/.test(digits)) return `+${digits}`;
+  return ALLOW_TURKISH_TESTERS && /^905\d{9}$/.test(digits) ? `+${digits}` : null;
 }
 
 function sha256(text: string): string {

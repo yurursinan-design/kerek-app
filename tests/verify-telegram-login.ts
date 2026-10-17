@@ -89,6 +89,14 @@ async function main() {
   const token = await run(verifyLoginCode, uidA, { phone, code: send.body.code }, '10.1.0.1');
   assert(typeof token?.token === 'string' && (await auth.getUser(uidA)).phoneNumber === phone, 'The Telegram code signs in and puts the number on the account');
 
+  // 2b. During the closed test a Turkish number gets a code too (Russian numbers stay refused)
+  const trPhone = `+90532${tail}`;
+  const tr = await run(requestLoginCode, uidB, { phone: '+90 532 ' + tail }, '10.1.0.11');
+  assert(tr?.channel === 'telegram' && tgCalls[tgCalls.length - 1].body.phone_number === trPhone, 'A Turkish tester number gets a Telegram code');
+  const trToken = await run(verifyLoginCode, uidB, { phone: trPhone, code: tgCalls[tgCalls.length - 1].body.code }, '10.1.0.11');
+  assert(typeof trToken?.token === 'string' && (await auth.getUser(uidB)).phoneNumber === trPhone, 'The Turkish tester signs in');
+  assert((await errCode(run(requestLoginCode, uidB, { phone: '+79121234567' }, '10.1.0.12'))) === 'invalid-argument', 'Russian numbers are still refused');
+
   // 3. A number without Telegram: told so, no message sent, no fee
   checkError = 'PHONE_NUMBER_NOT_FOUND';
   const before = tgCalls.length;

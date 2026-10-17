@@ -13,7 +13,8 @@ export function toIntlDigits(raw?: string): string | null {
 export function isSameNumber(raw: string | undefined, verified: string | null | undefined): boolean {
   const a = toIntlDigits(raw);
   const b = toIntlDigits(verified || '');
-  return Boolean(a && b && (a.length === 10 ? `7${a}` : a) === b);
+  // Only Kazakhstan login numbers (11 digits, +7): the rules can't confirm others
+  return Boolean(a && b && /^7\d{10}$/.test(b) && (a.length === 10 ? `7${a}` : a) === b);
 }
 
 export function toTelHref(raw?: string): string | null {
