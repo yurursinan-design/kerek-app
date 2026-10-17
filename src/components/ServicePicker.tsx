@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 import { Language } from '../types';
 import { SERVICE_CATALOG, getService, groupName, serviceName } from '../data/serviceCatalog';
+import { groupPhoto } from '../data/photos';
 import { CategoryIcon } from './CategoryIcon';
 
 interface ServicePickerProps {
@@ -75,7 +76,7 @@ export const ServicePicker: React.FC<ServicePickerProps> = ({ language, selected
                 onClick={() => setOpen(isOpen && !q ? null : group.id)}
                 className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50"
               >
-                <CategoryIcon emoji={group.emoji} color={group.color} size="sm" />
+                <CategoryIcon emoji={group.emoji} color={group.color} photo={groupPhoto(group.id)} size="sm" />
                 <span className="flex-1 text-sm font-semibold text-slate-800">{groupName(group, lang)}</span>
                 {count > 0 && (
                   <span className="min-w-6 h-6 px-1.5 rounded-full bg-sky-600 text-white text-xs font-bold flex items-center justify-center">{count}</span>

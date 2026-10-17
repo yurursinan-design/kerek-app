@@ -278,7 +278,7 @@ async function runTests() {
   console.log('\n[TEST 14] Storage and Firestore rules audit');
   const storageRulesPath = path.resolve('storage.rules');
   const storageContent = fs.readFileSync(storageRulesPath, 'utf8');
-  assert(storageContent.includes('match /chat/{conversationId}/{messageId}/{fileName}'), 'storage.rules must protect chat path');
+  assert(storageContent.includes('match /chat/{conversationId}/{uploadId}/{fileName}') && storageContent.includes('chatTicketOk('), 'storage.rules must protect chat path (one ticket per file)');
   assert(storageContent.includes('isConversationParticipant(conversationId)'), 'storage.rules must check conversation participant');
   assert(storageContent.includes('allow update, delete: if false;'), 'storage.rules must disallow file deletion');
 

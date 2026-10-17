@@ -14,6 +14,7 @@ import {
   ProviderOffer,
   RequestAttachment,
   RequestStatus,
+  RatingSummary,
   Review,
   sanitizeFileName,
   ServiceRequest,
@@ -623,7 +624,15 @@ export class LocalRepository implements Repository {
     if (selectedOfferId && selectedOfferId.trim()) {
       updates.selectedOfferId = selectedOfferId.trim();
     }
-    return this.updateRequest(requestId, updates);
+    const updated = await this.updateRequest(requestId, updates);
+    // A cancelled request cancels its agreed visit too, as in the cloud (firestore.rules)
+    if (updated && normalizeRequestStatus(status) === 'CANCELLED') {
+      const visit = await this.getAppointment(requestId);
+      if (visit && visit.status !== 'CANCELLED' && visit.status !== 'COMPLETED') {
+        await this.updateAppointment(visit.id, { status: 'CANCELLED' });
+      }
+    }
+    return updated;
   }
 
   /**
@@ -1099,11 +1108,19 @@ export class LocalRepository implements Repository {
     }
   }
 
-  async getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }> {
+  /** Same counting as the server: each customer once (their newest review), all reviews for "N reviews" */
+  async getRatingSummary(providerIds: string[]): Promise<RatingSummary> {
     const ids = new Set(providerIds.map((id) => (id || '').trim()).filter(Boolean));
     const reviews = (await this.getAllReviewsRaw()).filter((r) => ids.has((r.providerId || '').trim()));
-    const total = reviews.length;
-    return { count: total, avg: total ? reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0) / total : 0 };
+    const newest = new Map<string, Review>();
+    for (const r of reviews) {
+      const who = (r.customerId || r.id || '').trim();
+      const prev = newest.get(who);
+      if (!prev || String(r.createdAt || '') >= String(prev.createdAt || '')) newest.set(who, r);
+    }
+    const people = Array.from(newest.values());
+    const total = people.reduce((sum, r) => sum + (Number(r.rating) || 0), 0);
+    return { count: people.length, avg: people.length ? total / people.length : 0, reviews: reviews.length };
   }
 
   private async getAllReviewsRaw(): Promise<Review[]> {
@@ -2019,8 +2036,8 @@ export class LocalRepository implements Repository {
       workStatusUpdatedAt: now,
     };
 
-    // If work status reaches WORK_COMPLETED, also mark appointment completed
-    if (workStatus === 'WORK_COMPLETED' && (existing.status === 'CONFIRMED' || existing.status === 'PROPOSED' || existing.status === 'RESCHEDULED')) {
+    // An agreed visit is completed together with the work report, as in the cloud (firestore.rules)
+    if (workStatus === 'WORK_COMPLETED' && existing.status === 'CONFIRMED') {
       updates.status = 'COMPLETED';
     }
 

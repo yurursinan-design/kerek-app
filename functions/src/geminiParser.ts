@@ -6,6 +6,7 @@ import {
   validateAndNormalizeCategoryId,
   validateAndNormalizeCityId,
 } from './taxonomy';
+import { redactPersonalDetails } from './redact';
 
 export interface ParsedServiceRequest {
   cityId: string | null;
@@ -16,9 +17,11 @@ export interface ParsedServiceRequest {
 }
 
 /**
- * Builds the structured parsing prompt for Gemini.
+ * Builds the structured parsing prompt for Gemini. Phone numbers, addresses and other personal
+ * details are taken out of the customer's text first (redact.ts).
  */
-function buildPrompt(userInput: string): string {
+export function buildPrompt(userInput: string): string {
+  const safeInput = redactPersonalDetails(userInput).replace(/"""/g, '"');
   const categoriesList = CANONICAL_CATEGORIES.map(
     (c) => `- "${c.id}": ${c.nameRu} / ${c.nameKz} (${c.description})`
   ).join('\n');
@@ -59,7 +62,7 @@ Respond with ONLY valid JSON with keys:
 
 CUSTOMER INPUT:
 """
-${userInput}
+${safeInput}
 """`;
 }
 

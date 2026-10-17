@@ -1,0 +1,126 @@
+# Read-only checks on the live project. Runs only for a commit on a claude/** branch whose message
+# starts with "[check] <job>":
+#   gemini   is there a Gemini key in Secret Manager (its versions, never its value), does the live
+#            parser read three sample requests (through a temporary anonymous session that is deleted
+#            afterwards), and how did parseServiceRequest answer in the last 14 days
+#   keys     which APIs, websites and Android apps each Google API key is limited to (never the key
+#            itself), and whether the Gemini (Generative Language) API is switched on in the project
+# Nothing is deployed or changed.
+name: Kontrol
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  FIREBASE_PROJECT_ID: kerek-9d153
+
+jobs:
+  check:
+    if: startsWith(github.event.head_commit.message, '[check] ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Ne kontrol edilecek
+        id: mode
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          mode=$(printf '%s\n' "$MSG" | head -n1 | awk '{print $2}' | tr -cd 'a-z')
+          case "$mode" in gemini|keys) ;; *) echo "Bilinmeyen kontrol: $mode (gemini, keys)"; exit 1 ;; esac
+          echo "Kontrol: $mode"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
+      - name: Google Cloud'a giriş
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
+          service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Anahtar Secret Manager'da mı
+        if: steps.mode.outputs.mode == 'gemini'
+        run: |
+          gcloud secrets versions list GEMINI_API_KEY --project "$FIREBASE_PROJECT_ID" \
+            --format='table(name,state,createTime)'
+
+      - name: Canlı fonksiyon örnek talepleri okuyor mu
+        if: steps.mode.outputs.mode == 'gemini'
+        # Same path as a visitor in the app: a temporary anonymous session (public web key) calls
+        # parseServiceRequest; the session is deleted at the end
+        run: |
+          KEY=AIzaSyA2tm7w5In7uV6qEPbfCjSOKZ6Sj2fRoHI
+          TOKEN=$(curl -sS -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=$KEY" \
+            -H 'Content-Type: application/json' -d '{"returnSecureToken":true}' | jq -r .idToken)
+          echo "::add-mask::$TOKEN"
+          fail=0
+          for t in 'Қызылордада кран ағып тұр, сантехник керек, бүгін' \
+                   'Нужно отремонтировать стиральную машину Samsung, Кызылорда' \
+                   'Пәтерге 2 бөлмелік жөндеу керек, келесі аптада'; do
+            code=$(curl -sS -o out.json -w '%{http_code}' -X POST \
+              "https://asia-south1-$FIREBASE_PROJECT_ID.cloudfunctions.net/parseServiceRequest" \
+              -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg t "$t" '{data:{text:$t}}')")
+            echo "$t → HTTP $code $(cat out.json)"
+            [ "$code" = 200 ] || fail=1
+          done
+          rm -f out.json
+          echo "Geçici oturum silindi: HTTP $(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+            "https://identitytoolkit.googleapis.com/v1/accounts:delete?key=$KEY" \
+            -H 'Content-Type: application/json' -d "$(jq -n --arg t "$TOKEN" '{idToken:$t}')")"
+          exit $fail
+
+      - name: Canlı uygulamada son 14 gün
+        if: steps.mode.outputs.mode == 'gemini'
+        # The deploy account may not be allowed to read logs
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          filter='resource.type="cloud_run_revision" AND resource.labels.service_name="parseservicerequest"'
+          echo "Çağrı sonuçları (HTTP kodu, sayı):"
+          gcloud logging read "$filter AND httpRequest.status>0" --project "$FIREBASE_PROJECT_ID" \
+            --freshness=14d --limit=1000 --format='value(httpRequest.status)' | sort | uniq -c
+          echo "Uyarı ve hatalar (son 20):"
+          gcloud logging read "$filter AND severity>=WARNING AND textPayload:*" --project "$FIREBASE_PROJECT_ID" \
+            --freshness=14d --limit=20 --format='value(timestamp,severity,textPayload)' | cut -c1-300
+
+      - name: API anahtarlarının kısıtlamaları
+        if: steps.mode.outputs.mode == 'keys'
+        continue-on-error: true
+        run: |
+          gcloud services api-keys list --project "$FIREBASE_PROJECT_ID" --format=json | jq -r '.[] |
+            "\(.displayName // .name | tostring)\n  API: \((.restrictions.apiTargets // []) | map(.service) | if length == 0 then "KISITLAMA YOK (her API)" else join(", ") end)\n  Web siteleri: \((.restrictions.browserKeyRestrictions.allowedReferrers // []) | join(", "))\n  Android: \((.restrictions.androidKeyRestrictions.allowedApplications // []) | map(.packageName) | join(", "))"'
+
+      - name: Gemini API projede açık mı
+        if: steps.mode.outputs.mode == 'keys'
+        continue-on-error: true
+        run: |
+          gcloud services list --enabled --project "$FIREBASE_PROJECT_ID" --format='value(config.name)' \
+            | grep -E 'generativelanguage|aiplatform|identitytoolkit' || echo "Bu API'lerin hiçbiri açık değil"
+
+      - name: Herkese açık anahtarlarla Gemini çağrılabiliyor mu
+        # The web key (in the site) and the Android key (in every APK) are public by design; what keeps
+        # them from spending the project's Gemini credit is the list of APIs each key may call. Lists
+        # models only (free); prints the answer code and reason, never the key.
+        if: steps.mode.outputs.mode == 'keys'
+        continue-on-error: true
+        run: |
+          WEB_KEY=$(grep -h 'VITE_FIREBASE_API_KEY:' .github/workflows/preview.yml | head -1 | awk '{print $2}')
+          ANDROID_KEY=$(jq -r '.client[0].api_key[0].current_key' android/app/google-services.json)
+          echo "::add-mask::$WEB_KEY"; echo "::add-mask::$ANDROID_KEY"
+          try() {
+            code=$(curl -sS -o out.json -w '%{http_code}' "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1" -H "x-goog-api-key: $2" "${@:3}")
+            reason=$(jq -r '.error.details[]? | select(.reason) | .reason' out.json 2>/dev/null | head -1)
+            if [ "$code" = 200 ]; then verdict="AÇIK: bu anahtarla Gemini çağrılabiliyor"; else verdict="kapalı"; fi
+            echo "$1 -> HTTP $code ${reason:-} ($verdict)"
+          }
+          try "Web anahtarı, başlıksız" "$WEB_KEY"
+          try "Web anahtarı, tapsyr.web.app gibi davranarak" "$WEB_KEY" -H 'Referer: https://tapsyr.web.app/'
+          try "Android anahtarı, başlıksız" "$ANDROID_KEY"
+          try "Android anahtarı, uygulama gibi davranarak" "$ANDROID_KEY" -H 'X-Android-Package: kerek.kz.app'
+          rm -f out.json

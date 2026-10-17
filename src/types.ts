@@ -228,6 +228,8 @@ export interface ProviderOffer {
   providerName: string;
   providerPhone: string;
   providerWhatsapp: string;
+  /** providerPhone is the master's own login number, confirmed with the WhatsApp code (set by the rules check) */
+  providerPhoneVerified?: boolean;
   isDemo?: boolean;
   price: string;
   priceType?: OfferPriceType;
@@ -265,6 +267,33 @@ export interface Review {
   providerId: string;
   providerName: string;
   rating: number; // 1 to 5 integer
+  comment?: string;
+  createdAt: string;
+  /** The master's public answer to the review */
+  providerReply?: string;
+  providerReplyAt?: string;
+  /**
+   * The customer's own view of their review while it is checked before publishing:
+   * 'pending' (being checked), 'published', or 'rejected' (did not pass the rules).
+   * Absent on published reviews read from a master's profile.
+   */
+  moderation?: 'pending' | 'published' | 'rejected';
+}
+
+/** A master's rating: each customer counted once (count), and all published reviews (reviews) */
+export interface RatingSummary {
+  avg: number;
+  count: number;
+  reviews?: number;
+}
+
+/** The master's rating of the customer after a finished job (seen by masters) */
+export interface CustomerReview {
+  id: string; // the requestId
+  requestId: string;
+  customerId: string;
+  providerId: string;
+  rating: number;
   comment?: string;
   createdAt: string;
 }
@@ -461,6 +490,8 @@ export interface Provider {
   userId?: string;
   name: string;
   phone: string;
+  /** phone is the master's own login number, confirmed with the WhatsApp code (checked by the rules) */
+  phoneVerified?: boolean;
   whatsapp: string;
   city: string;
   cityId?: string;
@@ -483,6 +514,9 @@ export interface Provider {
   tradeLicense?: string;
   isActive?: boolean;
   isDemo?: boolean;
+  /** Set by the operator: hidden from customers / blocked from the platform */
+  hidden?: boolean;
+  blocked?: boolean;
   /** "Not taking orders now": new-request alerts stop until the master switches it off */
   paused?: boolean;
   /** Work photos: filled slots (p0 … p7), the files are in Storage under the master's folder */

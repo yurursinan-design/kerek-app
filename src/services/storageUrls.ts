@@ -3,6 +3,7 @@ import { getDownloadURL, ref as storageRef } from 'firebase/storage';
 import { storage } from './firebase';
 import { safeMediaUrl } from './safeData';
 import { deviceFileUrl } from './deviceFiles';
+import { onPersonalDataCleared } from './storage';
 
 /**
  * Request and chat files are stored by path only. The viewing address is asked from Cloud Storage
@@ -10,15 +11,36 @@ import { deviceFileUrl } from './deviceFiles';
  * long-lived file link sits in documents other people can read. Older records that still carry a
  * link (and previews on this device) keep working. Device mode reads its files from IndexedDB.
  */
-const resolved = new Map<string, string>();
+const resolved = new Map<string, { url: string; at: number }>();
 const pending = new Map<string, Promise<string>>();
+/**
+ * A file's link is asked again after this long: the server gives request files new links when the
+ * request's audience changes (functions/src/fileLinks.ts), and asking again re-checks the rules.
+ */
+const KEEP_MS = 10 * 60 * 1000;
+
+// Another account may sign in on this device next: its links are asked for afresh
+onPersonalDataCleared(() => {
+  resolved.clear();
+  pending.clear();
+});
+
+function cachedUrl(path: string): string {
+  const hit = resolved.get(path);
+  if (!hit) return '';
+  if (Date.now() - hit.at > KEEP_MS) {
+    resolved.delete(path);
+    return '';
+  }
+  return hit.url;
+}
 
 function isCloudPath(path: unknown): path is string {
   return typeof path === 'string' && /^(requests|chat)\//.test(path);
 }
 
 export function resolveStorageUrl(path: string): Promise<string> {
-  const hit = resolved.get(path);
+  const hit = cachedUrl(path);
   if (hit) return Promise.resolve(hit);
   let p = pending.get(path);
   if (!p) {
@@ -26,7 +48,7 @@ export function resolveStorageUrl(path: string): Promise<string> {
     p = (storage ? getDownloadURL(storageRef(storage, path)) : deviceFileUrl(path))
       .then((url) => {
         const safe = safeMediaUrl(url);
-        if (safe) resolved.set(path, safe);
+        if (safe) resolved.set(path, { url: safe, at: Date.now() });
         return safe;
       })
       .catch(() => '')
@@ -48,7 +70,7 @@ export function useMediaUrls(items: MediaLike[]): Record<string, string> {
   const initial = () => {
     const out: Record<string, string> = {};
     for (const it of items) {
-      const direct = safeMediaUrl(it.downloadUrl) || safeMediaUrl(it.previewUrl) || (isCloudPath(it.storagePath) ? resolved.get(it.storagePath) || '' : '');
+      const direct = safeMediaUrl(it.downloadUrl) || safeMediaUrl(it.previewUrl) || (isCloudPath(it.storagePath) ? cachedUrl(it.storagePath) : '');
       if (direct) out[it.id] = direct;
     }
     return out;

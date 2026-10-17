@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { ReportButton } from './ReportButton';
-import { isTopMaster, Language, Provider, Review } from '../types';
+import { isTopMaster, Language, Provider, RatingSummary, Review } from '../types';
 import { translations } from '../i18n/translations';
 import { formatShortDate } from '../services/dateFormat';
-import { repository, getCurrentUserId } from '../services';
+import { repository, getCurrentUserId, getFriendlyErrorMessage } from '../services';
 import { isFavorite, masterProfileLink, onFavoritesChange, toggleFavorite } from '../services/favorites';
 import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
 import { PortfolioGallery } from './PortfolioPhotos';
-import { getProviderStats, ProviderStats, responseTimeLabel } from '../services/publicStats';
+import { localReviewReply, replyToReview } from '../services/reviewsExtra';
+import { getProviderStats, ProviderStats, responseTimeLabel, reviewsCountLabel, reviewsFromCustomersLabel } from '../services/publicStats';
 import {
   X,
   Heart,
@@ -44,6 +45,12 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
   const [reviews, setReviews] = useState<Review[]>([]);
   const [favorite, setFavorite] = useState(false);
   const [stats, setStats] = useState<ProviderStats | null>(null);
+  // The master answering a review on their own profile
+  const [replyingId, setReplyingId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState('');
+  const [replySaving, setReplySaving] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [savedReplies, setSavedReplies] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let alive = true;
@@ -67,7 +74,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
   }, [provider?.id]);
   const [isLoadingReviews, setIsLoadingReviews] = useState<boolean>(false);
   // Counted on the server over all reviews (the list below shows the newest ones)
-  const [ratingSummary, setRatingSummary] = useState<{ avg: number; count: number } | null>(null);
+  const [ratingSummary, setRatingSummary] = useState<RatingSummary | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -119,7 +126,9 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
   const t = translations[language];
 
   // Rating from real reviews: the server count over all of them, or the loaded list until it arrives
+  // Stars count each customer once (server); "N reviews" counts every published review
   const reviewsCount = ratingSummary ? ratingSummary.count : reviews.length;
+  const totalReviews = ratingSummary?.reviews ?? reviewsCount;
   const ratingAvg = ratingSummary
     ? ratingSummary.avg
     : reviews.length > 0
@@ -227,7 +236,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                   >
                     <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
                     <span>
-                      {averageRating} ({reviewsCount})
+                      {averageRating} ({totalReviews})
                     </span>
                   </span>
                 ) : (
@@ -311,11 +320,22 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
               WhatsApp
             </a>
           )}
+          {telHref && (
+            <p className={`w-full text-[11px] leading-snug ${provider.phoneVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
+              {provider.phoneVerified
+                ? language === 'kz'
+                  ? '✓ Нөмір шебердің WhatsApp кодымен расталған нөмірі'
+                  : '✓ Номер подтверждён кодом WhatsApp при входе мастера'
+                : language === 'kz'
+                  ? 'Бұл нөмірді шебер өзі жазған, ол расталмаған'
+                  : 'Этот номер мастер указал сам, он не подтверждён'}
+            </p>
+          )}
           {shareNote && <p className="w-full text-[11px] text-slate-500 break-all">{shareNote}</p>}
         </div>
 
         {/* Content Body */}
-        <div className="p-5 overflow-y-auto space-y-4 text-xs">
+        <div className="p-5 overflow-y-auto overscroll-contain space-y-4 text-xs">
           {/* Experience Badge (if provided) */}
           {experienceText && (
             <div className="p-3 rounded-2xl bg-sky-50 border border-sky-100 flex items-center gap-2.5">
@@ -435,7 +455,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                 <span className="text-[11px] font-bold text-amber-900 bg-amber-100 px-2.5 py-0.5 rounded-full flex items-center gap-1">
                   <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
                   <span>
-                    {averageRating} / 5 ({reviewsCount} {t.reviewsCountUnit})
+                    {averageRating} / 5 ({reviewsCountLabel(totalReviews, language === 'kz' ? 'kz' : 'ru')})
                   </span>
                 </span>
               )}
@@ -464,10 +484,10 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                 </div>
                 <div className="text-right">
                   <span className="text-xs font-bold text-slate-800 block">
-                    {reviewsCount} {language === 'kz' ? 'пікір' : (reviewsCount === 1 ? 'отзыв' : reviewsCount < 5 ? 'отзыва' : 'отзывов')}
+                    {reviewsFromCustomersLabel(totalReviews, reviewsCount, language === 'kz' ? 'kz' : 'ru')}
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    {language === 'kz' ? 'Клиенттер бағасы' : 'Оценки клиентов'}
+                    {language === 'kz' ? 'Әр клиент бір рет есептеледі · пікірлер тексерілген' : 'Каждый клиент учтён один раз · отзывы проверены'}
                   </span>
                 </div>
               </div>
@@ -530,6 +550,77 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                         «{rev.comment.trim()}»
                       </p>
                     )}
+
+                    {(() => {
+                      const reply = savedReplies[rev.id] || rev.providerReply || localReviewReply(rev.id)?.text;
+                      if (reply) {
+                        return (
+                          <div className="ml-2 pl-2.5 border-l-2 border-sky-200">
+                            <span className="text-[10px] font-bold text-sky-700 block">
+                              {language === 'kz' ? 'Шебердің жауабы' : 'Ответ мастера'}
+                            </span>
+                            <p className="text-xs text-slate-700 leading-relaxed">{reply}</p>
+                          </div>
+                        );
+                      }
+                      if (!isOwnProfile) return null;
+                      if (replyingId !== rev.id) {
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setReplyingId(rev.id);
+                              setReplyText('');
+                              setReplyError(null);
+                            }}
+                            className="text-[11px] font-bold text-sky-700"
+                          >
+                            {language === 'kz' ? 'Жауап беру' : 'Ответить'}
+                          </button>
+                        );
+                      }
+                      return (
+                        <div className="space-y-1.5">
+                          <textarea
+                            rows={2}
+                            value={replyText}
+                            onChange={(e) => setReplyText(e.target.value.slice(0, 1000))}
+                            placeholder={language === 'kz' ? 'Мысалы: Рақмет! Тағы да қуана көмектесемін.' : 'Например: Спасибо! Буду рад помочь снова.'}
+                            className="w-full p-2 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-sky-500 resize-none"
+                          />
+                          {replyError && <p className="text-[11px] text-rose-600">{replyError}</p>}
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setReplyingId(null)}
+                              className="flex-1 h-8 rounded-lg bg-slate-100 text-slate-700 text-[11px] font-bold"
+                            >
+                              {language === 'kz' ? 'Болдырмау' : 'Отмена'}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={replySaving || !replyText.trim()}
+                              onClick={async () => {
+                                setReplySaving(true);
+                                setReplyError(null);
+                                try {
+                                  const saved = await replyToReview(rev.id, replyText);
+                                  setSavedReplies((m) => ({ ...m, [rev.id]: saved.text }));
+                                  setReplyingId(null);
+                                } catch (err) {
+                                  setReplyError(getFriendlyErrorMessage(err, language));
+                                } finally {
+                                  setReplySaving(false);
+                                }
+                              }}
+                              className="flex-1 h-8 rounded-lg bg-sky-600 text-white text-[11px] font-bold disabled:opacity-50"
+                            >
+                              {language === 'kz' ? 'Жариялау' : 'Опубликовать'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>

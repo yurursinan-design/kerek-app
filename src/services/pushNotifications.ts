@@ -93,6 +93,45 @@ export async function startPushNotifications(language: Lang, handler: OpenHandle
   }
 }
 
+export type NotificationPermissionState = 'granted' | 'denied' | 'prompt' | 'unsupported';
+
+/** Whether this phone (push) or browser (notices while the tab is open) may show notifications */
+export async function getNotificationPermission(): Promise<NotificationPermissionState> {
+  if (isPhoneApp()) {
+    try {
+      const perm = await PushNotifications.checkPermissions();
+      return perm.receive === 'granted' ? 'granted' : perm.receive === 'denied' ? 'denied' : 'prompt';
+    } catch {
+      return 'unsupported';
+    }
+  }
+  if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported';
+  return Notification.permission === 'granted' ? 'granted' : Notification.permission === 'denied' ? 'denied' : 'prompt';
+}
+
+/** "Turn on" on the profile tab: asks for permission and, on the phone, registers for push */
+export async function requestNotificationPermission(): Promise<NotificationPermissionState> {
+  if (isPhoneApp()) {
+    try {
+      const perm = await PushNotifications.requestPermissions();
+      if (perm.receive !== 'granted') return perm.receive === 'denied' ? 'denied' : 'prompt';
+      await createNewJobChannel();
+      if (token) await saveToken();
+      else await PushNotifications.register();
+      return 'granted';
+    } catch {
+      return 'unsupported';
+    }
+  }
+  if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported';
+  try {
+    const result = await Notification.requestPermission();
+    return result === 'granted' ? 'granted' : result === 'denied' ? 'denied' : 'prompt';
+  } catch {
+    return 'unsupported';
+  }
+}
+
 /** Logout or account deletion: this phone stops getting the account's notices. */
 export async function forgetPushToken(): Promise<void> {
   if (!token || !db || !auth?.currentUser) return;

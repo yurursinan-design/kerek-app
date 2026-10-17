@@ -1,11 +1,11 @@
 import React from 'react';
 import { Language } from '../types';
 import { translations } from '../i18n/translations';
-import { Search, ClipboardList, Briefcase, Send, Clock, ArrowLeftRight } from 'lucide-react';
+import { Search, ClipboardList, Briefcase, Send, Clock, ArrowLeftRight, UserRound } from 'lucide-react';
 import type { AppMode } from './RoleChooser';
 import type { ProviderTab } from './ProviderModeScreen';
 
-export type MainTab = 'home' | 'my-requests' | 'provider-mode';
+export type MainTab = 'home' | 'my-requests' | 'provider-mode' | 'profile';
 
 interface BottomNavProps {
   mode: AppMode;
@@ -23,7 +23,7 @@ const L = {
   providerNew: { kz: 'Жаңа өтініштер', ru: 'Новые заявки' },
   providerOffers: { kz: 'Ұсыныстарым', ru: 'Мои предложения' },
   providerActive: { kz: 'Белсенді жұмыстар', ru: 'Активные заказы' },
-  toCustomer: { kz: 'Маман іздеу', ru: 'Найти мастера' },
+  profile: { kz: 'Профиль', ru: 'Профиль' },
 } as const;
 
 interface ItemProps {
@@ -60,8 +60,9 @@ const NavItem: React.FC<ItemProps> = ({ active, activeClass, label, icon, badge,
 );
 
 /**
- * Bottom navigation. The customer side (blue) and the provider side (green) have their own items;
- * the last item switches to the other side.
+ * Bottom navigation. The customer side (blue) and the provider side (green) have their own items
+ * and both end with the profile tab. Customers also get a button to the provider side; providers
+ * switch back from the profile tab.
  */
 export const BottomNav: React.FC<BottomNavProps> = ({
   mode,
@@ -78,15 +79,17 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   const lang = language;
   const tx = (entry: { kz: string; ru: string }) => entry[lang] || entry.ru;
   const iconClass = (active: boolean) => `w-5 h-5 ${active ? 'stroke-[2.5]' : ''}`;
+  const onProfile = activeTab === 'profile';
+  const providerActive = (tab: ProviderTab) => !onProfile && providerTab === tab;
 
   return (
     <nav
-      className={`sticky bottom-0 z-40 w-full bg-white/95 backdrop-blur-md border-t-2 ${
+      className={`sticky bottom-0 z-40 w-full bg-white/95 backdrop-blur-md border-t-2 pb-[env(safe-area-inset-bottom,0px)] ${
         mode === 'provider' ? 'border-emerald-500' : 'border-sky-500'
       }`}
     >
       {mode === 'customer' ? (
-        <div className="grid grid-cols-3 items-center h-16 max-w-md mx-auto px-2">
+        <div className="grid grid-cols-4 items-center h-16 max-w-md mx-auto px-1">
           <NavItem
             active={activeTab === 'home'}
             activeClass="text-sky-600"
@@ -110,42 +113,49 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             icon={<ArrowLeftRight className="w-5 h-5 text-emerald-600" />}
             onClick={onSwitchMode}
           />
+          <NavItem
+            active={onProfile}
+            activeClass="text-sky-600"
+            label={tx(L.profile)}
+            icon={<UserRound className={iconClass(onProfile)} />}
+            onClick={() => onTabChange('profile')}
+          />
         </div>
       ) : (
         <div className="grid grid-cols-4 items-center h-16 max-w-md mx-auto px-1">
           <NavItem
-            active={providerTab === 'new'}
+            active={providerActive('new')}
             activeClass="text-emerald-700"
             label={tx(L.providerNew)}
-            icon={<Briefcase className={iconClass(providerTab === 'new')} />}
+            icon={<Briefcase className={iconClass(providerActive('new'))} />}
             badge={providerCounts.new}
             badgeClass="bg-emerald-600"
             onClick={() => onProviderTabChange('new')}
           />
           <NavItem
-            active={providerTab === 'offers'}
+            active={providerActive('offers')}
             activeClass="text-emerald-700"
             label={tx(L.providerOffers)}
-            icon={<Send className={iconClass(providerTab === 'offers')} />}
+            icon={<Send className={iconClass(providerActive('offers'))} />}
             badge={providerCounts.offers}
             badgeClass="bg-emerald-600"
             onClick={() => onProviderTabChange('offers')}
           />
           <NavItem
-            active={providerTab === 'active'}
+            active={providerActive('active')}
             activeClass="text-emerald-700"
             label={tx(L.providerActive)}
-            icon={<Clock className={iconClass(providerTab === 'active')} />}
+            icon={<Clock className={iconClass(providerActive('active'))} />}
             badge={providerCounts.active}
             badgeClass="bg-emerald-600"
             onClick={() => onProviderTabChange('active')}
           />
           <NavItem
-            active={false}
-            activeClass=""
-            label={tx(L.toCustomer)}
-            icon={<ArrowLeftRight className="w-5 h-5 text-sky-600" />}
-            onClick={onSwitchMode}
+            active={onProfile}
+            activeClass="text-emerald-700"
+            label={tx(L.profile)}
+            icon={<UserRound className={iconClass(onProfile)} />}
+            onClick={() => onTabChange('profile')}
           />
         </div>
       )}

@@ -1,7 +1,8 @@
 import React from 'react';
 import { ChevronRight } from 'lucide-react';
 import { Language } from '../types';
-import { Emoji3D } from './CategoryIcon';
+import { hasPhoto } from '../data/photos';
+import { Emoji3D, Photo } from './CategoryIcon';
 
 export type AppMode = 'customer' | 'provider';
 
@@ -36,6 +37,32 @@ export const RoleChooser: React.FC<RoleChooserProps> = ({ language, onChoose }) 
 
   const card = (mode: AppMode) => {
     const isCustomer = mode === 'customer';
+    const photo = isCustomer ? 'role_customer' : 'role_master';
+    if (hasPhoto(photo)) {
+      return (
+        <button
+          type="button"
+          onClick={() => onChoose(mode)}
+          className="press relative w-full h-[200px] overflow-hidden text-left rounded-[28px] text-white shadow-xl shadow-slate-900/15 bg-slate-800 animate-fadeUp"
+          style={{ animationDelay: isCustomer ? '120ms' : '220ms' }}
+        >
+          <Photo name={photo} eager className="absolute inset-0 w-full h-full object-[50%_30%]" />
+          <span
+            className={`absolute inset-0 bg-linear-to-t ${isCustomer ? 'from-sky-950/95 via-sky-900/45' : 'from-emerald-950/95 via-emerald-900/45'} to-transparent`}
+            aria-hidden="true"
+          />
+          <span className="absolute inset-x-0 bottom-0 p-5 flex items-end gap-3">
+            <span className="min-w-0 flex-1">
+              <span className="block text-xl font-bold font-display leading-tight">{tx(isCustomer ? TEXT.customer : TEXT.provider)}</span>
+              <span className="block mt-1 text-[13px] leading-snug text-white/85">{tx(isCustomer ? TEXT.customerSub : TEXT.providerSub)}</span>
+            </span>
+            <span className={`shrink-0 w-11 h-11 rounded-full flex items-center justify-center ${isCustomer ? 'bg-sky-500' : 'bg-emerald-500'}`}>
+              <ChevronRight className="w-5 h-5" strokeWidth={2.5} />
+            </span>
+          </span>
+        </button>
+      );
+    }
     return (
       <button
         type="button"
@@ -69,7 +96,7 @@ export const RoleChooser: React.FC<RoleChooserProps> = ({ language, onChoose }) 
   return (
     <div className="flex-1 w-full max-w-md mx-auto px-4 py-8 flex flex-col justify-center space-y-5">
       <div className="text-center space-y-2 animate-fadeUp">
-        <Emoji3D code="1f44b" size={72} eager className="mx-auto animate-float" style={{ ['--tilt' as string]: '12deg' }} />
+        <img src={`${import.meta.env.BASE_URL}icon.svg`} alt="" className="mx-auto w-16 h-16 rounded-2xl shadow-lg shadow-sky-900/15" />
         <h1 className="text-[26px] font-bold text-slate-900 font-display">{tx(TEXT.title)}</h1>
         <p className="text-base text-slate-600">{tx(TEXT.question)}</p>
       </div>

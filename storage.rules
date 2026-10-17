@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // Firebase Storage Security Rules for KEREK
-//   chat/{conversationId}/{messageId}/{fileName}  — files shared in a conversation
+//   chat/{conversationId}/{uploadId}/{fileName}   — files shared in a conversation
 //   requests/{requestId}/{fileName}               — photos, videos and voice notes of a request
 //   providers/{uid}/portfolio/{slot}              — a master's work photos (slots p0 … p7)
 //
@@ -31,19 +31,36 @@ service firebase.storage {
             || c.get('providerId', '') == request.auth.uid);
     }
 
+    // An account the operator blocked (bans/{uid} in Firestore) adds or changes no files
+    function notBanned() {
+      return !firestore.exists(/databases/(default)/documents/bans/$(request.auth.uid));
+    }
+
     function isImage(maxBytes) {
       return request.resource.contentType.matches('image/(jpeg|png|webp)')
         && request.resource.size <= maxBytes;
     }
 
+    // A chat file needs its ticket (chatUploads/{uploadId} in Firestore, counted in the uploader's
+    // daily file limit) naming this conversation and exactly this file name: one ticket, one file
+    function chatTicketOk(conversationId, uploadId, fileName) {
+      let path = /databases/(default)/documents/chatUploads/$(uploadId);
+      return firestore.exists(path)
+        && firestore.get(path).data.uid == request.auth.uid
+        && firestore.get(path).data.conversationId == conversationId
+        && firestore.get(path).data.fileName == fileName;
+    }
+
     // Chat files: images, or PDF documents such as estimates and invoices
-    match /chat/{conversationId}/{messageId}/{fileName} {
+    match /chat/{conversationId}/{uploadId}/{fileName} {
       allow read: if isConversationParticipant(conversationId);
 
       // resource is the file already stored at this path: uploads never replace an existing file.
       // Files can be added only while the job is active.
       allow create: if resource == null
                     && isConversationParticipant(conversationId)
+                    && notBanned()
+                    && chatTicketOk(conversationId, uploadId, fileName)
                     && requestDoc(conversationDoc(conversationId).get('requestId', '-')).get('status', '') in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS']
                     && request.resource.size > 0
                     && (isImage(10 * 1024 * 1024)
@@ -88,6 +105,7 @@ service firebase.storage {
       allow create: if resource == null
                     && fileName.matches('att(1[0-4]|[0-9])')
                     && isRequestOwner(requestId)
+                    && notBanned()
                     && isOpenRequest(requestId)
                     && request.resource.size > 0
                     && (isImage(10 * 1024 * 1024)
@@ -100,12 +118,17 @@ service firebase.storage {
     }
 
     // A master's work photos: shown with the profile (to phone-verified accounts, like the profile
-    // itself); only the master adds, replaces or removes them
+    // itself; a profile the operator hid or blocked only to its master); only the master adds,
+    // replaces or removes them
     match /providers/{uid}/portfolio/{slot} {
-      allow read: if isSignedIn() && ('phone_number' in request.auth.token);
+      allow read: if isSignedIn() && ('phone_number' in request.auth.token) && (
+        request.auth.uid == uid
+        || (firestore.get(/databases/(default)/documents/providers/$(uid)).data.get('hidden', false) != true
+            && firestore.get(/databases/(default)/documents/providers/$(uid)).data.get('blocked', false) != true));
       allow create, update: if isSignedIn()
                             && request.auth.uid == uid
                             && ('phone_number' in request.auth.token)
+                            && notBanned()
                             && slot.matches('p[0-7]')
                             && request.resource.size > 0
                             && isImage(5 * 1024 * 1024);

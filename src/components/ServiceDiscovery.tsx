@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, PenLine, Search, X } from 'lucide-react';
+import { BadgeCheck, ChevronRight, FilePenLine, HandCoins, Handshake, LockKeyhole, MessagesSquare, PenLine, Search, X } from 'lucide-react';
 import { Language } from '../types';
 import {
   CatalogGroup,
@@ -12,7 +12,8 @@ import {
   serviceName,
   getService,
 } from '../data/serviceCatalog';
-import { CategoryIcon, Emoji3D, tone } from './CategoryIcon';
+import { groupPhoto, hasPhoto, servicePhoto } from '../data/photos';
+import { CategoryIcon, Emoji3D, Photo, tone } from './CategoryIcon';
 
 interface ServiceDiscoveryProps {
   language: Language;
@@ -97,9 +98,9 @@ function servicesCount(n: number, lang: 'kz' | 'ru'): string {
 }
 
 const HOW_STEPS = [
-  { emoji: '1f4dd', title: T.how1, desc: T.how1d },
-  { emoji: '1f4e8', title: T.how2, desc: T.how2d },
-  { emoji: '1f91d', title: T.how3, desc: T.how3d },
+  { Icon: FilePenLine, title: T.how1, desc: T.how1d },
+  { Icon: MessagesSquare, title: T.how2, desc: T.how2d },
+  { Icon: Handshake, title: T.how3, desc: T.how3d },
 ];
 
 /** Top of the customer home screen: search, popular services, all categories and "how it works". */
@@ -135,23 +136,18 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
     <div className="space-y-8">
       {/* Hero: title, floating 3D icons, search, honest promises */}
       <section className="relative -mx-4 -mt-5">
-        <div className="absolute inset-0 rounded-b-[32px] overflow-hidden bg-linear-to-br from-sky-600 via-sky-500 to-indigo-500" aria-hidden="true">
-          <div className="absolute -top-20 -right-16 w-64 h-64 rounded-full bg-white/10" />
-          <div className="absolute top-28 -left-20 w-52 h-52 rounded-full bg-indigo-300/25 blur-2xl" />
-          <div className="absolute -bottom-10 right-10 w-40 h-40 rounded-full bg-cyan-300/20 blur-2xl" />
+        <div className="absolute inset-0 rounded-b-[32px] overflow-hidden bg-sky-800" aria-hidden="true">
+          {hasPhoto('hero_home') && <Photo name="hero_home" eager className="absolute inset-0 w-full h-full object-[70%_30%]" />}
+          <div className="absolute inset-0 bg-linear-to-r from-sky-950/90 via-sky-900/70 to-sky-900/10" />
+          <div className="absolute inset-x-0 bottom-0 h-2/3 bg-linear-to-t from-sky-950/80 to-transparent" />
         </div>
 
         <div className="relative px-4 pt-6 pb-5">
-          <div className="pointer-events-none absolute top-3 right-2 w-[132px] h-[124px]" aria-hidden="true">
-            <Emoji3D code="1f9f0" size={64} eager className="absolute top-1 right-3 animate-float drop-shadow-lg" style={{ ['--tilt' as string]: '6deg' }} />
-            <Emoji3D code="1f58c-fe0f" size={44} eager className="absolute top-16 right-[78px] animate-float drop-shadow-lg" style={{ ['--tilt' as string]: '-8deg', animationDelay: '-1.4s' }} />
-            <Emoji3D code="1f9f9" size={42} eager className="absolute top-[74px] right-0 animate-float drop-shadow-lg" style={{ ['--tilt' as string]: '10deg', animationDelay: '-2.8s' }} />
-          </div>
-
+          <div className="h-16" aria-hidden="true" />
           <h1 className="relative max-w-[64%] text-[25px] leading-[1.18] font-bold text-white tracking-tight font-display animate-fadeUp">
             {tx(T.title)}
           </h1>
-          <p className="relative max-w-[64%] mt-2 text-[13px] leading-snug text-sky-50/90 animate-fadeUp" style={{ animationDelay: '60ms' }}>
+          <p className="relative max-w-[64%] mt-2 text-[13px] leading-snug text-white/85 animate-fadeUp" style={{ animationDelay: '60ms' }}>
             {tx(T.subtitle)}
           </p>
 
@@ -192,7 +188,7 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
                     onClick={() => pick(group, service)}
                     className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 text-left border-b border-slate-100"
                   >
-                    <CategoryIcon emoji={service.emoji} color={group.color} size="sm" />
+                    <CategoryIcon emoji={service.emoji} color={group.color} photo={servicePhoto(service.id, group.id)} size="sm" />
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-semibold text-slate-900 truncate">{serviceName(service, lang)}</span>
                       <span className="block text-[11px] text-slate-500 truncate">{groupName(group, lang)}</span>
@@ -218,16 +214,16 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
 
           <div className="relative mt-4 flex flex-wrap gap-2 animate-fadeUp" style={{ animationDelay: '180ms' }}>
             {[
-              { emoji: '2728', text: T.free },
-              { emoji: '1f512', text: T.hidden },
-              { emoji: '1f91d', text: T.direct },
-            ].map((chip) => (
+              { Icon: BadgeCheck, text: T.free },
+              { Icon: LockKeyhole, text: T.hidden },
+              { Icon: HandCoins, text: T.direct },
+            ].map(({ Icon, text }) => (
               <span
-                key={chip.emoji}
-                className="inline-flex items-center gap-1.5 h-8 pl-1.5 pr-3 rounded-full bg-white/15 border border-white/20 backdrop-blur-sm text-white text-[12px] font-semibold whitespace-nowrap"
+                key={text.ru}
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-white/12 border border-white/20 backdrop-blur-md text-white text-[12px] font-semibold whitespace-nowrap"
               >
-                <Emoji3D code={chip.emoji} size={20} eager />
-                {tx(chip.text)}
+                <Icon className="w-3.5 h-3.5 text-sky-200" strokeWidth={2.5} />
+                {tx(text)}
               </span>
             ))}
           </div>
@@ -239,16 +235,20 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
         <button
           type="button"
           onClick={() => pick(season.group, season.service)}
-          className="press w-full flex items-center gap-3 p-3 rounded-3xl bg-linear-to-br from-amber-50 to-orange-50 border border-amber-200/80 text-left animate-fadeUp"
+          className="press w-full flex items-center gap-3 p-2.5 pr-3 rounded-3xl bg-white border border-slate-200/80 shadow-sm shadow-slate-200/60 text-left animate-fadeUp"
         >
-          <span className="w-14 h-14 rounded-2xl bg-white/80 flex items-center justify-center shrink-0">
-            <Emoji3D code={season.tip.emoji} size={40} />
-          </span>
+          {servicePhoto(season.service.id, season.group.id) ? (
+            <Photo name={servicePhoto(season.service.id, season.group.id)!} className="w-16 h-16 rounded-2xl shrink-0" />
+          ) : (
+            <span className="w-16 h-16 rounded-2xl bg-amber-50 flex items-center justify-center shrink-0">
+              <Emoji3D code={season.tip.emoji} size={40} />
+            </span>
+          )}
           <span className="min-w-0 flex-1">
             <span className="block text-[15px] font-bold text-slate-900 leading-tight">{tx(season.tip.title)}</span>
             <span className="block mt-0.5 text-[12px] text-slate-600 leading-snug">{tx(season.tip.text)}</span>
           </span>
-          <ChevronRight className="w-5 h-5 text-amber-500 shrink-0" />
+          <ChevronRight className="w-5 h-5 text-slate-300 shrink-0" />
         </button>
       )}
 
@@ -262,13 +262,16 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
               type="button"
               onClick={() => pick(group, service)}
               style={{ ['--i' as string]: i }}
-              className="press snap-start shrink-0 w-[132px] p-2 bg-white border border-slate-200/80 rounded-3xl text-left shadow-sm shadow-slate-200/60"
+              className="press snap-start shrink-0 w-[148px] bg-white border border-slate-200/80 rounded-3xl overflow-hidden text-left shadow-sm shadow-slate-200/60"
             >
-              <span className={`relative h-[88px] rounded-[20px] bg-linear-to-br ${tone(group.color).tile} flex items-center justify-center overflow-hidden`}>
-                <span className={`absolute -bottom-6 -right-6 w-20 h-20 rounded-full ${tone(group.color).glow} opacity-30`} />
-                <Emoji3D code={service.emoji} size={58} className="relative" />
-              </span>
-              <span className="block px-1 pt-2 pb-1 text-[13px] font-bold text-slate-800 leading-snug line-clamp-2 min-h-[2.6em]">
+              {servicePhoto(service.id, group.id) ? (
+                <Photo name={servicePhoto(service.id, group.id)!} className="w-full h-[112px]" />
+              ) : (
+                <span className={`h-[112px] bg-linear-to-br ${tone(group.color).tile} flex items-center justify-center`}>
+                  <Emoji3D code={service.emoji} size={58} />
+                </span>
+              )}
+              <span className="block px-3 pt-2.5 pb-3 text-[13px] font-bold text-slate-800 leading-snug line-clamp-2 min-h-[3.6em]">
                 {serviceName(service, lang)}
               </span>
             </button>
@@ -284,29 +287,44 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
             {SERVICE_CATALOG.length} {tx(T.groupsUnit)} · {servicesCount(TOTAL_SERVICE_COUNT, lang)}
           </span>
         </div>
-        <div className="grid grid-cols-3 gap-2.5 stagger">
+        <div className="grid grid-cols-2 min-[360px]:grid-cols-3 gap-2.5 stagger">
           {SERVICE_CATALOG.map((group, i) => (
             <button
               key={group.id}
               type="button"
               onClick={() => setOpenGroup(group)}
               style={{ ['--i' as string]: i }}
-              className={`press relative overflow-hidden p-2.5 pt-3 rounded-3xl bg-linear-to-br ${tone(group.color).tile} border border-white flex flex-col items-center text-center gap-1.5 min-h-[128px]`}
+              className={`press relative overflow-hidden rounded-3xl min-h-[136px] flex flex-col justify-end text-left ${
+                groupPhoto(group.id) ? 'bg-slate-800' : `bg-linear-to-br ${tone(group.color).tile} items-center text-center p-2.5`
+              }`}
             >
-              <Emoji3D code={group.emoji} size={50} />
-              <span className="text-[12px] font-bold text-slate-800 leading-tight line-clamp-2">{groupName(group, lang)}</span>
-              <span className={`mt-auto text-[10px] font-semibold ${tone(group.color).text} opacity-80`}>
-                {servicesCount(group.services.length, lang)}
-              </span>
+              {groupPhoto(group.id) ? (
+                <>
+                  <Photo name={groupPhoto(group.id)!} className="absolute inset-0 w-full h-full" />
+                  <span className="absolute inset-0 bg-linear-to-t from-slate-950/85 via-slate-950/25 to-transparent" aria-hidden="true" />
+                  <span className="relative px-2.5 pb-2.5">
+                    <span className="block text-[12px] font-bold text-white leading-tight line-clamp-3 break-words hyphens-auto">{groupName(group, lang)}</span>
+                    <span className="block mt-0.5 text-[10px] font-medium text-white/75">{servicesCount(group.services.length, lang)}</span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Emoji3D code={group.emoji} size={50} className="mb-auto" />
+                  <span className="text-[12px] font-bold text-slate-800 leading-tight line-clamp-2">{groupName(group, lang)}</span>
+                  <span className={`text-[10px] font-semibold ${tone(group.color).text} opacity-80`}>{servicesCount(group.services.length, lang)}</span>
+                </>
+              )}
             </button>
           ))}
           <button
             type="button"
             onClick={onDescribeOwn}
             style={{ ['--i' as string]: SERVICE_CATALOG.length }}
-            className={`press ${SERVICE_CATALOG.length % 3 === 1 ? 'col-span-2' : SERVICE_CATALOG.length % 3 === 2 ? 'col-span-1' : 'col-span-3'} p-3 rounded-3xl border-2 border-dashed border-slate-200 bg-white flex items-center gap-3 text-left min-h-[128px]`}
+            className={`press ${SERVICE_CATALOG.length % 2 === 0 ? 'col-span-2' : 'col-span-1'} ${SERVICE_CATALOG.length % 3 === 1 ? 'min-[360px]:col-span-2' : SERVICE_CATALOG.length % 3 === 2 ? 'min-[360px]:col-span-1' : 'min-[360px]:col-span-3'} p-3 rounded-3xl border-2 border-dashed border-slate-200 bg-white flex items-center gap-3 text-left min-h-[136px]`}
           >
-            <Emoji3D code="270d-fe0f" size={44} />
+            <span className="w-11 h-11 rounded-2xl bg-sky-50 flex items-center justify-center shrink-0">
+              <PenLine className="w-5 h-5 text-sky-700" />
+            </span>
             <span className="min-w-0">
               <span className="block text-[13px] font-bold text-slate-800 leading-tight">{tx(T.notListed)}</span>
               <span className="block mt-0.5 text-[11px] text-slate-500 leading-snug">{tx(T.notListedD)}</span>
@@ -324,8 +342,8 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
           <span className="absolute left-7 top-8 bottom-8 border-l-2 border-dashed border-sky-200" aria-hidden="true" />
           {HOW_STEPS.map((s, i) => (
             <li key={i} className="relative flex items-start gap-3.5">
-              <span className="relative w-14 h-14 rounded-2xl bg-linear-to-br from-sky-50 to-indigo-100 flex items-center justify-center shrink-0 ring-4 ring-white">
-                <Emoji3D code={s.emoji} size={36} />
+              <span className="relative w-14 h-14 rounded-2xl bg-sky-50 flex items-center justify-center shrink-0 ring-4 ring-white">
+                <s.Icon className="w-6 h-6 text-sky-700" strokeWidth={2} />
                 <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-sky-600 text-white text-[11px] font-extrabold flex items-center justify-center ring-2 ring-white">
                   {i + 1}
                 </span>
@@ -340,12 +358,18 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
       </section>
 
       {/* Become a provider */}
-      <section className="relative overflow-hidden p-5 rounded-3xl bg-linear-to-br from-emerald-500 to-teal-600 text-white">
-        <div className="absolute -top-12 -right-12 w-44 h-44 rounded-full bg-white/10" aria-hidden="true" />
-        <Emoji3D code="1f9d1-200d-1f527" size={92} className="absolute right-2 bottom-1 animate-float drop-shadow-xl" style={{ ['--tilt' as string]: '4deg' }} />
+      <section className="relative overflow-hidden p-5 rounded-3xl bg-emerald-800 text-white">
+        {hasPhoto('role_master') ? (
+          <>
+            <Photo name="role_master" className="absolute inset-y-0 right-0 w-[55%] h-full object-[50%_20%]" />
+            <span className="absolute inset-0 bg-linear-to-r from-emerald-800 via-emerald-800/90 to-emerald-800/10" aria-hidden="true" />
+          </>
+        ) : (
+          <Emoji3D code="1f9d1-200d-1f527" size={92} className="absolute right-2 bottom-1 drop-shadow-xl" />
+        )}
         <div className="relative max-w-[66%] space-y-1.5">
           <h2 className="text-lg font-extrabold tracking-tight">{tx(T.providerTitle)}</h2>
-          <p className="text-[13px] text-emerald-50 leading-snug">{tx(T.providerText)}</p>
+          <p className="text-[13px] text-emerald-50/90 leading-snug">{tx(T.providerText)}</p>
         </div>
         <button
           type="button"
@@ -370,6 +394,25 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
             className="w-full sm:max-w-md max-h-[88vh] bg-white rounded-t-[28px] sm:rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-slideUp"
             onClick={(e) => e.stopPropagation()}
           >
+            {groupPhoto(openGroup.id) ? (
+              <div className="relative h-40 shrink-0 bg-slate-800">
+                <Photo name={groupPhoto(openGroup.id)!} eager className="absolute inset-0 w-full h-full" />
+                <span className="absolute inset-0 bg-linear-to-t from-slate-950/85 via-slate-950/20 to-slate-950/10" aria-hidden="true" />
+                <div className="absolute top-2 inset-x-0 mx-auto w-10 h-1.5 rounded-full bg-white/60" aria-hidden="true" />
+                <button
+                  type="button"
+                  onClick={() => setOpenGroup(null)}
+                  aria-label={tx(T.close)}
+                  className="absolute top-3 right-3 w-10 h-10 rounded-full bg-black/35 backdrop-blur-sm flex items-center justify-center text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+                <div className="absolute inset-x-0 bottom-0 px-5 pb-4">
+                  <h3 className="text-xl font-bold text-white font-display leading-tight">{groupName(openGroup, lang)}</h3>
+                  <p className="mt-1 text-[13px] text-white/80 leading-snug">{lang === 'kz' ? openGroup.kzHint : openGroup.ruHint}</p>
+                </div>
+              </div>
+            ) : (
             <div className={`relative px-5 pt-3 pb-4 bg-linear-to-br ${tone(openGroup.color).tile}`}>
               <div className="mx-auto mb-3 w-10 h-1.5 rounded-full bg-slate-900/15" aria-hidden="true" />
               <button
@@ -388,7 +431,8 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
                 </div>
               </div>
             </div>
-            <div className="overflow-y-auto p-2 pb-4 stagger" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+            )}
+            <div className="overflow-y-auto overscroll-contain p-2 pb-4 stagger" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
               {openGroup.services.map((service, i) => (
                 <button
                   key={service.id}
@@ -397,7 +441,7 @@ export const ServiceDiscovery: React.FC<ServiceDiscoveryProps> = ({ language, on
                   style={{ ['--i' as string]: i }}
                   className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl hover:bg-slate-50 active:bg-slate-100 text-left"
                 >
-                  <CategoryIcon emoji={service.emoji} color={openGroup.color} size="sm" />
+                  <CategoryIcon emoji={service.emoji} color={openGroup.color} photo={servicePhoto(service.id, openGroup.id)} size="sm" />
                   <span className="flex-1 text-[15px] font-semibold text-slate-800">{serviceName(service, lang)}</span>
                   <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
                 </button>

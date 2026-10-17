@@ -1,9 +1,10 @@
 import * as crypto from 'crypto';
 import { getAuth } from 'firebase-admin/auth';
-import { getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret, defineString } from 'firebase-functions/params';
 import { allowCall, clientIp, DAY_MS } from './limits';
+import { recordLoginSignals } from './signals';
 
 /**
  * Phone login with a one-time code sent to WhatsApp (WhatsApp Business Platform, Cloud API), using
@@ -37,18 +38,28 @@ const graphVersion = defineString('WHATSAPP_GRAPH_VERSION', { default: 'v23.0' }
 const REGION = 'asia-south1';
 const CODE_TTL_MS = 10 * 60 * 1000;
 const MAX_TRIES = 5;
-/** All codes sent by the app in one day; protects the WhatsApp balance from abuse */
-const GLOBAL_DAILY_CODES = 1000;
+/**
+ * All codes sent by the app in one day; protects the WhatsApp balance from abuse. Sized for the
+ * Kyzylorda pilot (real logins are a few dozen a day); raise it when the app grows.
+ */
+const GLOBAL_DAILY_CODES = 200;
 /** Template language per app language; Russian is the fallback when a Kazakh version is missing */
 const TEMPLATE_LANG: Record<string, string> = { kz: 'kk', ru: 'ru' };
 /** Graph API error codes: template missing in this language, and sending too fast */
 const TEMPLATE_MISSING = 132001;
 const RATE_LIMITED = new Set([4, 80007, 130429, 131048, 131056]);
 
-/** Kazakhstan mobile numbers only (+7 7xx / +7 6xx), the same check as the app. */
+/**
+ * Turkish mobile numbers (+90 5xx) are accepted too while the closed test on Google Play runs, so
+ * testers in Turkey can sign in. Set to false (here and in src/services/phoneAuth.ts) after it.
+ */
+export const ALLOW_TURKISH_TESTERS = true;
+
+/** Kazakhstan mobile numbers (+7 7xx / +7 6xx), and Turkish ones during the test; the same check as the app. */
 export function normalizeKzPhone(raw: unknown): string | null {
   const digits = String(typeof raw === 'string' ? raw : '').replace(/\D/g, '');
-  return /^7[67]\d{9}$/.test(digits) ? `+${digits}` : null;
+  if (/^7[67]\d{9}$/.test(digits)) return `+${digits}`;
+  return ALLOW_TURKISH_TESTERS && /^905\d{9}$/.test(digits) ? `+${digits}` : null;
 }
 
 function sha256(text: string): string {
@@ -158,14 +169,46 @@ export const requestLoginCode = onCall<{ phone?: string; lang?: string }, Promis
   }
 );
 
-export const verifyLoginCode = onCall<{ phone?: string; code?: string }, Promise<{ token: string }>>(
+/**
+ * The consent given in the login form (privacy policy and terms of this version), kept on the server:
+ * consents/{uid} holds the latest, consents/{uid}/history one entry per login. Server time, never
+ * written by the app (firestore.rules).
+ */
+export async function recordConsent(uid: string, version: string, ip: string, now = Date.now()): Promise<void> {
+  const db = getFirestore();
+  const entry = {
+    version,
+    acceptedAt: FieldValue.serverTimestamp(),
+    method: 'phone_login',
+    // Only a short fingerprint of the network address, enough to tell logins apart
+    ...(ip ? { ipHash: sha256(`consent:${ip}`).slice(0, 16) } : {}),
+  };
+  const batch = db.batch();
+  batch.set(db.collection('consents').doc(uid), { uid, ...entry }, { merge: true });
+  batch.set(db.collection('consents').doc(uid).collection('history').doc(String(now)), entry);
+  await batch.commit();
+}
+
+export const verifyLoginCode = onCall<{ phone?: string; code?: string; deviceId?: string; consentVersion?: string }, Promise<{ token: string }>>(
   { region: REGION, maxInstances: 5, timeoutSeconds: 20 },
   async (request) => {
     const callerUid = request.auth?.uid;
     if (!callerUid) throw new HttpsError('unauthenticated', 'Sign-in is required.');
+    // A few checks an hour per account and per network address (every code allows five tries; the
+    // limits on sending codes keep the number of codes small), so the endpoint can't be flooded
+    const now = Date.now();
+    const tooMany = () => new HttpsError('resource-exhausted', 'Too many tries. Please wait and try again.');
+    if (!(await allowCall(`otpv_uid_${callerUid}`, 15, now, 3600 * 1000))) throw tooMany();
+    const ip = clientIp(request.rawRequest);
+    if (ip && !(await allowCall(`otpv_ip_${sha256(ip).slice(0, 32)}`, 40, now, 3600 * 1000))) throw tooMany();
     const phone = normalizeKzPhone(request.data?.phone);
     const code = String(request.data?.code || '').replace(/\D/g, '');
     if (!phone || code.length !== 6) throw new HttpsError('invalid-argument', 'Invalid code.');
+    // The login form can only be sent with the consent box ticked; the version it showed comes along
+    const consentVersion = String(request.data?.consentVersion || '').trim();
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}(\.[0-9]+)?$/.test(consentVersion)) {
+      throw new HttpsError('failed-precondition', 'Consent to the privacy policy is required.');
+    }
 
     const db = getFirestore();
     const ref = db.collection('loginCodes').doc(codeDocId(phone));
@@ -206,7 +249,10 @@ export const verifyLoginCode = onCall<{ phone?: string; code?: string }, Promise
         uid = (await auth.getUserByPhoneNumber(phone)).uid;
       }
     }
+    await recordConsent(uid, consentVersion, ip);
     const token = await auth.createCustomToken(uid);
+    // Which phone and network the account uses, for the review check (signals.ts); never fails the login
+    await recordLoginSignals(uid, request.data?.deviceId, ip);
     return { token };
   }
 );

@@ -68,6 +68,18 @@ async function run() {
     await setDoc(doc(db, 'conversations', 'conv_1'), { id: 'conv_1', requestId: 'REQ-S1', customerId: 'alice', providerUserId: 'sam', providerId: 'sam' });
     await setDoc(doc(db, 'requests', 'REQ-C1'), { id: 'REQ-C1', customerId: 'alice', cityId: 'almaty', status: 'CANCELLED', selectedOfferId: 'OFFER-C1' });
     await setDoc(doc(db, 'conversations', 'conv_c'), { id: 'conv_c', requestId: 'REQ-C1', customerId: 'alice', providerUserId: 'sam', providerId: 'sam' });
+    // Chat file tickets (chatUploads, counted in the daily file limit by the app)
+    const ticket = (id: string, uid: string, conversationId: string, fileName: string) =>
+      setDoc(doc(db, 'chatUploads', id), { uid, conversationId, fileName, createdAt: new Date().toISOString() });
+    await ticket('m2', 'alice', 'conv_1', 'a.png');
+    await ticket('m3', 'sam', 'conv_1', 'estimate.pdf');
+    await ticket('m6', 'alice', 'conv_1', 'b.png');
+    for (const [id, name] of [['m4a', 'x.js'], ['m4b', 'x.zip'], ['m4c', 'x.html']]) await ticket(id, 'alice', 'conv_1', name);
+    await ticket('m5', 'mallory', 'conv_1', 'a.jpg');
+    await ticket('mc', 'alice', 'conv_c', 'a.jpg');
+    await ticket('mb1', 'bob', 'conv_b', 'a.jpg');
+    await ticket('mb2', 'bob', 'conv_b', 'a.jpg');
+    await ticket('mb3', 'sam', 'conv_b', 'a.jpg');
   });
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await uploadBytes(ref(ctx.storage(), 'requests/REQ-A1/photo.jpg'), new Uint8Array([1, 2, 3]), { contentType: 'image/jpeg' });
@@ -117,14 +129,20 @@ async function run() {
   console.log('\n--- Chat files ---');
   await test('Customer uploads an image to the chat', () => assertSucceeds(put('alice', 'chat/conv_1/m2/a.png', 'image/png')));
   await test('Provider uploads a PDF to the chat', () => assertSucceeds(put('sam', 'chat/conv_1/m3/estimate.pdf', 'application/pdf')));
-  await test('JavaScript file in chat is refused', () => assertFails(put('alice', 'chat/conv_1/m4/x.js', 'application/javascript')));
-  await test('ZIP archive in chat is refused', () => assertFails(put('alice', 'chat/conv_1/m4/x.zip', 'application/zip')));
-  await test('HTML page in chat is refused', () => assertFails(put('alice', 'chat/conv_1/m4/x.html', 'text/html')));
+  await test('JavaScript file in chat is refused', () => assertFails(put('alice', 'chat/conv_1/m4a/x.js', 'application/javascript')));
+  await test('ZIP archive in chat is refused', () => assertFails(put('alice', 'chat/conv_1/m4b/x.zip', 'application/zip')));
+  await test('HTML page in chat is refused', () => assertFails(put('alice', 'chat/conv_1/m4c/x.html', 'text/html')));
   await test("Outsider can't upload to the chat", () => assertFails(put('mallory', 'chat/conv_1/m5/a.jpg', 'image/jpeg')));
   await test("Outsider can't read chat files", () => assertFails(read('mallory', 'chat/conv_1/m1/a.jpg')));
   await test('Participant reads chat file', () => assertSucceeds(read('sam', 'chat/conv_1/m1/a.jpg')));
+  await test('A chat file needs its own ticket with exactly this name (daily limit, audit S06)', async () => {
+    await assertFails(put('alice', 'chat/conv_1/no-ticket/a.png', 'image/png'));
+    await assertFails(put('alice', 'chat/conv_1/m6/other-name.png', 'image/png'));
+    await assertFails(put('sam', 'chat/conv_1/m6/b.png', 'image/png'));
+    await assertSucceeds(put('alice', 'chat/conv_1/m6/b.png', 'image/png'));
+  });
   await test('Upload to a conversation that does not exist is refused', () => assertFails(put('alice', 'chat/conv_nope/m1/a.jpg', 'image/jpeg')));
-  await test('Chat upload after the request is cancelled is refused', () => assertFails(put('alice', 'chat/conv_c/m1/a.jpg', 'image/jpeg')));
+  await test('Chat upload after the request is cancelled is refused', () => assertFails(put('alice', 'chat/conv_c/mc/a.jpg', 'image/jpeg')));
 
   console.log('\n--- Master work photos ---');
   const phoneStorage = (uid: string) => testEnv.authenticatedContext(uid, { phone_number: '+77000000000' }).storage();
@@ -149,6 +167,41 @@ async function run() {
   await test('Only the master deletes their work photo', async () => {
     await assertFails(deleteObject(ref(phoneStorage('sam'), 'providers/pat/portfolio/p0')));
     await assertSucceeds(deleteObject(ref(phoneStorage('pat'), 'providers/pat/portfolio/p0')));
+  });
+
+  console.log('\n--- Blocked accounts and hidden profiles (external audit S04) ---');
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'providers', 'hid'), { id: 'hid', cityId: 'almaty', hidden: true });
+    await setDoc(doc(db, 'providers', 'blk'), { id: 'blk', cityId: 'almaty', blocked: true });
+    await setDoc(doc(db, 'requests', 'REQ-B1'), { id: 'REQ-B1', customerId: 'bob', cityId: 'almaty', status: 'OPEN' });
+    await setDoc(doc(db, 'requests', 'REQ-B2'), { id: 'REQ-B2', customerId: 'bob', cityId: 'almaty', status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-B2' });
+    await setDoc(doc(db, 'offers', 'OFFER-B2'), { id: 'OFFER-B2', requestId: 'REQ-B2', providerId: 'sam', providerUserId: 'sam' });
+    await setDoc(doc(db, 'conversations', 'conv_b'), { id: 'conv_b', requestId: 'REQ-B2', customerId: 'bob', providerUserId: 'sam', providerId: 'sam' });
+  });
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await uploadBytes(ref(ctx.storage(), 'providers/hid/portfolio/p0'), new Uint8Array([1, 2, 3]), { contentType: 'image/jpeg' });
+    await uploadBytes(ref(ctx.storage(), 'providers/blk/portfolio/p0'), new Uint8Array([1, 2, 3]), { contentType: 'image/jpeg' });
+  });
+  await test('Before a block, the customer and the master add files', async () => {
+    await assertSucceeds(put('bob', 'requests/REQ-B1/att0', 'image/jpeg'));
+    await assertSucceeds(put('bob', 'chat/conv_b/mb1/a.jpg', 'image/jpeg'));
+    await assertSucceeds(putPhoto('hid', 'providers/hid/portfolio/p1'));
+  });
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'bans', 'bob'), { uid: 'bob', reason: 'test' });
+    await setDoc(doc(ctx.firestore(), 'bans', 'hid'), { uid: 'hid', reason: 'test' });
+  });
+  await test('A blocked account adds no request files, chat files or work photos', async () => {
+    await assertFails(put('bob', 'requests/REQ-B1/att1', 'image/jpeg'));
+    await assertFails(put('bob', 'chat/conv_b/mb2/a.jpg', 'image/jpeg'));
+    await assertFails(putPhoto('hid', 'providers/hid/portfolio/p2'));
+  });
+  await test('The other side of a blocked account still adds chat files', () => assertSucceeds(put('sam', 'chat/conv_b/mb3/a.jpg', 'image/jpeg')));
+  await test('Work photos of a hidden or blocked profile: only its master sees them', async () => {
+    await assertFails(getBytes(ref(phoneStorage('alice'), 'providers/hid/portfolio/p0')));
+    await assertFails(getBytes(ref(phoneStorage('alice'), 'providers/blk/portfolio/p0')));
+    await assertSucceeds(getBytes(ref(phoneStorage('hid'), 'providers/hid/portfolio/p0')));
   });
 
   console.log('\n--- Other paths ---');

@@ -52,8 +52,10 @@ const TEXT = {
   },
   close: { kz: 'Жабу', ru: 'Закрыть' },
   consent: {
-    kz: 'Мен Пайдалану шарттарын қабылдаймын және Құпиялылық саясатында көрсетілген шарттармен дербес деректерімді жинауға және өңдеуге, оның ішінде трансшекаралық беруге келісім беремін. Маған 18 жас толған.',
-    ru: 'Я принимаю Условия использования и даю согласие на сбор и обработку моих персональных данных, в том числе на их трансграничную передачу, на условиях Политики конфиденциальности. Мне есть 18 лет.',
+    // Plain words for the same consent: processing under the privacy policy, storage in
+    // Kazakhstan and the copy processed abroad (cross-border transfer, Law 94-V art. 16)
+    kz: 'Мен Пайдалану шарттарын қабылдаймын және дербес деректерімді Құпиялылық саясатына сай өңдеуге келісемін. Деректерім Қазақстанда сақталады, ал қолданба жұмыс істеуі үшін олардың көшірмесі шетелдегі серверлерде (Google, WhatsApp) өңделеді, бұған да келісемін. Маған 18 жас толған.',
+    ru: 'Я принимаю Условия использования и соглашаюсь на обработку моих персональных данных по Политике конфиденциальности. Мои данные хранятся в Казахстане, а для работы приложения их копия обрабатывается на зарубежных серверах (Google, WhatsApp), и на это я тоже даю согласие. Мне есть 18 лет.',
   },
   consentRequired: {
     kz: 'Жалғастыру үшін келісім белгісін қойыңыз.',
@@ -205,7 +207,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
             <button
               type="submit"
               disabled={busy || !agreed}
-              className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
+              className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm shadow-md shadow-sky-600/20 active:scale-[0.99] transition flex items-center justify-center gap-2"
             >
               {busy && <Loader2 className="w-4 h-4 animate-spin" />}
               <span>{tx(TEXT.sendCode)}</span>
@@ -237,7 +239,7 @@ export const PhoneLoginModal: React.FC<PhoneLoginModalProps> = ({ open, language
             <button
               type="submit"
               disabled={busy || code.length < 6}
-              className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
+              className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm shadow-md shadow-sky-600/20 active:scale-[0.99] transition flex items-center justify-center gap-2"
             >
               {busy && <Loader2 className="w-4 h-4 animate-spin" />}
               <span>{tx(TEXT.confirm)}</span>

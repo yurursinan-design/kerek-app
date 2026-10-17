@@ -11,6 +11,7 @@ import {
 import { resilientRepository } from './resilientRepository';
 import { auth } from './firebase';
 import { getCurrentUserId } from './localRepository';
+import { formatSchedule } from './dateFormat';
 
 /**
  * Plays a subtle, pleasant chime for incoming in-app notifications using Web Audio API.
@@ -18,6 +19,26 @@ import { getCurrentUserId } from './localRepository';
  */
 let chimeContext: AudioContext | null = null;
 let dombra: HTMLAudioElement | null = null;
+
+// "Sound in the app" on the profile tab. Push notices on the phone keep the phone's own settings.
+const SOUND_OFF_KEY = 'kerek_sound_off_v1';
+
+export function isSoundOn(): boolean {
+  try {
+    return localStorage.getItem(SOUND_OFF_KEY) !== '1';
+  } catch {
+    return true;
+  }
+}
+
+export function setSoundOn(on: boolean): void {
+  try {
+    if (on) localStorage.removeItem(SOUND_OFF_KEY);
+    else localStorage.setItem(SOUND_OFF_KEY, '1');
+  } catch {
+    // storage unavailable: the choice lasts until the page is closed
+  }
+}
 
 /** KEREK's sound for a new job: a short dombra strum (same file as the phone notification). */
 function playDombra(): boolean {
@@ -33,6 +54,7 @@ function playDombra(): boolean {
 }
 
 export function playNotificationSound(type?: NotificationEventType): void {
+  if (!isSoundOn()) return;
   if (type === 'NEW_REQUEST' && playDombra()) return;
   try {
     if (typeof window === 'undefined') return;
@@ -442,11 +464,11 @@ export const notificationService = {
         },
         body: {
           kz: isCustomerActor
-            ? `${request.customerName || 'Клиент'} кездесу уақытын белгіледі: ${appointment.scheduledAt}`
-            : `Маман сізге кездесу уақытын ұсынды: ${appointment.scheduledAt}`,
+            ? `${request.customerName || 'Клиент'} кездесу уақытын белгіледі: ${formatSchedule(appointment.scheduledAt, 'kz')}`
+            : `Маман сізге кездесу уақытын ұсынды: ${formatSchedule(appointment.scheduledAt, 'kz')}`,
           ru: isCustomerActor
-            ? `Клиент (${request.customerName || 'Клиент'}) предложил встречу: ${appointment.scheduledAt}`
-            : `Мастер предложил время встречи: ${appointment.scheduledAt}`,
+            ? `Клиент (${request.customerName || 'Клиент'}) предложил встречу: ${formatSchedule(appointment.scheduledAt, 'ru')}`
+            : `Мастер предложил время встречи: ${formatSchedule(appointment.scheduledAt, 'ru')}`,
         },
         requestId: request.id,
         targetScreen: 'request_detail',
@@ -490,11 +512,11 @@ export const notificationService = {
 
       let body = {
         kz: action === 'CONFIRMED'
-          ? (isCustomerActor ? 'Клиент кездесу уақытын растады' : 'Маман кездесу уақытын растады') + `: ${appointment.scheduledAt}`
-          : (isCustomerActor ? 'Клиент жаңа кездесу уақытын ұсынды' : 'Маман жаңа кездесу уақытын ұсынды') + `: ${appointment.scheduledAt}`,
+          ? (isCustomerActor ? 'Клиент кездесу уақытын растады' : 'Маман кездесу уақытын растады') + `: ${formatSchedule(appointment.scheduledAt, 'kz')}`
+          : (isCustomerActor ? 'Клиент жаңа кездесу уақытын ұсынды' : 'Маман жаңа кездесу уақытын ұсынды') + `: ${formatSchedule(appointment.scheduledAt, 'kz')}`,
         ru: action === 'CONFIRMED'
-          ? (isCustomerActor ? 'Клиент подтвердил время встречи' : 'Мастер подтвердил время встречи') + `: ${appointment.scheduledAt}`
-          : (isCustomerActor ? 'Клиент предложил другое время' : 'Мастер предложил другое время') + `: ${appointment.scheduledAt}`,
+          ? (isCustomerActor ? 'Клиент подтвердил время встречи' : 'Мастер подтвердил время встречи') + `: ${formatSchedule(appointment.scheduledAt, 'ru')}`
+          : (isCustomerActor ? 'Клиент предложил другое время' : 'Мастер предложил другое время') + `: ${formatSchedule(appointment.scheduledAt, 'ru')}`,
       };
 
       const payload: AppNotification = {

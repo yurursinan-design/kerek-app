@@ -3,6 +3,7 @@ import {
   AppNotification,
   ExtractedNeed,
   Language,
+  normalizeRequestStatus,
   PendingAttachment,
   RequestAttachment,
   RequestLocation,
@@ -17,6 +18,8 @@ import { InterpretationScreen } from './components/InterpretationScreen';
 const ResultScreen = lazy(() => import('./components/ResultScreen').then((m) => ({ default: m.ResultScreen })));
 const MyRequestsScreen = lazy(() => import('./components/MyRequestsScreen').then((m) => ({ default: m.MyRequestsScreen })));
 const ProviderModeScreen = lazy(() => import('./components/ProviderModeScreen').then((m) => ({ default: m.ProviderModeScreen })));
+const AdminScreen = lazy(() => import('./components/AdminScreen').then((m) => ({ default: m.AdminScreen })));
+const ProfileScreen = lazy(() => import('./components/ProfileScreen').then((m) => ({ default: m.ProfileScreen })));
 const ProviderProfileModal = lazy(() => import('./components/ProviderProfileModal').then((m) => ({ default: m.ProviderProfileModal })));
 import type { ProviderTab } from './components/ProviderModeScreen';
 import { RoleChooser, AppMode } from './components/RoleChooser';
@@ -26,6 +29,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { logoutToAnonymous, requiresPhoneLogin } from './services/phoneAuth';
 import { startPushNotifications } from './services/pushNotifications';
 import { ActiveJobsError, deleteMyAccount, RecentLoginRequiredError } from './services/account';
+import { checkAdminRole } from './services/admin';
+import { forgetCachedNames } from './services/profile';
 import { generateRequestId } from './services/ids';
 import { localRepository } from './services/localRepository';
 import {
@@ -128,6 +133,23 @@ export default function App() {
     setPhoneLogin(reason);
   };
 
+  // The operator's panel: offered in the account menu to accounts with the admin claim
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
+  useEffect(() => {
+    if (!phoneNumber) {
+      setIsAdmin(false);
+      return;
+    }
+    let cancelled = false;
+    checkAdminRole()
+      .then((admin) => !cancelled && setIsAdmin(admin))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [phoneNumber, authUid]);
+
   // A shared master profile link (?master=<id>): after a phone login, show that master's profile
   const [sharedMaster, setSharedMaster] = useState<Provider | null>(null);
   useEffect(() => {
@@ -165,6 +187,7 @@ export default function App() {
   const handleDeleteAccount = async (): Promise<void> => {
     try {
       await deleteMyAccount();
+      forgetCachedNames();
       // Start over as a new anonymous visitor
       window.location.replace('/');
     } catch (err) {
@@ -362,9 +385,13 @@ export default function App() {
         if (typeof aiData.confidence === 'number' && aiData.confidence > need.confidence!) {
           need.confidence = aiData.confidence;
         }
+      } else if (aiResponse.error && !['EMPTY_INPUT', 'INPUT_TOO_LONG', 'FIREBASE_NOT_CONFIGURED'].includes(aiResponse.error.code)) {
+        // Gemini didn't answer: the summary screen asks the customer to check the fields
+        need.aiError = aiResponse.error.code;
       }
     } catch (err) {
       console.warn('[App] Cloud AI parser note (using local understanding):', err);
+      need.aiError = 'UNKNOWN_ERROR';
     } finally {
       setExtractedNeed(need);
       setIsAnalyzing(false);
@@ -375,6 +402,9 @@ export default function App() {
 
   // Continue from interpretation: creates request in repository with customerId
   const submittingRequestRef = useRef(false);
+  // One id per submission: sending the same request again after an error reuses it, so a request
+  // that was stored before the error is returned instead of created twice (createRequest)
+  const draftRequestRef = useRef<{ key: string; id: string } | null>(null);
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
 
   const handleContinue = async (updatedNeed: ExtractedNeed) => {
@@ -398,17 +428,28 @@ export default function App() {
 
     try {
       const rawText = (updatedNeed.originalQuery || updatedNeed.service || '').trim();
-      // Pilot: requests are only created for an open city (Kyzylorda); anything else falls back to it
+      // Pilot: requests are only created for an open city (Kyzylorda). The confirmation screen already
+      // switches a closed city to Kyzylorda with a visible note; a closed city arriving here is refused
+      // with a clear message instead of being sent to another city's masters without the customer knowing
       const pilotCity = language === 'kz' ? 'Қызылорда' : 'Кызылорда';
-      const askedCity = updatedNeed.city?.trim() || pilotCity;
-      const city = isCityOpen(updatedNeed.cityId || askedCity) ? askedCity : pilotCity;
+      const city = updatedNeed.city?.trim() || pilotCity;
+      if (!isCityOpen(updatedNeed.cityId || city)) {
+        setAppError(
+          language === 'kz'
+            ? 'Tapsyr әзірге тек Қызылордада жұмыс істейді. Қаланы Қызылорда деп таңдаңыз.'
+            : 'Tapsyr пока работает только в Кызылорде. Выберите город Кызылорда.'
+        );
+        return;
+      }
       const cityId = isCityOpen(updatedNeed.cityId) ? updatedNeed.cityId! : normalizeCityId(city);
       const category = updatedNeed.category?.trim() || (language === 'kz' ? 'Тұрмыстық техника жөндеу' : 'Ремонт бытовой техники');
       const categoryId = updatedNeed.categoryId || normalizeCategoryId(category);
       const service = (updatedNeed.service || rawText || category).trim();
       const text = rawText || service;
 
-      const targetRequestId = generateRequestId();
+      const draftKey = JSON.stringify([currentUserId, text, service, cityId, categoryId, updatedNeed.date, updatedNeed.budget, updatedNeed.pendingAttachments?.length || 0]);
+      if (draftRequestRef.current?.key !== draftKey) draftRequestRef.current = { key: draftKey, id: generateRequestId() };
+      const targetRequestId = draftRequestRef.current.id;
 
       // Create the request first: storage only accepts files for a request that already exists
       // and belongs to the uploader, so nobody can claim someone else's request folder.
@@ -457,16 +498,23 @@ export default function App() {
         }
 
         if (uploadedAttachments.length > 0) {
-          try {
-            const withFiles = await repository.updateRequest(newReq.id, { attachments: uploadedAttachments });
-            if (withFiles) newReq = withFiles;
-          } catch (attachErr) {
-            console.warn('[App] attaching uploaded files to request failed:', attachErr);
-            failedUploads += uploadedAttachments.length;
+          // Listing the files on the request is tried twice (a short network drop shouldn't leave
+          // uploaded files that nobody sees); the server removes unlisted files with the account
+          let attached = false;
+          for (let attempt = 0; attempt < 2 && !attached; attempt++) {
+            try {
+              const withFiles = await repository.updateRequest(newReq.id, { attachments: uploadedAttachments });
+              if (withFiles) newReq = withFiles;
+              attached = true;
+            } catch (attachErr) {
+              console.warn('[App] attaching uploaded files to request failed:', attachErr);
+            }
           }
+          if (!attached) failedUploads += uploadedAttachments.length;
         }
       }
 
+      draftRequestRef.current = null;
       setActiveRequest(newReq);
       await refreshData();
 
@@ -488,8 +536,27 @@ export default function App() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      await logoutToAnonymous();
+      forgetCachedNames();
+      setAppMode('customer');
+      setActiveTab('home');
+      setCurrentScreen('home');
+      setActiveRequest(null);
+      setExtractedNeed(null);
+      window.scrollTo({ top: 0 });
+    } catch (err) {
+      setAppError(getFriendlyErrorMessage(err, language));
+    }
+  };
+
   // Back actions
   const handleBack = () => {
+    if (appMode === 'provider' && activeTab === 'profile') {
+      setActiveTab('provider-mode');
+      return;
+    }
     if (appMode === 'provider') {
       // Provider side: "back" returns to the new-requests list
       if (providerTab !== 'new') setProviderTab('new');
@@ -512,7 +579,10 @@ export default function App() {
   // Phone/browser back button: while the user is away from the start screen, keep one history
   // entry so "back" steps back inside the app instead of leaving it.
   const isAtRoot =
-    !appMode || (appMode === 'provider' ? providerTab === 'new' : activeTab === 'home' && currentScreen === 'home');
+    !appMode ||
+    (appMode === 'provider'
+      ? activeTab === 'provider-mode' && providerTab === 'new'
+      : activeTab === 'home' && currentScreen === 'home');
   const handleBackRef = useRef(handleBack);
   handleBackRef.current = handleBack;
 
@@ -537,7 +607,7 @@ export default function App() {
 
   // Keep the visible tab consistent with the chosen side of the app
   useEffect(() => {
-    if (appMode === 'provider' && activeTab !== 'provider-mode') setActiveTab('provider-mode');
+    if (appMode === 'provider' && activeTab !== 'provider-mode' && activeTab !== 'profile') setActiveTab('provider-mode');
     if (appMode === 'customer' && activeTab === 'provider-mode') setActiveTab('home');
   }, [appMode, activeTab]);
 
@@ -571,6 +641,38 @@ export default function App() {
     setCurrentScreen('interpretation');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // "Repeat this request": a new request filled in from an old one, checked on the summary screen first
+  const handleRepeatRequest = (req: ServiceRequest) => {
+    setActiveRequest(null);
+    setExtractedNeed({
+      city: req.city,
+      ...(req.cityId ? { cityId: req.cityId } : {}),
+      category: req.category,
+      ...(req.categoryId ? { categoryId: req.categoryId } : {}),
+      ...(req.serviceId ? { serviceId: req.serviceId } : {}),
+      service: req.service,
+      description: req.requestText || req.description,
+      date: req.date,
+      budget: req.budget,
+      urgency: req.urgency,
+      originalQuery: req.requestText || req.service,
+      confidence: 1,
+    });
+    setActiveTab('home');
+    setCurrentScreen('interpretation');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // A reminder on the home screen when an open request is about to stop taking offers
+  const expiringRequest = customerRequests.find(
+    (r) =>
+      normalizeRequestStatus(r.status) === 'OPEN' &&
+      !r.selectedOfferId &&
+      typeof r.expiresAtMs === 'number' &&
+      r.expiresAtMs > Date.now() &&
+      r.expiresAtMs - Date.now() < 12 * 3600000
+  );
 
   // Switch tabs
   // Provider side: needs a verified phone number first
@@ -670,8 +772,8 @@ export default function App() {
           }
         }
         await auth?.authStateReady?.();
-        if (saved.activeTab === 'my-requests') {
-          setActiveTab('my-requests');
+        if (saved.activeTab === 'my-requests' || saved.activeTab === 'profile') {
+          setActiveTab(saved.activeTab);
         } else if (saved.activeTab === 'provider-mode') {
           if (!requiresPhoneLogin()) setActiveTab('provider-mode');
         } else if (saved.currentScreen === 'results' && saved.requestId) {
@@ -747,9 +849,9 @@ export default function App() {
   }, [authUid, language]);
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-start sm:py-4">
+    <div className="min-h-dvh bg-slate-100 flex flex-col items-center justify-start sm:py-4">
       {/* Mobile Shell Container */}
-      <div className="w-full max-w-md bg-white sm:rounded-3xl sm:shadow-xl sm:border sm:border-slate-200/80 min-h-screen sm:min-h-[780px] flex flex-col justify-between overflow-clip relative">
+      <div className="w-full max-w-md bg-white sm:rounded-3xl sm:shadow-xl sm:border sm:border-slate-200/80 min-h-dvh sm:min-h-[780px] flex flex-col justify-between overflow-clip relative">
         {/* Unconfigured Firebase Local Mode Banner */}
         {!isFirebaseConfigured() && (
           <div className="sticky top-0 z-50 w-full bg-amber-500 text-slate-950 font-bold text-xs py-1.5 px-4 text-center shadow-xs">
@@ -765,7 +867,7 @@ export default function App() {
             !appMode
               ? 'home'
               : appMode === 'provider'
-              ? providerTab === 'new'
+              ? providerTab === 'new' && activeTab !== 'profile'
                 ? 'home'
                 : 'results'
               : activeTab !== 'home'
@@ -784,19 +886,7 @@ export default function App() {
           showAccount={isFirebaseConfigured()}
           phoneNumber={phoneNumber}
           onLoginClick={() => setPhoneLogin('header')}
-          onLogout={async () => {
-            try {
-              await logoutToAnonymous();
-              setAppMode('customer');
-              setActiveTab('home');
-              setCurrentScreen('home');
-              setActiveRequest(null);
-              setExtractedNeed(null);
-            } catch (err) {
-              setAppError(getFriendlyErrorMessage(err, language));
-            }
-          }}
-          onDeleteAccount={handleDeleteAccount}
+          onOpenProfile={() => handleTabChange('profile')}
         />
 
         <PhoneLoginModal
@@ -813,9 +903,17 @@ export default function App() {
             setPhoneLogin(null);
             setPhoneNumber(auth?.currentUser?.phoneNumber || null);
             setAuthUid(auth?.currentUser?.uid || null);
+            // A fresh login checks the operator role right away
+            checkAdminRole(true).then(setIsAdmin).catch(() => {});
             if (next) next();
           }}
         />
+
+        {adminOpen && isAdmin && (
+          <Suspense fallback={null}>
+            <AdminScreen language={language} onClose={() => setAdminOpen(false)} />
+          </Suspense>
+        )}
 
         {sharedMaster && (
           <Suspense fallback={null}>
@@ -903,6 +1001,20 @@ export default function App() {
           )}
           {appMode && !restoringNav && activeTab === 'home' && (
             <>
+              {currentScreen === 'home' && appMode === 'customer' && expiringRequest && (
+                <button
+                  type="button"
+                  onClick={() => handleSelectRequestFromHistory(expiringRequest)}
+                  className="mx-4 mt-3 p-3 rounded-2xl bg-amber-50 border border-amber-200 flex items-center gap-3 text-left"
+                >
+                  <span className="text-lg" aria-hidden="true">⏳</span>
+                  <span className="flex-1 text-xs text-amber-900 leading-snug">
+                    {language === 'kz'
+                      ? `«${expiringRequest.service}» өтінімінің мерзімі ${Math.max(1, Math.ceil(((expiringRequest.expiresAtMs || 0) - Date.now()) / 3600000))} сағаттан кейін бітеді. Ашып, ұзартыңыз.`
+                      : `Срок заявки «${expiringRequest.service}» истекает через ${Math.max(1, Math.ceil(((expiringRequest.expiresAtMs || 0) - Date.now()) / 3600000))} ч. Откройте и продлите.`}
+                  </span>
+                </button>
+              )}
               {currentScreen === 'home' && (
                 <HomeScreen
                   language={language}
@@ -931,6 +1043,7 @@ export default function App() {
                   language={language}
                   onNewSearch={handleNewSearch}
                   onEditSearch={handleEditSearch}
+                  onRepeatRequest={handleRepeatRequest}
                 />
               )}
             </>
@@ -943,6 +1056,31 @@ export default function App() {
               language={language}
               onSelectRequest={handleSelectRequestFromHistory}
               onCreateNewRequest={handleNewSearch}
+            />
+          )}
+
+          {appMode && activeTab === 'profile' && (
+            <ProfileScreen
+              language={language}
+              onLanguageChange={setLanguage}
+              mode={appMode}
+              uid={authUid || getCurrentUserId()}
+              phoneNumber={phoneNumber}
+              cloud={isFirebaseConfigured()}
+              isAdmin={isAdmin}
+              requests={customerRequests}
+              onLogin={() => setPhoneLogin('header')}
+              onLogout={handleLogout}
+              onDeleteAccount={handleDeleteAccount}
+              onSwitchMode={appMode === 'provider' ? enterCustomerMode : enterProviderMode}
+              onOpenRequests={() => handleTabChange('my-requests')}
+              onOpenAdmin={() => setAdminOpen(true)}
+              onOpenMaster={(prov) => setSharedMaster(prov)}
+              onOpenMasterSettings={() => {
+                setProviderTab('new');
+                setActiveTab('provider-mode');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
             />
           )}
 
@@ -973,6 +1111,7 @@ export default function App() {
             onTabChange={handleTabChange}
             onProviderTabChange={(tab) => {
               setProviderTab(tab);
+              setActiveTab('provider-mode');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             onSwitchMode={appMode === 'provider' ? enterCustomerMode : enterProviderMode}

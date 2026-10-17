@@ -16,6 +16,7 @@ import {
   paymentMethodLabel,
   Provider,
   ProviderOffer,
+  RatingSummary,
   RequestStatus,
   Review,
   ServiceRequest,
@@ -29,27 +30,12 @@ import { getCityDisplayName } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { toIntlDigits, toTelHref, toWhatsAppHref } from '../services/phoneLinks';
 import { ReviewModal } from './ReviewModal';
-import { Emoji3D } from './CategoryIcon';
+import { Emoji3D, Photo } from './CategoryIcon';
 import { RequestIcon, requestVisual } from './RequestIcon';
 import { ChatScreen } from './ChatScreen';
 import { AppointmentSection } from './AppointmentSection';
 import { formatTenge, getPriceRange, PriceRange } from '../services/publicStats';
-import {
-  Clock,
-  MapPin,
-  Phone,
-  MessageCircle,
-  MessageSquare,
-  RotateCcw,
-  X,
-  CheckCircle,
-  UserCheck,
-  Calendar,
-  Wallet,
-  XCircle,
-  Inbox,
-  Star,
-} from 'lucide-react';
+import { Calendar, CheckCircle, Clock, Inbox, MapPin, MessageCircle, MessageSquare, Phone, RotateCcw, ShieldCheck, Star, UserCheck, Wallet, X, XCircle } from 'lucide-react';
 
 interface ResultScreenProps {
   need: ExtractedNeed;
@@ -57,6 +43,8 @@ interface ResultScreenProps {
   language: Language;
   onNewSearch: () => void;
   onEditSearch: () => void;
+  /** Starts a new request filled in from this one ("repeat") */
+  onRepeatRequest?: (request: ServiceRequest) => void;
 }
 
 
@@ -64,6 +52,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   request: initialRequest,
   language,
   onNewSearch,
+  onRepeatRequest,
 }) => {
   const t = translations[language];
 
@@ -183,7 +172,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
   }, [initialRequest, language, refreshTick]);
 
   // Average rating per provider from real reviews (shown on offer cards)
-  const [providerRatings, setProviderRatings] = useState<Record<string, { avg: number; count: number }>>({});
+  const [providerRatings, setProviderRatings] = useState<Record<string, RatingSummary>>({});
   useEffect(() => {
     const ids = Array.from(new Set(offers.map((o) => o.providerUserId || o.providerId).filter(Boolean))) as string[];
     const missing = ids.filter((id) => !(id in providerRatings));
@@ -537,8 +526,8 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
               <span className="absolute inset-0 rounded-full bg-sky-300/40 animate-radar" />
               <span className="absolute inset-0 rounded-full bg-sky-300/40 animate-radar" style={{ animationDelay: '0.8s' }} />
               <span className="absolute inset-0 rounded-full bg-sky-300/40 animate-radar" style={{ animationDelay: '1.6s' }} />
-              <span className="relative w-24 h-24 rounded-full bg-white shadow-lg shadow-sky-200 flex items-center justify-center">
-                <Emoji3D code={requestVisual(request).emoji} size={60} eager className="animate-float" />
+              <span className="relative w-24 h-24 rounded-full bg-white p-1 shadow-lg shadow-sky-200 flex items-center justify-center">
+                {requestVisual(request).photo ? <Photo name={requestVisual(request).photo!} eager className="w-full h-full rounded-full" /> : <Emoji3D code={requestVisual(request).emoji} size={60} eager className="animate-float" />}
               </span>
             </div>
             <h3 className="mt-3 text-lg font-bold text-slate-900">
@@ -564,7 +553,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
 
         {/* Phone number privacy */}
         <div className="flex items-start gap-2.5 px-1 text-xs text-slate-600">
-          <Emoji3D code="1f6e1-fe0f" size={22} />
+          <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
           <p className="leading-relaxed">{t.phoneMaskingGuarantee}</p>
         </div>
 
@@ -629,8 +618,20 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                           «{existingReview.comment}»
                         </p>
                       )}
-                      <span className="text-[10px] text-emerald-700 font-semibold block">
-                        {t.thankYouNotice}
+                      <span
+                        className={`text-[10px] font-semibold block ${
+                          existingReview.moderation === 'rejected'
+                            ? 'text-rose-700'
+                            : existingReview.moderation === 'pending'
+                            ? 'text-amber-700'
+                            : 'text-emerald-700'
+                        }`}
+                      >
+                        {existingReview.moderation === 'rejected'
+                          ? t.reviewRejectedNotice
+                          : existingReview.moderation === 'pending'
+                          ? t.reviewPendingNotice
+                          : t.thankYouNotice}
                       </span>
                     </div>
                   ) : isSelfProvider ? (
@@ -646,7 +647,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                     <button
                       type="button"
                       onClick={handleOpenRating}
-                      className="w-full min-h-[46px] rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.99] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                      className="w-full min-h-[46px] rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.99] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
                     >
                       <Star className="w-4 h-4 fill-white text-white" />
                       <span>{t.rateProviderBtn}</span>
@@ -663,12 +664,24 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
               <button
                 type="button"
                 onClick={() => setIsChatOpen(true)}
-                className="w-full min-h-[46px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                className="w-full min-h-[46px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition cursor-pointer"
               >
                 <MessageSquare className="w-4 h-4" />
                 <span>{t.chatWithProviderBtn}</span>
               </button>
 
+              {/* Whether the number is the master's own login number or just typed in the offer */}
+              {!selectedOffer.isDemo && selectedOffer.providerPhone && (
+                <p className={`text-[11px] leading-snug ${selectedOffer.providerPhoneVerified ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  {selectedOffer.providerPhoneVerified
+                    ? language === 'kz'
+                      ? '✓ Нөмір шебердің WhatsApp кодымен расталған нөмірі'
+                      : '✓ Номер подтверждён кодом WhatsApp при входе мастера'
+                    : language === 'kz'
+                      ? 'Бұл нөмірді шебер өзі жазған, ол расталмаған'
+                      : 'Этот номер мастер указал сам, он не подтверждён'}
+                </p>
+              )}
               {/* Call & WhatsApp: real providers get working tel:/wa.me links; demo offers keep the demo notice */}
               <div className="grid grid-cols-2 gap-2 pt-1">
                 {!selectedOffer.isDemo && toTelHref(selectedOffer.providerPhone) ? (
@@ -790,7 +803,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                       type="button"
                       disabled={isSubmittingCompletion}
                       onClick={handleCompleteWorkClick}
-                      className="flex-1 min-h-[42px] px-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 active:scale-[0.99] text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="flex-1 min-h-[42px] px-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 active:scale-[0.99] text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <CheckCircle className="w-4 h-4" />
                       <span>{t.btnCompleteWork}</span>
@@ -863,6 +876,23 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 ? `${MAX_OFFERS_PER_REQUEST} ұсыныс түсті, жаңалары қабылданбайды. Ең ыңғайлысын таңдаңыз.`
                 : `Получено ${MAX_OFFERS_PER_REQUEST} предложений, новые не принимаются. Выберите подходящее.`}
             </div>
+          ) : typeof request.expiresAtMs === 'number' && request.expiresAtMs - Date.now() < 12 * 3600000 ? (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-center gap-3">
+              <span className="text-lg" aria-hidden="true">⏳</span>
+              <span className="flex-1 text-xs text-amber-900 leading-snug">
+                {language === 'kz'
+                  ? `Өтінімнің мерзімі ${Math.max(1, Math.ceil((request.expiresAtMs - Date.now()) / 3600000))} сағаттан кейін бітеді.`
+                  : `Срок заявки истекает через ${Math.max(1, Math.ceil((request.expiresAtMs - Date.now()) / 3600000))} ч.`}
+              </span>
+              <button
+                type="button"
+                onClick={handleRenew}
+                disabled={renewing}
+                className="shrink-0 h-9 px-3 rounded-xl bg-amber-500 text-white text-xs font-bold disabled:opacity-60"
+              >
+                {language === 'kz' ? 'Ұзарту' : 'Продлить'}
+              </button>
+            </div>
           ) : typeof request.expiresAtMs === 'number' ? (
             <p className="text-[11px] text-slate-500 px-1">
               {(() => {
@@ -918,7 +948,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 return (
                   <div
                     key={offer.id}
-                    className={`bg-white rounded-2xl border p-4 transition-all ${
+                    className={`bg-white rounded-2xl border p-4 transition ${
                       isSelected
                         ? 'border-2 border-emerald-500 shadow-sm bg-emerald-50/20'
                         : isRejected
@@ -968,7 +998,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                               <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
                               <span className="font-bold">{r.avg.toFixed(1)}</span>
                               <span className="text-slate-500">
-                                ({r.count} {language === 'kz' ? 'пікір' : 'отзыв.'})
+                                ({r.reviews ?? r.count} {language === 'kz' ? 'пікір' : 'отзыв.'})
                               </span>
                               {isTopMaster(r) && (
                                 <span className="ml-1 text-[10px] font-bold text-amber-900 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded-full">
@@ -1048,7 +1078,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                           <button
                             type="button"
                             onClick={() => handleAcceptOffer(offer)}
-                            className="min-h-[44px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all"
+                            className="min-h-[44px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.99] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition"
                           >
                             <UserCheck className="w-4 h-4" />
                             <span>{language === 'kz' ? 'Қабылдау' : 'Принять'}</span>
@@ -1057,7 +1087,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                           <button
                             type="button"
                             onClick={() => handleRejectOffer(offer)}
-                            className="min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all"
+                            className="min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-[0.99] text-slate-700 font-semibold text-xs flex items-center justify-center gap-1.5 transition"
                           >
                             <XCircle className="w-4 h-4 text-slate-400" />
                             <span>{language === 'kz' ? 'Бас тарту' : 'Отклонить'}</span>
@@ -1077,12 +1107,22 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
 
       </div>
 
-      {/* Bottom Action: New Request */}
-      <div className="pt-4 pb-2">
+      {/* Bottom Action: New Request (or the same one again) */}
+      <div className="pt-4 pb-2 space-y-2">
+        {request && onRepeatRequest && (reqStatus === 'COMPLETED' || reqStatus === 'CANCELLED' || (reqStatus === 'OPEN' && isRequestExpired(request))) && (
+          <button
+            type="button"
+            onClick={() => onRepeatRequest(request)}
+            className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-xs active:scale-[0.99] transition"
+          >
+            <RotateCcw className="w-4 h-4" />
+            <span>{language === 'kz' ? 'Осы өтінімді қайталау' : 'Повторить эту заявку'}</span>
+          </button>
+        )}
         <button
           type="button"
           onClick={onNewSearch}
-          className="w-full min-h-[48px] rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-bold text-sm flex items-center justify-center gap-2 shadow-xs active:scale-[0.99] transition-all"
+          className="w-full min-h-[48px] rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 font-bold text-sm flex items-center justify-center gap-2 shadow-xs active:scale-[0.99] transition"
         >
           <RotateCcw className="w-4 h-4 text-sky-600" />
           <span>{t.newSearchButton}</span>
@@ -1187,7 +1227,7 @@ export const ResultScreen: React.FC<ResultScreenProps> = ({
                 type="button"
                 disabled={isSubmittingCompletion}
                 onClick={handleConfirmCompleteWork}
-                className="flex-1 min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 active:scale-[0.99] text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="flex-1 min-h-[44px] rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 active:scale-[0.99] text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 cursor-pointer"
               >
                 {isSubmittingCompletion ? (
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />

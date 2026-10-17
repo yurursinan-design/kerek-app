@@ -2,7 +2,8 @@
  * Verification Test Suite: Customer Completion Security & Audit
  * Tests:
  * 1. Owner customer can complete request in valid state (PROVIDER_SELECTED / IN_PROGRESS)
- * 2. Another customer cannot complete request (ownership check)
+ * 2. Another customer cannot complete request: a direct write as that customer, refused by the
+ *    Firestore security rules (emulator); the other scenarios use the device-mode repository
  * 3. Mismatched appointment belonging to another customer cannot be updated
  * 4. Mismatched appointment belonging to another request cannot be updated
  * 5. Completion without appointment succeeds cleanly
@@ -11,7 +12,10 @@
  * 8. Completion process does NOT write 'released' to any paymentStatus field
  */
 
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../src/services/firebase';
 import { localRepository } from '../src/services/localRepository';
+import { actAs } from './helpers/actors';
 
 async function runAuditTests() {
   console.log('====================================================');
@@ -58,31 +62,60 @@ async function runAuditTests() {
   );
 
   // -----------------------------------------------------------------
-  // SCENARIO 2: Another customer cannot complete another customer's request
+  // SCENARIO 2: Another customer cannot complete another customer's request.
+  // Tried for real against the Firestore emulator and its security rules: customer B writes the
+  // completion straight to the database (no app checks in between) and is refused, while the same
+  // write by the owner goes through, so the refusal is about who writes, not a malformed write.
   // -----------------------------------------------------------------
-  const req2Id = `REQ_AUDIT_2_${timestamp}`;
-  await localRepository.createRequest({
-    id: req2Id,
-    customerId: customerA,
-    city: 'Almaty',
-    cityId: 'almaty',
-    category: 'Home Services',
-    categoryId: 'home_services',
-    service: 'Electrician',
-    status: 'IN_PROGRESS',
-  });
+  {
+    const { createRequire } = await import('node:module');
+    const requireFromFunctions = createRequire(new URL('../functions/package.json', import.meta.url));
+    const adminApp = requireFromFunctions('firebase-admin/app');
+    if (!adminApp.getApps().length) adminApp.initializeApp({ projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'demo-kerek' });
+    const adminDb = requireFromFunctions('firebase-admin/firestore').getFirestore();
 
-  // Verify that an unauthorized caller ID is rejected
-  let scenario2Rejected = false;
-  // If simulated with mismatch:
-  const fetchedReq2 = await localRepository.getRequest(req2Id);
-  if (fetchedReq2 && fetchedReq2.customerId !== customerB) {
-    scenario2Rejected = true;
+    const ownerUid = await actAs('completion-owner');
+    const strangerUid = await actAs('completion-stranger');
+    const reqId = `REQ_AUDIT_2_${timestamp}`;
+    const offerId = `OFFER-${reqId}-${providerUid}`;
+    const now = new Date().toISOString();
+    await adminDb.doc(`requests/${reqId}`).set({
+      id: reqId, customerId: ownerUid, cityId: 'kyzylorda', city: 'Кызылорда', categoryId: 'plumbing', category: 'Сантехника',
+      service: 'Сантехник', status: 'IN_PROGRESS', selectedOfferId: offerId, createdAt: now, updatedAt: now,
+    });
+    await adminDb.doc(`offers/${offerId}`).set({
+      id: offerId, requestId: reqId, customerId: ownerUid, providerId: providerUid, providerUserId: providerUid, status: 'ACCEPTED', createdAt: now,
+    });
+    const completion = () => updateDoc(doc(db!, 'requests', reqId), { status: 'COMPLETED', updatedAt: new Date().toISOString() });
+
+    await actAs('completion-stranger');
+    let strangerError = '';
+    try {
+      await completion();
+    } catch (err: any) {
+      strangerError = String(err?.code || err?.message);
+    }
+    const afterStranger = (await adminDb.doc(`requests/${reqId}`).get()).data();
+    assert(
+      strangerUid !== ownerUid && strangerError === 'permission-denied' && afterStranger?.status === 'IN_PROGRESS',
+      'SCENARIO 2: Another customer writing the completion directly is refused by the security rules; the request stays IN_PROGRESS',
+      strangerError || 'the write went through'
+    );
+
+    await actAs('completion-owner');
+    let ownerError = '';
+    try {
+      await completion();
+    } catch (err: any) {
+      ownerError = String(err?.code || err?.message);
+    }
+    const afterOwner = (await adminDb.doc(`requests/${reqId}`).get()).data();
+    assert(
+      !ownerError && afterOwner?.status === 'COMPLETED',
+      'SCENARIO 2: The same write by the request owner is accepted (control)',
+      ownerError
+    );
   }
-  assert(
-    scenario2Rejected && fetchedReq2?.customerId === customerA,
-    'SCENARIO 2: Request customerId belongs strictly to customerA; customerB is unauthorized'
-  );
 
   // -----------------------------------------------------------------
   // SCENARIO 3: Mismatched appointment belonging to another customer cannot be updated

@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import { countedSet } from './helpers/counted';
 import { db, auth, ensureFirebaseAuth, createSecondaryFirebaseApp, attachEmulatorTestPhone } from '../src/services/firebase';
 import { deleteApp } from 'firebase/app';
 import { signInAnonymously } from 'firebase/auth';
@@ -101,10 +102,9 @@ async function runMessagingSecurityTests() {
   const msgRef = doc(db!, 'conversations', testConvId, 'messages', testMsgId);
 
   // Customer creates request
-  await setDoc(reqRef, {
+  await countedSet(reqRef, {
     id: testReqId,
     customerId: customerUid,
-    customerName: 'Test Müşteri',
     city: 'Қызылорда',
     cityId: 'kyzylorda',
     category: 'Тұрмыстық техника жөндеу',
@@ -155,7 +155,7 @@ async function runMessagingSecurityTests() {
   // -------------------------------------------------------------------------
   console.log('\n--- SCENARIO 3: Authorized Customer Sends Message ---');
   try {
-    await setDoc(msgRef, {
+    await countedSet(msgRef, {
       id: testMsgId,
       conversationId: testConvId,
       requestId: testReqId,
@@ -229,7 +229,7 @@ async function runMessagingSecurityTests() {
   console.log('\n--- SCENARIO 8: Unauthorized User Attempts to Send Message ---');
   try {
     const unauthMsgId = `unauth_msg_${Date.now()}`;
-    await setDoc(doc(unrelatedDb, 'conversations', testConvId, 'messages', unauthMsgId), {
+    await countedSet(doc(unrelatedDb, 'conversations', testConvId, 'messages', unauthMsgId), {
       id: unauthMsgId,
       conversationId: testConvId,
       requestId: testReqId,

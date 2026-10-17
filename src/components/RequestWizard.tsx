@@ -1,9 +1,10 @@
 import React, { useRef, useState } from 'react';
-import { ArrowLeft, Camera, Check, ChevronRight, Loader2, X } from 'lucide-react';
+import { ArrowLeft, BadgeCheck, CalendarDays, Camera, Check, ChevronRight, ClipboardCheck, Clock, FilePenLine, Handshake, Loader2, MapPin, ScrollText, Siren, Sun, Sunrise, Wallet, X } from 'lucide-react';
 import { ExtractedNeed, Language, PendingAttachment, RequestLocation, Urgency, sanitizeFileName, validateRequestAttachment } from '../types';
 import { CatalogGroup, CatalogService, groupName, serviceName } from '../data/serviceCatalog';
 import { CANONICAL_CITIES, PILOT_CITY_ID, isCityOpen } from '../services/taxonomy';
-import { CategoryIcon, Emoji3D, tone } from './CategoryIcon';
+import { servicePhoto } from '../data/photos';
+import { CategoryIcon, Emoji3D, Photo, tone } from './CategoryIcon';
 
 interface RequestWizardProps {
   language: Language;
@@ -86,7 +87,22 @@ const PART_OF_DAY: { id: string; kz: string; ru: string }[] = [
 ];
 
 /** 3D icon shown next to each step's title */
-const STEP_EMOJI = ['1f4dd', '23f0', '1f3d9-fe0f', '1f4b0', '1f4cb'];
+const STEP_ICON = [FilePenLine, Clock, MapPin, Wallet, ClipboardCheck];
+const WHEN_ICON: Record<string, typeof Clock> = { urgent: Siren, today: Sun, tomorrow: Sunrise, week: CalendarDays, flexible: Handshake };
+
+const StepIcon: React.FC<{ step: number }> = ({ step }) => {
+  const Icon = STEP_ICON[step] || FilePenLine;
+  return (
+    <span className="w-14 h-14 rounded-2xl bg-sky-50 text-sky-700 flex items-center justify-center shrink-0 animate-popIn">
+      <Icon className="w-6 h-6" />
+    </span>
+  );
+};
+
+const WhenIcon: React.FC<{ id: string }> = ({ id }) => {
+  const Icon = WHEN_ICON[id] || Clock;
+  return <Icon className={`w-5 h-5 shrink-0 ${id === 'urgent' ? 'text-rose-500' : 'text-slate-500'}`} />;
+};
 
 const BUDGET_OPTIONS: { id: string; kz: string; ru: string }[] = [
   { id: 'negotiable', kz: 'Келісімді', ru: 'Договорная' },
@@ -204,7 +220,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
 
   const tick = (selected: boolean) => (
     <span
-      className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition-all ${
+      className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 transition ${
         selected ? 'bg-sky-600 scale-100' : 'border-2 border-slate-200 scale-90'
       }`}
     >
@@ -214,9 +230,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
 
   const heading = (title: string, hint?: string) => (
     <div className="flex items-center gap-3.5">
-      <span className="w-16 h-16 rounded-3xl bg-linear-to-br from-sky-50 to-indigo-100 flex items-center justify-center shrink-0">
-        <Emoji3D code={STEP_EMOJI[step]} size={44} eager className="animate-popIn" />
-      </span>
+      <StepIcon step={step} />
       <div className="min-w-0">
         <h2 className="text-[22px] leading-tight font-bold text-slate-900 font-display">{title}</h2>
         {hint && <p className="mt-1 text-[13px] text-slate-500 leading-snug">{hint}</p>}
@@ -239,7 +253,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
           <ArrowLeft className="w-5 h-5 text-slate-700" />
         </button>
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          <CategoryIcon emoji={service.emoji} color={group.color} size="sm" eager />
+          <CategoryIcon emoji={service.emoji} color={group.color} photo={servicePhoto(service.id, group.id)} size="sm" eager />
           <div className="min-w-0">
             <div className="text-sm font-bold text-slate-900 truncate">{svcName}</div>
             <div className="text-[11px] font-semibold text-slate-500">
@@ -255,7 +269,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
         {Array.from({ length: STEPS }, (_, i) => (
           <span key={i} className="h-1.5 flex-1 rounded-full bg-slate-100 overflow-hidden">
             <span
-              className="block h-full rounded-full bg-linear-to-r from-sky-500 to-indigo-500 transition-all duration-500 ease-out"
+              className="block h-full rounded-full bg-linear-to-r from-sky-500 to-indigo-500 transition-[width] duration-300 ease-out"
               style={{ width: i <= step ? '100%' : '0%' }}
             />
           </span>
@@ -335,7 +349,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
               {WHEN_OPTIONS.map((w, i) => (
                 <button key={w.id} type="button" onClick={() => setWhen(w.id)} className={chip(when === w.id)} style={{ ['--i' as string]: i }}>
                   <span className="flex items-center gap-3">
-                    <Emoji3D code={w.emoji} size={30} eager />
+                    <WhenIcon id={w.id} />
                     <span className="flex-1">{tx(w)}</span>
                     {tick(when === w.id)}
                   </span>
@@ -402,7 +416,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
                 location ? 'border-emerald-400 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'
               }`}
             >
-              <Emoji3D code="1f4cd" size={30} eager />
+              <MapPin className="w-6 h-6 text-rose-500 shrink-0" />
               <span className="flex-1">{location ? tx(T.locationAdded) : tx(T.location)}</span>
               {locating ? <Loader2 className="w-5 h-5 animate-spin text-slate-400" /> : location ? <Check className="w-5 h-5 text-emerald-600" strokeWidth={3} /> : null}
             </button>
@@ -452,7 +466,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
             {heading(tx(T.reviewTitle))}
             <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-sm shadow-slate-200/60">
               <div className={`flex items-center gap-3 p-4 bg-linear-to-br ${tone(group.color).tile}`}>
-                <Emoji3D code={service.emoji} size={52} eager />
+                {servicePhoto(service.id, group.id) ? <Photo name={servicePhoto(service.id, group.id)!} eager className="w-14 h-14 rounded-2xl shrink-0" /> : <Emoji3D code={service.emoji} size={52} eager />}
                 <div className="min-w-0 flex-1">
                   <div className="text-base font-bold text-slate-900 leading-tight">{svcName}</div>
                   <div className={`text-xs font-semibold ${tone(group.color).text}`}>{groupName(group, lang)}</div>
@@ -482,12 +496,12 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
               </div>
             </div>
             <div className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-emerald-50 border border-emerald-100">
-              <Emoji3D code="2728" size={22} eager />
+              <BadgeCheck className="w-5 h-5 text-emerald-600 shrink-0" />
               <p className="text-xs text-emerald-900 leading-relaxed">{tx(T.freeNote)}</p>
             </div>
             {group.licensed && (
               <div className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-amber-50 border border-amber-200">
-                <Emoji3D code="1f4dc" size={22} eager />
+                <ScrollText className="w-5 h-5 text-amber-600 shrink-0" />
                 <p className="text-xs text-amber-900 leading-relaxed">{tx(T.licenseNote)}</p>
               </div>
             )}

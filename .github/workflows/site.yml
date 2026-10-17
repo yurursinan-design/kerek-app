@@ -1,0 +1,77 @@
+# Opens a second web address for the app (Firebase Hosting site <id>.web.app) and gets the project
+# ready for it. Runs only for a commit on a claude/** branch whose message starts with "[site] ":
+#   - takes the first free name of SITE_IDS (site names are shared by all Firebase projects)
+#   - adds <id>.web.app and <id>.firebaseapp.com to the sign-in authorized domains (phone login
+#     with reCAPTCHA works only on listed addresses)
+#   - shows the browser API keys' website restrictions, which may need the new address too
+# The site stays empty until deploy.yml publishes the app to it.
+name: Web adresi
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  FIREBASE_PROJECT_ID: kerek-9d153
+  SITE_IDS: tapsyr tapsyrkz tapsyr-app tapsyr-kz
+
+jobs:
+  site:
+    if: startsWith(github.event.head_commit.message, '[site] ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Google Cloud'a giriş
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
+          service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Adresi aç
+        id: site
+        run: |
+          fb() { npx --yes firebase-tools@15.31.0 "$@" --project "$FIREBASE_PROJECT_ID" --non-interactive; }
+          existing=$(fb hosting:sites:list --json | jq -r '(.result.sites // .result // [])[]?.name | split("/") | last')
+          echo "Bu projedeki adresler: $existing"
+          for id in $SITE_IDS; do
+            if printf '%s\n' "$existing" | grep -qx "$id"; then
+              echo "$id zaten bu projede"; echo "id=$id" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            if fb hosting:sites:create "$id"; then
+              echo "Açıldı: https://$id.web.app"; echo "id=$id" >> "$GITHUB_OUTPUT"; exit 0
+            fi
+            echo "$id alınamadı, sıradakine geçiliyor"
+          done
+          echo "Hiçbir ad boş değil: $SITE_IDS"; exit 1
+
+      - name: Girişe izinli adresler
+        env:
+          SITE: ${{ steps.site.outputs.id }}
+        run: |
+          TOKEN=$(gcloud auth print-access-token)
+          URL="https://identitytoolkit.googleapis.com/admin/v2/projects/$FIREBASE_PROJECT_ID/config"
+          H=(-H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $FIREBASE_PROJECT_ID")
+          current=$(curl -sS "${H[@]}" "$URL" | jq -c '.authorizedDomains // empty')
+          if [ -z "$current" ]; then echo "İzinli adresler okunamadı (yetki yok); konsoldan eklenmeli"; exit 0; fi
+          echo "Şu an: $current"
+          wanted=$(jq -c --arg a "$SITE.web.app" --arg b "$SITE.firebaseapp.com" '. + [$a, $b] | unique' <<<"$current")
+          if [ "$wanted" = "$(jq -c 'unique' <<<"$current")" ]; then echo "Yeni adres zaten listede"; exit 0; fi
+          code=$(curl -sS -o out.json -w '%{http_code}' -X PATCH "${H[@]}" -H 'Content-Type: application/json' \
+            "$URL?updateMask=authorizedDomains" -d "{\"authorizedDomains\": $wanted}")
+          if [ "$code" = 200 ]; then echo "Eklendi: $(jq -c '.authorizedDomains' out.json)"; else echo "Eklenemedi (HTTP $code): $(jq -r '.error.message // empty' out.json); konsoldan eklenmeli"; fi
+          rm -f out.json
+
+      - name: Tarayıcı anahtarlarının web sitesi kısıtlamaları
+        continue-on-error: true
+        run: |
+          gcloud services api-keys list --project "$FIREBASE_PROJECT_ID" --format=json \
+            | jq -r '.[] | "\(.displayName): web siteleri = \(.restrictions.browserKeyRestrictions.allowedReferrers // ["kısıtlama yok"] | join(", "))"'

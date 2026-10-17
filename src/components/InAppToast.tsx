@@ -40,7 +40,7 @@ export const InAppToast: React.FC<InAppToastProps> = ({
   return (
     <div
       role="alert"
-      className={`fixed top-16 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-sm transition-all duration-300 ease-out ${
+      className={`fixed top-16 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-sm transition duration-300 ease-out ${
         isVisible
           ? 'opacity-100 translate-y-0 scale-100'
           : 'opacity-0 -translate-y-4 scale-95 pointer-events-none'
@@ -51,7 +51,7 @@ export const InAppToast: React.FC<InAppToastProps> = ({
           setIsVisible(false);
           onClick(notification);
         }}
-        className="w-full bg-slate-900/95 backdrop-blur-md text-white p-3.5 rounded-2xl shadow-xl border border-slate-700/60 flex items-start gap-3 cursor-pointer hover:bg-slate-900 active:scale-[0.99] transition-all group"
+        className="w-full bg-slate-900/95 backdrop-blur-md text-white p-3.5 rounded-2xl shadow-xl border border-slate-700/60 flex items-start gap-3 cursor-pointer hover:bg-slate-900 active:scale-[0.99] transition group"
       >
         {/* Animated Bell Icon */}
         <div className="w-8 h-8 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center shrink-0 mt-0.5 text-sky-400 group-hover:scale-110 transition-transform">
@@ -73,7 +73,7 @@ export const InAppToast: React.FC<InAppToastProps> = ({
 
         {/* Navigation Indicator & Close */}
         <div className="flex items-center gap-1 shrink-0 mt-1">
-          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-white group-hover:translate-x-0.5 transition-all" />
+          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-white group-hover:translate-x-0.5 transition" />
           <button
             type="button"
             onClick={(e) => {

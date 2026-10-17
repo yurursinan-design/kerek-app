@@ -56,8 +56,13 @@ async function main() {
   const { getFirestore } = requireFromFunctions('firebase-admin/firestore');
   const auth = getAuth();
 
+  // The app sends the privacy policy version the user accepted with every code check
   const run = (fn: any, uid: string, data: any, ip = '10.0.0.1') =>
-    fn.run({ data, auth: { uid, token: {} }, rawRequest: { headers: { 'x-forwarded-for': ip }, ip } });
+    fn.run({
+      data: fn === verifyLoginCode && !('consentVersion' in data) ? { ...data, consentVersion: '2026-10-17.3' } : data,
+      auth: { uid, token: {} },
+      rawRequest: { headers: { 'x-forwarded-for': ip }, ip },
+    });
   const errCode = async (p: Promise<unknown>) => {
     try {
       await p;
@@ -77,6 +82,7 @@ async function main() {
 
   assert(normalizeKzPhone('+7 701 123 45 67') === '+77011234567', 'Kazakhstan number is accepted');
   assert(normalizeKzPhone('+7 912 123 45 67') === null, 'Russian number is refused');
+  assert(normalizeKzPhone('+90 532 123 45 67') === '+905321234567', 'Turkish tester number is accepted during the closed test');
   assert((await errCode(run(requestLoginCode, uidA, { phone: '+79121234567' }))) === 'invalid-argument', 'Request with a non-Kazakhstan number fails');
   assert((await errCode(requestLoginCode.run({ data: { phone }, rawRequest: { headers: {} } } as any))) === 'unauthenticated', 'Request without sign-in fails');
 
@@ -97,6 +103,7 @@ async function main() {
   // 3. Wrong code counts, right code links the number to the caller's account
   const wrong = code === '000000' ? '111111' : '000000';
   assert((await errCode(run(verifyLoginCode, uidA, { phone, code: wrong }))) === 'invalid-argument', 'Wrong code is refused');
+  assert((await errCode(run(verifyLoginCode, uidA, { phone, code, consentVersion: '' }))) === 'failed-precondition', 'Without the consent the code is not accepted');
   const res = await run(verifyLoginCode, uidA, { phone, code });
   assert(typeof res?.token === 'string' && res.token.length > 20, 'Right code returns a sign-in token');
   assert((await auth.getUser(uidA)).phoneNumber === phone, 'Number is now on the caller’s own account');
@@ -110,6 +117,9 @@ async function main() {
   assert((await errCode(run(requestLoginCode, uidB, { phone, lang: 'kz' }, '10.0.0.2'))) === 'ok', 'Second device requests a code');
   const code2 = sent[sent.length - 1].bodyCode;
   assert(sent[sent.length - 1].lang === 'kk', 'Kazakh template for the Kazakh app');
+  const consent = (await getFirestore().collection('consents').doc(uidA).get()).data();
+  const history = await getFirestore().collection('consents').doc(uidA).collection('history').get();
+  assert(consent?.version === '2026-10-17.3' && typeof consent?.acceptedAt?.toMillis === 'function' && history.size >= 1, 'The consent is recorded on the server with its version and server time');
   const res2 = await run(verifyLoginCode, uidB, { phone, code: code2 });
   const claims = JSON.parse(Buffer.from(String(res2.token).split('.')[1], 'base64url').toString());
   assert(claims.uid === uidA, 'Second device signs in to the account that has the number', claims.uid);
@@ -164,6 +174,18 @@ async function main() {
   process.env.PLAY_REVIEW_LOGIN = '';
   await getFirestore().collection('rateLimits').doc(`otp_phone_min_${createHash('sha256').update(`login:${reviewPhone}`).digest('hex').slice(0, 40)}`).delete();
   assert((await errCode(run(requestLoginCode, uidD, { phone: reviewPhone }, '10.0.0.10'))) === 'ok' && sent[sent.length - 1].to === reviewPhone.slice(1), 'Without the setting the review number is an ordinary number');
+
+  // Checking codes is limited per account and per network address, even when no code exists
+  const noCode = `+7604${tail}`;
+  const uidE = `anonE_${tail}`;
+  const codesE: string[] = [];
+  for (let i = 0; i < 15; i++) codesE.push(await errCode(run(verifyLoginCode, uidE, { phone: noCode, code: '123456' }, '10.0.0.30')));
+  assert(codesE.every((c) => c === 'deadline-exceeded'), 'Fifteen checks an hour are answered normally', codesE.join(','));
+  assert((await errCode(run(verifyLoginCode, uidE, { phone: noCode, code: '123456' }, '10.0.0.31'))) === 'resource-exhausted', 'The 16th check from one account in an hour is refused');
+  const fromOneIp: string[] = [];
+  for (let i = 0; i < 40; i++) fromOneIp.push(await errCode(run(verifyLoginCode, `anonF${Math.floor(i / 14)}_${tail}`, { phone: noCode, code: '123456' }, '10.0.0.31')));
+  assert(fromOneIp.every((c) => c === 'deadline-exceeded'), 'Forty checks an hour from one address are answered normally', fromOneIp.join(','));
+  assert((await errCode(run(verifyLoginCode, `anonG_${tail}`, { phone: noCode, code: '123456' }, '10.0.0.31'))) === 'resource-exhausted', 'More checks from the same address, even from new accounts, are refused');
 
   console.log(failed ? `\nWHATSAPP LOGIN: ${failed} FAILED` : '\nWHATSAPP LOGIN: ALL CHECKS PASSED');
   process.exit(failed ? 1 : 0);

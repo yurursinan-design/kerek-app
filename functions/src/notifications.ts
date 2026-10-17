@@ -14,7 +14,7 @@ import {
   onDocumentUpdated,
   onDocumentWrittenWithAuthContext,
 } from 'firebase-functions/v2/firestore';
-import { DAY_MS } from './limits';
+import { DAY_MS, tooOldToRetry } from './limits';
 
 type Role = 'customer' | 'provider';
 type Text = { kz: string; ru: string };
@@ -260,6 +260,16 @@ const WORK_STATUS_TEXT: Record<string, { type: string; title: Text; body: Text }
  * Appointment created or changed. actorUid is who made the change (from the event's auth
  * context); the other side is told. eventId makes the notice id unique per change.
  */
+/**
+ * A visit time for a notice: "18.10.2026, 10:00" in Kyzylorda time, as stored
+ * ("2026-10-18T10:00+05:00"); older free-text entries as they are.
+ */
+export function scheduleLabel(value: unknown): string {
+  const raw = str(value, 40);
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}:\d{2})/.exec(raw);
+  return m ? `${m[3]}.${m[2]}.${m[1]}, ${m[4]}` : raw;
+}
+
 export function forAppointmentChange(apptId: string, before: any, after: any, actorUid: string, eventId: string): NotificationDoc[] {
   if (!after) return [];
   const customerId = str(after.customerId, 128);
@@ -270,7 +280,7 @@ export function forAppointmentChange(apptId: string, before: any, after: any, ac
   const recipientUserId = recipientRole === 'customer' ? customerId : providerUserId;
   if (!recipientUserId || recipientUserId === actorUid) return [];
   const requestId = str(after.requestId, 128);
-  const when = str(after.scheduledAt, 40);
+  const when = scheduleLabel(after.scheduledAt);
   const byCustomer = actor === 'customer';
   const tag = short(eventId);
   const base = { recipientUserId, recipientRole, requestId, targetScreen: 'request_detail' as const };
@@ -314,7 +324,7 @@ export function forAppointmentChange(apptId: string, before: any, after: any, ac
         ? { kz: `Клиент кездесу уақытын растады: ${when}`, ru: `Клиент подтвердил время встречи: ${when}` }
         : { kz: `Маман кездесу уақытын растады: ${when}`, ru: `Мастер подтвердил время встречи: ${when}` },
     });
-  } else if (str(before.scheduledAt, 40) !== when && (after.status === 'RESCHEDULED' || after.status === 'PROPOSED')) {
+  } else if (str(before.scheduledAt, 40) !== str(after.scheduledAt, 40) && (after.status === 'RESCHEDULED' || after.status === 'PROPOSED')) {
     out.push({
       ...base,
       id: `notif_appt_upd_${apptId}_${tag}`,
@@ -346,10 +356,14 @@ export function forAppointmentChange(apptId: string, before: any, after: any, ac
 
 // ---------------------------------------------------------------- writing
 
-/** Writes the notices; one that already exists (event delivered twice) is left as it is. */
+/**
+ * Writes the notices; one that already exists (event delivered twice) is left as it is, so its read
+ * mark stays. Any other failure is thrown after trying the rest, so the event is retried.
+ */
 export async function saveNotifications(items: NotificationDoc[], now = Date.now()): Promise<number> {
   const db = getFirestore();
   let written = 0;
+  let failed = 0;
   for (const n of items) {
     if (!n.recipientUserId || !n.requestId) continue;
     try {
@@ -360,9 +374,13 @@ export async function saveNotifications(items: NotificationDoc[], now = Date.now
       written++;
     } catch (err: any) {
       // 6 = ALREADY_EXISTS
-      if (err?.code !== 6 && err?.code !== 'already-exists') console.error('[notifications] write failed', n.id, err);
+      if (err?.code !== 6 && err?.code !== 'already-exists') {
+        console.error('[notifications] write failed', n.id, err);
+        failed++;
+      }
     }
   }
+  if (failed > 0) throw new Error(`${failed} notices were not written`);
   return written;
 }
 
@@ -376,10 +394,19 @@ async function selectedProviderUserId(request: any): Promise<string> {
 
 // ---------------------------------------------------------------- triggers
 
-// Firestore triggers run where the database is (asia-south1)
-const OPTS = { region: 'asia-south1', maxInstances: 10 };
+// Firestore triggers run where the database is (asia-south1). Failures are retried (writes are
+// idempotent: notices are created once, pushes are marked as sent); an event still failing after
+// two hours is given up and logged.
+const OPTS = { region: 'asia-south1', maxInstances: 10, retry: true };
+
+function givenUp(event: { time: string; id: string; source?: string }): boolean {
+  if (!tooOldToRetry(event.time)) return false;
+  console.error('[notifications] gave up on event', event.id, event.source || '');
+  return true;
+}
 
 export const notifyOnOfferCreated = onDocumentCreated({ ...OPTS, document: 'offers/{offerId}' }, async (event) => {
+    if (givenUp(event)) return;
   const offer = event.data?.data();
   if (!offer?.requestId) return;
   const request = (await getFirestore().collection('requests').doc(String(offer.requestId)).get()).data();
@@ -387,6 +414,7 @@ export const notifyOnOfferCreated = onDocumentCreated({ ...OPTS, document: 'offe
 });
 
 export const notifyOnOfferUpdated = onDocumentUpdated({ ...OPTS, document: 'offers/{offerId}' }, async (event) => {
+    if (givenUp(event)) return;
   const before = event.data?.before.data();
   const after = event.data?.after.data();
   if (!after?.requestId || before?.status === after.status) return;
@@ -397,6 +425,7 @@ export const notifyOnOfferUpdated = onDocumentUpdated({ ...OPTS, document: 'offe
 export const notifyOnMessageCreated = onDocumentCreated(
   { ...OPTS, document: 'conversations/{conversationId}/messages/{messageId}' },
   async (event) => {
+    if (givenUp(event)) return;
     const message = event.data?.data();
     if (!message) return;
     const conversation = (await getFirestore().collection('conversations').doc(event.params.conversationId).get()).data();
@@ -406,6 +435,7 @@ export const notifyOnMessageCreated = onDocumentCreated(
 );
 
 export const notifyOnRequestUpdated = onDocumentUpdated({ ...OPTS, document: 'requests/{requestId}' }, async (event) => {
+    if (givenUp(event)) return;
   const before = event.data?.before.data();
   const after = event.data?.after.data();
   if (!after) return;
@@ -419,6 +449,7 @@ export const notifyOnRequestUpdated = onDocumentUpdated({ ...OPTS, document: 're
 export const notifyOnAppointmentWritten = onDocumentWrittenWithAuthContext(
   { ...OPTS, document: 'appointments/{appointmentId}' },
   async (event) => {
+    if (givenUp(event)) return;
     const before = event.data?.before?.exists ? event.data.before.data() : undefined;
     const after = event.data?.after?.exists ? event.data.after.data() : undefined;
     // Who made the change: a signed-in app user's id (matched against the participants below);
@@ -453,14 +484,23 @@ function androidSound(type: unknown): { sound: string; channelId?: string } {
  * that no longer accept messages (app removed). Returns how many phones got it.
  */
 export async function pushNotification(n: any, send: Sender = (m) => getMessaging().sendEachForMulticast(m)): Promise<number> {
+  return (await pushNotificationDetailed(n, send)).delivered;
+}
+
+/** pushNotification, also counting phones that failed for a reason worth retrying */
+export async function pushNotificationDetailed(
+  n: any,
+  send: Sender = (m) => getMessaging().sendEachForMulticast(m)
+): Promise<{ delivered: number; retryable: number }> {
   const uid = str(n?.recipientUserId, 128);
-  if (!uid) return 0;
+  if (!uid) return { delivered: 0, retryable: 0 };
   const db = getFirestore();
   const snap = await db.collection('pushTokens').where('uid', '==', uid).limit(10).get();
-  if (snap.empty) return 0;
+  if (snap.empty) return { delivered: 0, retryable: 0 };
   const byLang: Record<'kz' | 'ru', string[]> = { kz: [], ru: [] };
   snap.docs.forEach((d) => byLang[d.get('lang') === 'kz' ? 'kz' : 'ru'].push(d.id));
   let delivered = 0;
+  let retryable = 0;
   for (const lang of ['kz', 'ru'] as const) {
     const tokens = byLang[lang];
     if (!tokens.length) continue;
@@ -482,19 +522,24 @@ export async function pushNotification(n: any, send: Sender = (m) => getMessagin
           delivered++;
           return null;
         }
-        return r.error && DEAD_TOKEN_CODES.has(r.error.code) ? db.collection('pushTokens').doc(tokens[i]).delete() : null;
+        if (r.error && DEAD_TOKEN_CODES.has(r.error.code)) return db.collection('pushTokens').doc(tokens[i]).delete();
+        retryable++;
+        return null;
       })
     );
   }
-  return delivered;
+  return { delivered, retryable };
 }
 
 export const pushOnNotificationCreated = onDocumentCreated({ ...OPTS, document: 'notifications/{notificationId}' }, async (event) => {
-  const n = event.data?.data();
-  if (!n || n.isRead) return;
-  try {
-    await pushNotification(n);
-  } catch (err) {
-    console.error('[push] failed for', event.params.notificationId, err);
-  }
+  if (givenUp(event)) return;
+  const ref = event.data?.ref;
+  // Read again: a retried event must not push a second time, and a notice read meanwhile needs no push
+  const n = ref ? (await ref.get()).data() : undefined;
+  if (!ref || !n || n.isRead || n.pushedAt) return;
+  const { delivered, retryable } = await pushNotificationDetailed(n);
+  // Nothing reached a phone because of a passing error (network, FCM busy): retried later.
+  // When some phones got it, it is marked sent so nobody gets it twice.
+  if (retryable > 0 && delivered === 0) throw new Error(`push for ${event.params.notificationId} failed on ${retryable} phone(s); retrying`);
+  await ref.update({ pushedAt: new Date().toISOString() });
 });

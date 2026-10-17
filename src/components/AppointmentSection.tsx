@@ -11,6 +11,7 @@ import {
 import { translations } from '../i18n/translations';
 import { repository, getCurrentUserId, getFriendlyErrorMessage } from '../services';
 import { auth } from '../services/firebase';
+import { formatSchedule, isPastSchedule, serviceToday, toScheduleValue } from '../services/dateFormat';
 import {
   Calendar,
   Clock,
@@ -63,13 +64,11 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
   const [cancelReason, setCancelReason] = useState('');
 
   const effectiveUserId = currentUserId || auth?.currentUser?.uid || getCurrentUserId();
+  const pastTimeText = language === 'kz' ? 'Өткен уақытты таңдауға болмайды' : 'Нельзя выбрать прошедшее время';
 
-  // Default date: today on the phone's own calendar (toISOString would give the UTC date, which
-  // is yesterday in Kazakhstan between midnight and 05:00)
-  const localToday = (() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  })();
+  // Default date: today in Kyzylorda, where the job is (visit times are Kyzylorda time on every
+  // phone, whatever zone the phone is set to)
+  const localToday = serviceToday();
   // The date field starts at today (set once when the section opens)
   const todayRef = useRef(localToday);
   useEffect(() => {
@@ -114,11 +113,15 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       setErrorMsg(language === 'kz' ? 'Күні мен уақытын көрсетіңіз' : 'Укажите дату и время');
       return;
     }
+    if (isPastSchedule(dateStr, timeStr)) {
+      setErrorMsg(pastTimeText);
+      return;
+    }
 
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      const scheduledAt = `${dateStr} ${timeStr}`;
+      const scheduledAt = toScheduleValue(dateStr, timeStr);
       await repository.createAppointment({
         requestId: request.id,
         customerId: request.customerId,
@@ -160,10 +163,14 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
   const handleReschedule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!appointment || !dateStr || !timeStr) return;
+    if (isPastSchedule(dateStr, timeStr)) {
+      setErrorMsg(pastTimeText);
+      return;
+    }
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      const scheduledAt = `${dateStr} ${timeStr}`;
+      const scheduledAt = toScheduleValue(dateStr, timeStr);
       await repository.rescheduleAppointment(
         appointment.id,
         scheduledAt,
@@ -390,7 +397,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               <button
                 type="button"
                 onClick={() => setIsFormOpen(true)}
-                className="w-full min-h-[40px] px-3 rounded-xl bg-sky-50 hover:bg-sky-100 active:scale-[0.99] text-sky-800 font-bold text-xs flex items-center justify-center gap-2 transition-all border border-sky-200 cursor-pointer"
+                className="w-full min-h-[40px] px-3 rounded-xl bg-sky-50 hover:bg-sky-100 active:scale-[0.99] text-sky-800 font-bold text-xs flex items-center justify-center gap-2 transition border border-sky-200 cursor-pointer"
               >
                 <Calendar className="w-3.5 h-3.5" />
                 <span>{t.appointmentCreateBtn}</span>
@@ -462,7 +469,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="flex-1 min-h-[38px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50"
+                    className="flex-1 min-h-[38px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition disabled:opacity-50"
                   >
                     <Send className="w-3.5 h-3.5" />
                     <span>{submitting ? '...' : t.appointmentSubmitBtn}</span>
@@ -489,7 +496,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               <span className="text-slate-500">{t.appointmentDateLabel}:</span>
               <span className="font-bold text-slate-900 font-mono flex items-center gap-1">
                 <Calendar className="w-3.5 h-3.5 text-sky-600" />
-                {appointment.scheduledAt}
+                {formatSchedule(appointment.scheduledAt, language)}
               </span>
             </div>
 
@@ -574,7 +581,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                     return (
                       <div key={m.key} className="flex flex-col items-center text-center">
                         <div
-                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${
+                          className={`w-7 h-7 rounded-full flex items-center justify-center transition ${
                             isDone
                               ? isCurrent
                                 ? 'bg-sky-600 text-white ring-2 ring-sky-300 ring-offset-1 shadow-xs scale-105'
@@ -612,7 +619,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                         type="button"
                         disabled={submitting}
                         onClick={() => handleUpdateWorkStatus(nextWorkStatus)}
-                        className="flex-1 min-h-[38px] px-3 rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all disabled:opacity-50 cursor-pointer"
+                        className="flex-1 min-h-[38px] px-3 rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition disabled:opacity-50 cursor-pointer"
                       >
                         {nextWorkStatus === 'PROVIDER_ON_THE_WAY' && <Car className="w-3.5 h-3.5" />}
                         {nextWorkStatus === 'PROVIDER_ARRIVED' && <MapPin className="w-3.5 h-3.5" />}
@@ -749,7 +756,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   type="button"
                   disabled={submitting}
                   onClick={handleConfirm}
-                  className="flex-1 min-h-[38px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                  className="flex-1 min-h-[38px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition cursor-pointer"
                 >
                   <CheckCircle className="w-3.5 h-3.5" />
                   <span>{t.appointmentConfirmBtn}</span>
@@ -780,7 +787,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
                   type="button"
                   disabled={submitting}
                   onClick={handleConfirmCompletion}
-                  className="w-full min-h-[42px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                  className="w-full min-h-[42px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition cursor-pointer disabled:opacity-50"
                 >
                   <CheckCircle2 className="w-4 h-4 text-emerald-100" />
                   <span>

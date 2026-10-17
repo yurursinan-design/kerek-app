@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { emojiSrc } from '../data/serviceCatalog';
+import { photoSrc } from '../data/photos';
 
 // Literal class names so Tailwind keeps them in the build
 export const TONES: Record<string, { tile: string; text: string; ring: string; glow: string }> = {
@@ -67,17 +68,46 @@ const BOX = {
   xl: { box: 'w-20 h-20 rounded-3xl', img: 56 },
 } as const;
 
+interface PhotoProps {
+  /** Name of a photo in public/img/photo (see data/photos.ts) */
+  name: string;
+  className?: string;
+  eager?: boolean;
+  alt?: string;
+}
+
+/** A photo made for the app; fills its box. Decorative unless alt is given. */
+export const Photo: React.FC<PhotoProps> = ({ name, className = '', eager, alt = '' }) => {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <span aria-hidden="true" className={`block bg-slate-200 ${className}`} />;
+  return (
+    <img
+      src={photoSrc(name)}
+      alt={alt}
+      aria-hidden={alt ? undefined : true}
+      draggable={false}
+      loading={eager ? 'eager' : 'lazy'}
+      decoding="async"
+      onError={() => setFailed(true)}
+      className={`block object-cover select-none bg-slate-200 ${className}`}
+    />
+  );
+};
+
 interface CategoryIconProps {
   /** 3D icon code (CatalogGroup.emoji or CatalogService.emoji) */
   emoji: string;
   color: string;
+  /** Photo to show instead of the icon (data/photos.ts) */
+  photo?: string;
   size?: keyof typeof BOX;
   eager?: boolean;
 }
 
-/** Soft coloured tile with a 3D icon. */
-export const CategoryIcon: React.FC<CategoryIconProps> = ({ emoji, color, size = 'md', eager }) => {
+/** A small photo of the service, or a soft coloured tile with a 3D icon when there is no photo. */
+export const CategoryIcon: React.FC<CategoryIconProps> = ({ emoji, color, photo, size = 'md', eager }) => {
   const b = BOX[size];
+  if (photo) return <Photo name={photo} eager={eager} className={`${b.box} shrink-0 ring-1 ring-black/5`} />;
   return (
     <span className={`${b.box} bg-linear-to-br ${tone(color).tile} flex items-center justify-center shrink-0`}>
       <Emoji3D code={emoji} size={b.img} eager={eager} />

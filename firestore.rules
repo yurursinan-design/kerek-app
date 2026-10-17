@@ -30,9 +30,59 @@ service cloud.firestore {
       return isSignedIn() && ('phone_number' in request.auth.token) && request.auth.token.phone_number is string;
     }
 
+    // The operator (owner): an account whose phone is in config/admins gets the admin claim from the
+    // claimAdmin function; it can manage badges, hide or block accounts and read reports
+    function isAdmin() {
+      // The claim counts only while the phone is still on the operator list (config/adminPhones, kept
+      // by the server from config/admins): removing a number takes the rights away at once
+      return isSignedIn() && request.auth.token.admin == true
+        && ('phone_number' in request.auth.token) && request.auth.token.phone_number is string
+        && exists(/databases/$(database)/documents/config/adminPhones)
+        && request.auth.token.phone_number in get(/databases/$(database)/documents/config/adminPhones).data.get('e164', []);
+    }
+
+    // An account the operator blocked (bans/{uid}) keeps reading its own data, can cancel its own
+    // requests and confirm a finished job, and can still report; it can't publish or change anything
+    // others see: no requests, offers or offer edits, messages or chat files, profile or portfolio
+    // changes, or reviews (storage.rules applies the same to files)
+    function notBanned() {
+      return !exists(/databases/$(database)/documents/bans/$(request.auth.uid));
+    }
+
+    // ---- Daily limits per account (usage/{uid}_{yyyymmdd}, UTC day) ----
+    // Requests, messages, reports and chat file uploads are each counted in the caller's usage
+    // document for today, in the same batch as the write (increment(1)); the write is refused when
+    // it isn't counted or the day's limit is reached. Protects people from spam and the project
+    // from cost, whatever client sends the writes.
+    function todayKey() {
+      return string(request.time.year() * 10000 + request.time.month() * 100 + request.time.day());
+    }
+    function usagePath() {
+      return /databases/$(database)/documents/usage/$(request.auth.uid + '_' + todayKey());
+    }
+    function countedToday(field, max) {
+      let before = exists(usagePath()) ? get(usagePath()).data.get(field, 0) : 0;
+      let after = getAfter(usagePath()).data.get(field, 0);
+      return after == before + 1 && after <= max;
+    }
+    function DAILY_REQUESTS() { return 10; }
+    function DAILY_MESSAGES() { return 300; }
+    function DAILY_REPORTS() { return 20; }
+    function DAILY_CHAT_FILES() { return 30; }
+
     // Optional string field: absent, or a string of at most n characters
     function strMax(m, k, n) {
       return !(k in m) || (m[k] is string && m[k].size() <= n);
+    }
+
+    // On an update, each listed time field that changes is a short text (the app writes ISO times).
+    // Without this, anyone allowed to touch a shared document could plant a map or a huge string in
+    // it that the other side's app then has to read.
+    function changedTimesOk(changed, fields) {
+      return !changed.hasAny(fields) || (
+        (!changed.hasAny(['updatedAt']) || strMax(incoming(), 'updatedAt', 40))
+        && (!changed.hasAny(['lastMessageAt']) || strMax(incoming(), 'lastMessageAt', 40))
+      );
     }
 
     // Trust badges are not self-assignable: absent or false only
@@ -79,8 +129,22 @@ service cloud.firestore {
     }
 
     // Request statuses in which providers of the city may still see and answer a request
+    // Whether a typed number is the caller's own login number (confirmed with the WhatsApp code):
+    // compared by digits, "+7 701 …", "8 701 …" and "701 …" all match +7701…
+    function phoneMatchesToken(p) {
+      let token = ('phone_number' in request.auth.token && request.auth.token.phone_number is string)
+        ? request.auth.token.phone_number.replace('[^0-9]', '') : '';
+      return p is string && token.size() == 11
+        && p.replace('[^0-9]', '').matches('[78]?' + token.replace('^7', ''));
+    }
+
+    // The "confirmed number" flag of a profile (phone) or offer (providerPhone) tells the truth
+    function phoneFlagOk(m, phoneField, flagField) {
+      return m.get(flagField, false) == phoneMatchesToken(m.get(phoneField, ''));
+    }
+
     function PROVIDER_KEYS() {
-      return ['id', 'userId', 'name', 'phone', 'whatsapp', 'city', 'cityId', 'district', 'category', 'categoryId',
+      return ['id', 'userId', 'name', 'phone', 'phoneVerified', 'whatsapp', 'city', 'cityId', 'district', 'category', 'categoryId',
         'categoryIds', 'serviceIds', 'services', 'priceRange', 'workingHours', 'experienceYears', 'description',
         'availability', 'tradeLicense', 'verified', 'iinVerified', 'hasCertificate', 'isDemo', 'blocked', 'hidden',
         'paused', 'portfolio', 'createdAt', 'updatedAt'];
@@ -105,6 +169,30 @@ service cloud.firestore {
         && m.location.longitude >= -180 && m.location.longitude <= 180);
     }
 
+    // A visit time: Kyzylorda wall-clock time with its UTC offset ("2026-10-18T10:00+05:00"), a real
+    // date, not more than 2 hours in the past (phone clocks drift) and within a year
+    function scheduleOk(s) {
+      return s is string
+        && s.matches('[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9][+]05:00')
+        && scheduleInstant(s) > request.time - duration.value(2, 'h')
+        && scheduleInstant(s) < request.time + duration.value(366, 'd');
+    }
+    function scheduleInstant(s) {
+      let day = s.split('T')[0].split('-');
+      let hm = s.split('T')[1].split('[+]')[0].split(':');
+      return timestamp.date(int(day[0]), int(day[1]), int(day[2]))
+        + duration.value(int(hm[0]) * 60 + int(hm[1]), 'm') - duration.value(5, 'h');
+    }
+
+    // The exact point in requestContacts (only the customer and the chosen master read it)
+    function preciseLocationOk(l) {
+      return l is map && l.keys().hasOnly(['latitude', 'longitude', 'accuracy', 'address', 'approximate'])
+        && l.latitude is number && l.longitude is number
+        && l.latitude >= -90 && l.latitude <= 90 && l.longitude >= -180 && l.longitude <= 180
+        && (!('accuracy' in l) || l.accuracy is number)
+        && strMax(l, 'address', 300);
+    }
+
     // The parsed version of the customer's text: known keys, bounded strings and lists
     function understandingOk(m) {
       return !('understanding' in m) || (m.understanding is map
@@ -115,6 +203,35 @@ service cloud.firestore {
         && strMax(m.understanding, 'preferredDate', 100)
         && (!('missingInformation' in m.understanding) || (m.understanding.missingInformation is list && m.understanding.missingInformation.size() <= 10))
         && (!('suggestedQuestions' in m.understanding) || (m.understanding.suggestedQuestions is list && m.understanding.suggestedQuestions.size() <= 10)));
+    }
+
+    // One file attached to a chat message, as the app writes it (path, name, type and size): checked
+    // field by field so a malformed entry can't break the other participant's chat screen
+    function chatAttachmentOk(a, conversationId) {
+      return a is map
+        && a.keys().hasAll(['id', 'type', 'storagePath', 'fileName', 'mimeType', 'sizeBytes'])
+        && a.keys().hasOnly(['id', 'type', 'storagePath', 'downloadUrl', 'fileName', 'mimeType', 'sizeBytes', 'width', 'height', 'createdAt'])
+        && a.id is string && a.id.size() > 0 && a.id.size() <= 100
+        && a.type in ['image', 'file']
+        && a.storagePath is string && a.storagePath.size() <= 300
+        && a.storagePath.matches('chat/' + conversationId + '/[^/]+/[^/]+')
+        && (!('downloadUrl' in a) || a.downloadUrl == '')
+        && a.fileName is string && a.fileName.size() > 0 && a.fileName.size() <= 200
+        && a.mimeType is string && a.mimeType.size() <= 100
+        && a.sizeBytes is number && a.sizeBytes >= 0 && a.sizeBytes <= 25 * 1024 * 1024
+        && (!('width' in a) || a.width is number)
+        && (!('height' in a) || a.height is number)
+        && (!('createdAt' in a) || (a.createdAt is string && a.createdAt.size() <= 40));
+    }
+
+    // A message carries at most three files (the app sends one)
+    function chatAttachmentsOk(m, conversationId) {
+      return !('attachments' in m) || (
+        m.attachments is list && m.attachments.size() <= 3
+        && (m.attachments.size() < 1 || chatAttachmentOk(m.attachments[0], conversationId))
+        && (m.attachments.size() < 2 || chatAttachmentOk(m.attachments[1], conversationId))
+        && (m.attachments.size() < 3 || chatAttachmentOk(m.attachments[2], conversationId))
+      );
     }
 
     function attachmentsOk(m) {
@@ -163,9 +280,22 @@ service cloud.firestore {
     // - Providers can only create and manage their own profile
     // - Listing is scoped to user's own profile or targeted directory queries (preventing blanket scraping)
     match /providers/{providerId} {
-      // Profiles carry phone numbers: only phone-verified accounts read them, not anonymous visitors
-      allow get: if hasVerifiedPhone() && isValidId(providerId);
-      allow list: if false;
+      // Profiles carry phone numbers: only phone-verified accounts read them, not anonymous visitors.
+      // A profile the operator hid or blocked is readable only by its master and the operator.
+      allow get: if hasVerifiedPhone() && isValidId(providerId) && (
+        resource == null ||
+        providerId == request.auth.uid ||
+        (resource.data.get('hidden', false) != true && resource.data.get('blocked', false) != true) ||
+        isAdmin()
+      );
+      allow list: if isAdmin();
+      // Operator: trust badges, hiding and blocking, nothing else
+      allow update: if isAdmin() && isValidId(providerId)
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['verified', 'iinVerified', 'hasCertificate', 'blocked', 'hidden', 'updatedAt'])
+                    && incoming().get('verified', false) is bool && incoming().get('iinVerified', false) is bool
+                    && incoming().get('hasCertificate', false) is bool && incoming().get('blocked', false) is bool
+                    && incoming().get('hidden', false) is bool;
       allow create: if hasVerifiedPhone()
                     && isValidId(providerId)
                     && providerId == request.auth.uid
@@ -178,11 +308,13 @@ service cloud.firestore {
                     && incoming().keys().hasOnly(PROVIDER_KEYS())
                     && noTrustBadges(incoming())
                     && falseOrAbsent(incoming(), 'blocked') && falseOrAbsent(incoming(), 'hidden') && falseOrAbsent(incoming(), 'isDemo')
+                    && phoneFlagOk(incoming(), 'phone', 'phoneVerified')
                     // Operator bans live in bans/{uid} (console only), so deleting and recreating the
                     // profile doesn't lift a block
                     && !exists(/databases/$(database)/documents/bans/$(request.auth.uid))
                     && providerFieldLimits(incoming());
       allow update: if hasVerifiedPhone()
+                    && notBanned()
                     && isValidId(providerId)
                     && providerId == request.auth.uid
                     && existing().userId == request.auth.uid
@@ -198,6 +330,7 @@ service cloud.firestore {
                          && incoming().get('hasCertificate', false) == existing().get('hasCertificate', false)))
                     && incoming().get('blocked', false) == existing().get('blocked', false)
                     && incoming().get('hidden', false) == existing().get('hidden', false)
+                    && phoneFlagOk(incoming(), 'phone', 'phoneVerified')
                     && providerFieldLimits(incoming());
       // Account deletion: a provider can remove their own profile
       allow delete: if isSignedIn() && isValidId(providerId) && providerId == request.auth.uid;
@@ -207,7 +340,8 @@ service cloud.firestore {
     // Jobs done and answer speed of a master, shown with the profile (same audience as the profile)
     match /providerStats/{uid} {
       allow get: if hasVerifiedPhone() && isValidId(uid);
-      allow list, write: if false;
+      allow list: if isAdmin();
+      allow write: if false;
     }
 
     // Typical prices of finished jobs per city and service, shown to signed-in users
@@ -247,16 +381,20 @@ service cloud.firestore {
         resource == null ||
         resource.data.customerId == request.auth.uid ||
         isProviderInCityOf(resource.data) ||
-        isSelectedProviderOf(resource.data)
+        isSelectedProviderOf(resource.data) ||
+        isAdmin()
       );
       allow list: if isSignedIn() && (
         resource.data.customerId == request.auth.uid ||
-        isProviderInCityOf(resource.data)
+        isProviderInCityOf(resource.data) ||
+        isAdmin()
       );
       allow create: if hasVerifiedPhone()
+                    && notBanned()
                     && isValidId(requestId)
                     && incoming().id == requestId
                     && incoming().customerId == request.auth.uid
+                    && countedToday('requests', DAILY_REQUESTS())
                     && incoming().city is string && incoming().city.size() <= 50
                     && incoming().category is string && incoming().category.size() <= 100
                     && ('service' in incoming()) && incoming()['service'] is string && incoming()['service'].size() <= 150
@@ -265,19 +403,22 @@ service cloud.firestore {
                     && !('selectedOfferId' in incoming())
                     && !('paymentStatus' in incoming())
                     && !('escrowAmount' in incoming())
+                    // The customer's name is not on the request (masters of the city read it); the
+                    // chosen master gets it from requestContacts
                     && incoming().keys().hasOnly([
-                      'id', 'customerId', 'customerName', 'requestText', 'description', 'city', 'cityId',
+                      'id', 'customerId', 'requestText', 'description', 'city', 'cityId',
                       'category', 'categoryId', 'serviceId', 'service', 'date', 'budget', 'urgency', 'status',
                       'createdAt', 'updatedAt', 'attachments', 'location', 'understanding', 'expiresAtMs'
                     ])
                     && (!('expiresAtMs' in incoming()) || expiryOk(incoming().expiresAtMs))
+                    && strMax(incoming(), 'createdAt', 40) && strMax(incoming(), 'updatedAt', 40)
                     && requestFieldLimits(incoming())
                     && attachmentsOk(incoming()) && locationOk(incoming()) && understandingOk(incoming());
       // Which fields an update changes, computed once: diff() walks the whole document (including the
       // nested understanding map), so repeating it per branch could exceed the 1000-expression limit.
       function requestUpdateAllowed() {
         let changed = request.resource.data.diff(resource.data).affectedKeys();
-        return (
+        return changedTimesOk(changed, ['updatedAt']) && (
         // 1. Customer updating request details while open (allowlist of editable request fields; cannot change id, customerId, status or selectedOfferId)
         (existing().customerId == request.auth.uid &&
          incoming().status == existing().status &&
@@ -288,7 +429,7 @@ service cloud.firestore {
           ('selectedOfferId' in existing() && 'selectedOfferId' in incoming() && incoming().selectedOfferId == existing().selectedOfferId)) &&
          changed.hasOnly([
            'requestText', 'description', 'service', 'category', 'categoryId',
-           'city', 'cityId', 'serviceId', 'date', 'budget', 'urgency', 'customerName',
+           'city', 'cityId', 'serviceId', 'date', 'budget', 'urgency',
            'attachments', 'location', 'understanding', 'expiresAtMs', 'updatedAt'
          ]) &&
          // Extending the request: a new end within the allowed window
@@ -307,7 +448,7 @@ service cloud.firestore {
          get(/databases/$(database)/documents/offers/$(incoming().selectedOfferId)).data.requestId == requestId &&
          getAfter(/databases/$(database)/documents/offers/$(incoming().selectedOfferId)).data.status == 'ACCEPTED' &&
          changed.hasOnly(['status', 'selectedOfferId', 'updatedAt'])) ||
-        // 3. Customer cancelling request
+        // 3. Customer cancelling request; an agreed visit is cancelled in the same write
         (existing().customerId == request.auth.uid &&
          incoming().customerId == existing().customerId &&
          incoming().id == existing().id &&
@@ -315,7 +456,9 @@ service cloud.firestore {
          incoming().status == 'CANCELLED' &&
          ((!('selectedOfferId' in existing()) && !('selectedOfferId' in incoming())) ||
           ('selectedOfferId' in existing() && 'selectedOfferId' in incoming() && incoming().selectedOfferId == existing().selectedOfferId)) &&
-         changed.hasOnly(['status', 'updatedAt'])) ||
+         changed.hasOnly(['status', 'updatedAt']) &&
+         (!exists(/databases/$(database)/documents/appointments/$('appointment_' + requestId)) ||
+          getAfter(/databases/$(database)/documents/appointments/$('appointment_' + requestId)).data.status in ['CANCELLED', 'COMPLETED'])) ||
         // 4. Provider sending an offer: in the same write as their new offer, the request counts it
         //    (offerCount + 1, at most MAX_OFFERS) and moves to OFFERS_RECEIVED
         (existing().customerId != request.auth.uid &&
@@ -393,7 +536,15 @@ service cloud.firestore {
         isAcceptedOfferProvider(requestId)
       );
       allow list: if false;
-      allow create, update: if isSignedIn() && isValidId(requestId) && incoming().customerId == request.auth.uid && exists(/databases/$(database)/documents/requests/$(requestId)) && get(/databases/$(database)/documents/requests/$(requestId)).data.customerId == request.auth.uid;
+      // Written together with the request (one batch), so the request is checked as it is after the write
+      allow create, update: if isSignedIn() && isValidId(requestId) && incoming().customerId == request.auth.uid
+                            && existsAfter(/databases/$(database)/documents/requests/$(requestId))
+                            && getAfter(/databases/$(database)/documents/requests/$(requestId)).data.customerId == request.auth.uid
+                            && incoming().keys().hasOnly(['requestId', 'customerId', 'customerName', 'customerPhone', 'location', 'createdAt', 'updatedAt'])
+                            && incoming().get('requestId', requestId) == requestId
+                            && strMax(incoming(), 'customerName', 100) && strMax(incoming(), 'customerPhone', 30)
+                            && strMax(incoming(), 'createdAt', 40) && strMax(incoming(), 'updatedAt', 40)
+                            && (!('location' in incoming()) || preciseLocationOk(incoming().location));
       // Account deletion: the customer removes their contact details (deleting a missing document is a no-op)
       allow delete: if isSignedIn() && isValidId(requestId) && (resource == null || resource.data.customerId == request.auth.uid);
     }
@@ -408,6 +559,7 @@ service cloud.firestore {
         // A provider checks whether their own offer on a request already exists
         (resource == null && offerId.matches('OFFER-.+-' + request.auth.uid)) ||
         resource.data.providerUserId == request.auth.uid ||
+        isAdmin() ||
         (resource.data.requestId is string &&
          get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.customerId == request.auth.uid)
       );
@@ -421,6 +573,7 @@ service cloud.firestore {
       // One offer per provider and request (the id is fixed), only from a provider profile in the
       // request's city, never on your own request, and only with the known offer fields.
       allow create: if hasVerifiedPhone()
+                    && notBanned()
                     && isValidId(offerId)
                     && incoming().id == offerId
                     && incoming().requestId is string && incoming().requestId.size() <= 64
@@ -435,22 +588,25 @@ service cloud.firestore {
                     && incoming().providerName == get(/databases/$(database)/documents/providers/$(request.auth.uid)).data.name
                     && incoming().keys().hasOnly([
                       'id', 'requestId', 'providerId', 'providerUserId', 'providerName', 'providerPhone',
-                      'providerWhatsapp', 'isDemo', 'price', 'priceType', 'availability', 'message', 'status',
+                      'providerPhoneVerified', 'providerWhatsapp', 'isDemo', 'price', 'priceType', 'availability', 'message', 'status',
                       'createdAt', 'updatedAt', 'iinVerified', 'hasCertificate', 'paymentMethods', 'fixPledge',
                       'inspectionFee'
                     ])
                     && falseOrAbsent(incoming(), 'isDemo')
-                    && strMax(incoming(), 'createdAt', 40)
+                    && strMax(incoming(), 'createdAt', 40) && strMax(incoming(), 'updatedAt', 40)
                     && incoming().providerUserId == request.auth.uid
                     // providerId names the provider profile shown to the customer; it must be the caller's own
                     && (!('providerId' in incoming()) || incoming().providerId == request.auth.uid)
                     && incoming().price is string && incoming().price.size() <= 50
                     && incoming().status == 'PENDING'
                     && noTrustBadges(incoming())
+                    && phoneFlagOk(incoming(), 'providerPhone', 'providerPhoneVerified')
                     && offerFieldLimits(incoming());
-      allow update: if isSignedIn() && isValidId(offerId) && (
-        // Provider updating their own offer details while still PENDING
+      allow update: if isSignedIn() && isValidId(offerId)
+        && changedTimesOk(incoming().diff(existing()).affectedKeys(), ['updatedAt']) && (
+        // Provider updating their own offer details while still PENDING (not after a ban)
         (
+          notBanned() &&
           (existing().providerUserId == request.auth.uid || (('providerId' in existing()) && existing().providerId == request.auth.uid)) &&
           incoming().providerUserId == existing().providerUserId &&
           incoming().requestId == existing().requestId &&
@@ -461,15 +617,21 @@ service cloud.firestore {
           incoming().status == 'PENDING' &&
           incoming().diff(existing()).affectedKeys().hasOnly([
             'price', 'priceType', 'availability', 'message', 'paymentMethods', 'fixPledge', 'inspectionFee',
-            'providerPhone', 'providerWhatsapp', 'providerName', 'updatedAt'
+            'providerPhone', 'providerPhoneVerified', 'providerWhatsapp', 'providerName', 'updatedAt'
           ]) &&
+          phoneFlagOk(incoming(), 'providerPhone', 'providerPhoneVerified') &&
           incoming().price is string && incoming().price.size() <= 50 &&
+          // The name on an offer is the provider profile's name: it can follow a profile rename, but
+          // can't be changed to anything else (no posing as another master or as Tapsyr)
+          (!incoming().diff(existing()).affectedKeys().hasAny(['providerName']) ||
+           incoming().providerName == get(/databases/$(database)/documents/providers/$(request.auth.uid)).data.name) &&
           offerFieldLimits(incoming())
         ) ||
         // Account deletion: the provider removes their phone numbers from their offers in any status
         (
           existing().providerUserId == request.auth.uid &&
           incoming().diff(existing()).affectedKeys().hasOnly(['providerPhone', 'providerWhatsapp', 'updatedAt']) &&
+          incoming().diff(existing()).affectedKeys().hasAny(['providerPhone', 'providerWhatsapp']) &&
           !('providerPhone' in incoming()) && !('providerWhatsapp' in incoming())
         ) ||
         // Customer rejecting an offer, or accepting the one the request selects in the same write
@@ -489,34 +651,95 @@ service cloud.firestore {
     // =================== Reviews Collection ===================
     // Customer Reviews & Ratings for Completed Jobs:
     // - Document ID is strictly bound to requestId (/reviews/{requestId}) to prevent duplicate reviews
-    // - Server-side verified against actual completed request & accepted offer
-    // - Reviewer must be the customer who created the completed request
-    // - Reviewed provider must be the one whose offer was accepted
-    // - Provider cannot review themselves
+    // - Verified against the actual completed request & accepted offer (reviewOk)
+    // - Reviewer must be the customer who created the completed request; no self-reviews
     // - Rating must be an integer from 1 to 5
-    // - Updates and deletes are strictly prohibited
+    // - The customer submits to reviewSubmissions; the review check publishes it to reviews
+    // A customer's review of the master of their own finished job (ids bound to the request)
+    function reviewOk(reviewId) {
+      return isValidId(reviewId)
+        && reviewId == incoming().requestId
+        && incoming().id == reviewId
+        && incoming().customerId == request.auth.uid
+        && incoming().providerId is string
+        && incoming().providerId != request.auth.uid
+        && incoming().rating is int && incoming().rating >= 1 && incoming().rating <= 5
+        && incoming().keys().hasOnly(['id', 'requestId', 'customerId', 'customerName', 'providerId', 'providerName', 'rating', 'comment', 'createdAt'])
+        && strMax(incoming(), 'comment', 1000) && strMax(incoming(), 'customerName', 100)
+        && strMax(incoming(), 'providerName', 100) && strMax(incoming(), 'createdAt', 40)
+        && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
+        && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status == 'COMPLETED'
+        && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == request.auth.uid
+        && (get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId is string)
+        && exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId))
+        && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.status == 'ACCEPTED'
+        && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerId == incoming().providerId;
+    }
+
     match /reviews/{reviewId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn()
+      // Shown with master profiles and on the customer's own jobs, which only phone-verified
+      // accounts open: anonymous visitors can't page through customers' names and comments
+      allow get, list: if hasVerifiedPhone();
+      // Published only by the server, after the review check (functions/src/reviewModeration.ts),
+      // or by the operator in the admin panel: the app writes to reviewSubmissions below
+      allow create: if false;
+      // The reviewed master answers the review (once or edits the answer); nothing else changes
+      allow update: if hasVerifiedPhone() && isValidId(reviewId)
+                    && resource.data.providerId == request.auth.uid
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['providerReply', 'providerReplyAt'])
+                    && incoming().providerReply is string && incoming().providerReply.size() > 0
+                    && incoming().providerReply.size() <= 1000
+                    && incoming().providerReplyAt is string && incoming().providerReplyAt.size() <= 40;
+      // The operator removes a review that breaks the rules (terms, section 7)
+      allow delete: if isAdmin();
+    }
+
+    // =================== Review submissions (checked before they are published) ===================
+    // The customer's review waits here while Gemini and the suspicion checks look at it
+    // (functions/src/reviewModeration.ts). A clean review is copied to reviews at once; a doubtful one
+    // waits for the operator. The customer sees their own submission and its status.
+    match /reviewSubmissions/{reviewId} {
+      allow get: if hasVerifiedPhone() && isValidId(reviewId)
+                 && (resource == null || resource.data.customerId == request.auth.uid || isAdmin());
+      allow list: if isAdmin();
+      allow create: if hasVerifiedPhone() && notBanned() && reviewOk(reviewId)
+                    && !exists(/databases/$(database)/documents/reviews/$(reviewId));
+      // Decisions are written by the server only
+      allow update, delete: if false;
+    }
+
+    // =================== Customer reviews (master → customer) ===================
+    // After a finished job the selected master rates the customer (one per request, write-once).
+    // Masters see them before answering a request; the customer sees their own; the operator all.
+    match /customerReviews/{reviewId} {
+      allow get: if hasVerifiedPhone() && isValidId(reviewId) && (
+        resource == null ||
+        resource.data.customerId == request.auth.uid ||
+        resource.data.providerId == request.auth.uid ||
+        exists(/databases/$(database)/documents/providers/$(request.auth.uid)) ||
+        isAdmin()
+      );
+      allow list: if hasVerifiedPhone() && (
+        resource.data.customerId == request.auth.uid ||
+        exists(/databases/$(database)/documents/providers/$(request.auth.uid)) ||
+        isAdmin()
+      );
+      allow create: if hasVerifiedPhone()
                     && isValidId(reviewId)
-                    && reviewId == incoming().requestId
+                    && incoming().keys().hasOnly(['id', 'requestId', 'customerId', 'providerId', 'rating', 'comment', 'createdAt'])
                     && incoming().id == reviewId
-                    && incoming().customerId == request.auth.uid
-                    && incoming().providerId is string
-                    && incoming().providerId != request.auth.uid
+                    && incoming().requestId == reviewId
+                    && incoming().providerId == request.auth.uid
+                    && incoming().customerId is string && incoming().customerId != request.auth.uid
                     && incoming().rating is int && incoming().rating >= 1 && incoming().rating <= 5
-                    && incoming().keys().hasOnly(['id', 'requestId', 'customerId', 'customerName', 'providerId', 'providerName', 'rating', 'comment', 'createdAt'])
-                    && strMax(incoming(), 'comment', 1000) && strMax(incoming(), 'customerName', 100)
-                    && strMax(incoming(), 'providerName', 100) && strMax(incoming(), 'createdAt', 40)
-                    && exists(/databases/$(database)/documents/requests/$(incoming().requestId))
-                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.status == 'COMPLETED'
-                    && get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.customerId == request.auth.uid
-                    && (get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId is string)
-                    && exists(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId))
-                    && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.status == 'ACCEPTED'
-                    && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(incoming().requestId)).data.selectedOfferId)).data.providerId == incoming().providerId;
+                    && strMax(incoming(), 'comment', 500) && strMax(incoming(), 'createdAt', 40)
+                    && exists(/databases/$(database)/documents/requests/$(reviewId))
+                    && get(/databases/$(database)/documents/requests/$(reviewId)).data.status == 'COMPLETED'
+                    && get(/databases/$(database)/documents/requests/$(reviewId)).data.customerId == incoming().customerId
+                    && get(/databases/$(database)/documents/requests/$(reviewId)).data.selectedOfferId is string
+                    && get(/databases/$(database)/documents/offers/$(get(/databases/$(database)/documents/requests/$(reviewId)).data.selectedOfferId)).data.providerUserId == request.auth.uid;
       allow update: if false;
-      allow delete: if false;
+      allow delete: if isAdmin();
     }
 
     // =================== Conversations Collection ===================
@@ -565,12 +788,15 @@ service cloud.firestore {
         incoming().get('providerId', null) == existing().get('providerId', null) &&
         incoming().requestId == existing().requestId &&
         incoming().id == existing().id &&
+        changedTimesOk(incoming().diff(existing()).affectedKeys(), ['updatedAt', 'lastMessageAt']) &&
         // Participants only move the last-message preview, the unread counters and their own read mark
         incoming().diff(existing()).affectedKeys().hasOnly([
           'lastMessageText', 'lastMessageSenderId', 'lastMessageAt', 'unreadCountCustomer', 'unreadCountProvider',
           'customerLastReadAt', 'providerLastReadAt', 'updatedAt'
         ]) &&
         (!incoming().diff(existing()).affectedKeys().hasAny(['lastMessageSenderId']) || incoming().lastMessageSenderId == request.auth.uid) &&
+        // A blocked account sends nothing, not even through the preview; reading stays possible
+        (!incoming().diff(existing()).affectedKeys().hasAny(['lastMessageText', 'lastMessageSenderId', 'lastMessageAt', 'unreadCountCustomer', 'unreadCountProvider']) || notBanned()) &&
         (!incoming().diff(existing()).affectedKeys().hasAny(['customerLastReadAt']) ||
           (existing().customerId == request.auth.uid && strMax(incoming(), 'customerLastReadAt', 40))) &&
         (!incoming().diff(existing()).affectedKeys().hasAny(['providerLastReadAt']) ||
@@ -592,6 +818,8 @@ service cloud.firestore {
                         get(/databases/$(database)/documents/conversations/$(conversationId)).data.providerId == request.auth.uid
                       );
         allow create: if isSignedIn()
+                      && notBanned()
+                      && countedToday('messages', DAILY_MESSAGES())
                       && isValidId(messageId)
                       && incoming().id == messageId
                       && incoming().conversationId == conversationId
@@ -600,7 +828,7 @@ service cloud.firestore {
                       && incoming().keys().hasOnly(['id', 'conversationId', 'requestId', 'senderId', 'senderRole', 'type', 'text', 'attachments', 'isRead', 'readAt', 'createdAt'])
                       && strMax(incoming(), 'createdAt', 40)
                       && incoming().text is string && incoming().text.size() <= 2000
-                      && (!('attachments' in incoming()) || (incoming().attachments is list && incoming().attachments.size() <= 10))
+                      && chatAttachmentsOk(incoming(), conversationId)
                       && conversationId == ('conv_' + incoming().requestId)
                       && exists(/databases/$(database)/documents/conversations/$(conversationId))
                       && get(/databases/$(database)/documents/conversations/$(conversationId)).data.requestId == incoming().requestId
@@ -659,19 +887,77 @@ service cloud.firestore {
 
     // Operator bans (document id = user id), managed in the Firebase console only
     match /bans/{uid} {
-      allow read, write: if false;
+      allow get, list: if isAdmin();
+      allow create, update: if isAdmin() && isValidId(uid)
+                    && incoming().keys().hasOnly(['uid', 'reason', 'createdAt'])
+                    && incoming().uid == uid
+                    && strMax(incoming(), 'reason', 300) && strMax(incoming(), 'createdAt', 40);
+      allow delete: if isAdmin();
     }
 
     // =================== Reports Collection ===================
     // "Report" button: a phone-verified user flags a provider, offer, request or chat. One report per
     // user and target (the id is bound to both), write-once; only operators (admin claim) read them.
+    // The operator's history (functions/src/adminLog.ts): written by the server only, read by operators
+    match /adminLog/{logId} {
+      allow get, list: if isAdmin();
+      allow write: if false;
+    }
+
+    // Consent records written by the server when a phone login is confirmed (verifyLoginCode):
+    // the account and the operator read them; nobody changes or deletes them from the app
+    match /consents/{uid} {
+      allow get: if isSignedIn() && (uid == request.auth.uid || isAdmin());
+      allow list, write: if false;
+      match /history/{entryId} {
+        allow read: if isSignedIn() && (uid == request.auth.uid || isAdmin());
+        allow write: if false;
+      }
+    }
+
+    // Today's counters of the account (see countedToday): only ever one up, only its own, only today
+    match /usage/{usageId} {
+      allow get: if isSignedIn() && usageId.matches(request.auth.uid + '_[0-9]{8}');
+      allow list: if false;
+      allow create, update: if isSignedIn()
+                    && usageId == request.auth.uid + '_' + todayKey()
+                    && incoming().keys().hasOnly(['uid', 'requests', 'messages', 'reports', 'files', 'expireAt'])
+                    && incoming().uid == request.auth.uid
+                    && incoming().expireAt is timestamp
+                    && usageStepOk('requests') && usageStepOk('messages') && usageStepOk('reports') && usageStepOk('files');
+      allow delete: if false;
+    }
+    function usageStepOk(field) {
+      let before = resource == null ? 0 : resource.data.get(field, 0);
+      let after = incoming().get(field, 0);
+      return after is int && (after == before || after == before + 1);
+    }
+
+    // A ticket for one chat file: storage.rules lets exactly this file name be uploaded under this
+    // ticket's folder, and the ticket is counted in the uploader's daily file limit
+    match /chatUploads/{uploadId} {
+      allow get: if isSignedIn() && resource != null && resource.data.uid == request.auth.uid;
+      allow list: if false;
+      allow create: if hasVerifiedPhone()
+                    && notBanned()
+                    && isValidId(uploadId)
+                    && incoming().keys().hasOnly(['uid', 'conversationId', 'fileName', 'createdAt', 'expireAt'])
+                    && incoming().uid == request.auth.uid
+                    && incoming().conversationId is string && isValidId(incoming().conversationId)
+                    && incoming().fileName is string && incoming().fileName.size() > 0 && incoming().fileName.size() <= 200
+                    && incoming().createdAt is string && incoming().createdAt.size() <= 40
+                    && incoming().expireAt is timestamp
+                    && countedToday('files', DAILY_CHAT_FILES());
+      allow update, delete: if false;
+    }
+
     match /reports/{reportId} {
       allow get: if isSignedIn() && isValidId(reportId) && (
         (resource == null && reportId.matches('REPORT-' + request.auth.uid + '-.+')) ||
         (resource != null && resource.data.reporterId == request.auth.uid) ||
-        request.auth.token.admin == true
+        isAdmin()
       );
-      allow list: if isSignedIn() && request.auth.token.admin == true;
+      allow list: if isAdmin();
       allow create: if hasVerifiedPhone()
                     && isValidId(reportId)
                     && incoming().keys().hasOnly(['id', 'reporterId', 'targetType', 'targetId', 'requestId', 'reason', 'details', 'createdAt'])
@@ -683,8 +969,26 @@ service cloud.firestore {
                     && incoming().reason in ['fraud', 'spam', 'rude', 'fake', 'no_show', 'other']
                     && (!('requestId' in incoming()) || isValidId(incoming().requestId))
                     && strMax(incoming(), 'details', 1000)
-                    && incoming().createdAt is string && incoming().createdAt.size() >= 10 && incoming().createdAt.size() <= 40;
-      allow update, delete: if false;
+                    && incoming().createdAt is string && incoming().createdAt.size() >= 10 && incoming().createdAt.size() <= 40
+                    && countedToday('reports', DAILY_REPORTS())
+                    // The target exists; a conversation is reported only by one of its two participants
+                    && (
+                      (incoming().targetType == 'provider' && exists(/databases/$(database)/documents/providers/$(incoming().targetId))) ||
+                      (incoming().targetType == 'offer' && exists(/databases/$(database)/documents/offers/$(incoming().targetId))) ||
+                      (incoming().targetType == 'request' && exists(/databases/$(database)/documents/requests/$(incoming().targetId))) ||
+                      (incoming().targetType == 'conversation'
+                        && exists(/databases/$(database)/documents/conversations/$(incoming().targetId))
+                        && request.auth.uid in [
+                          get(/databases/$(database)/documents/conversations/$(incoming().targetId)).data.get('customerId', ''),
+                          get(/databases/$(database)/documents/conversations/$(incoming().targetId)).data.get('providerUserId', '')
+                        ])
+                    );
+      // The operator marks a report handled
+      allow update: if isAdmin()
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'resolution', 'resolvedAt'])
+                    && incoming().status in ['open', 'resolved']
+                    && strMax(incoming(), 'resolution', 300) && strMax(incoming(), 'resolvedAt', 40);
+      allow delete: if false;
     }
 
     // =================== Appointments Collection ===================
@@ -754,7 +1058,7 @@ service cloud.firestore {
                     // The other side confirms; work progress starts from the beginning
                     && incoming().status == 'PROPOSED'
                     && (!('workStatus' in incoming()) || incoming().workStatus == 'NOT_STARTED')
-                    && incoming().scheduledAt is string && incoming().scheduledAt.size() >= 10 && incoming().scheduledAt.size() <= 40
+                    && scheduleOk(incoming().scheduledAt)
                     && (!('durationMinutes' in incoming()) || (incoming().durationMinutes is number && incoming().durationMinutes > 0 && incoming().durationMinutes <= 1440))
                     && (!('note' in incoming()) || (incoming().note is string && incoming().note.size() <= 1000))
                     && (!('workStatus' in incoming()) || incoming().workStatus in ['NOT_STARTED', 'PROVIDER_ON_THE_WAY', 'PROVIDER_ARRIVED', 'WORK_STARTED', 'WORK_COMPLETED', 'CANCELLED'])
@@ -785,7 +1089,8 @@ service cloud.firestore {
                       (incoming().proposedBy == 'provider' && (request.auth.uid == resource.data.providerUserId || request.auth.uid == resource.data.providerId))
                     )
                     && incoming().updatedAt is string
-                    && incoming().scheduledAt is string && incoming().scheduledAt.size() >= 10 && incoming().scheduledAt.size() <= 40
+                    // A new time must be a valid future time; an unchanged older entry stays as it is
+                    && (incoming().scheduledAt == resource.data.scheduledAt || scheduleOk(incoming().scheduledAt))
                     && (!('durationMinutes' in incoming()) || (incoming().durationMinutes is number && incoming().durationMinutes > 0 && incoming().durationMinutes <= 1440))
                     && (!('note' in incoming()) || (incoming().note is string && incoming().note.size() <= 1000))
                     && exists(/databases/$(database)/documents/requests/$(resource.data.requestId))
@@ -798,6 +1103,19 @@ service cloud.firestore {
                       (resource.data.status == 'CANCELLED' && incoming().status in ['CANCELLED', 'PROPOSED'])
                     )
                     && (incoming().scheduledAt == resource.data.scheduledAt || incoming().status in ['PROPOSED', 'RESCHEDULED'])
+                    // The visit becomes COMPLETED only together with the work: the master reports the work
+                    // done (WORK_COMPLETED, and the request gets a new providerDoneAt in the same write), or
+                    // the customer completes the request in the same write
+                    && (
+                      incoming().status != 'COMPLETED' || resource.data.status == 'COMPLETED' || (
+                        ('workStatus' in incoming()) && incoming().workStatus == 'WORK_COMPLETED'
+                        && (
+                          getAfter(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.status == 'COMPLETED' ||
+                          getAfter(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.get('providerDoneAt', '')
+                            != get(/databases/$(database)/documents/requests/$(resource.data.requestId)).data.get('providerDoneAt', '')
+                        )
+                      )
+                    )
                     // A proposed or rescheduled time is confirmed by the other side, not by whoever proposed it
                     && (
                       incoming().status != 'CONFIRMED' || resource.data.status == 'CONFIRMED' ||

@@ -31,7 +31,7 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
     if (!this.state.failed) return this.props.children;
     const kz = screenLanguage() === 'kz';
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 px-6">
+      <div className="min-h-dvh flex items-center justify-center bg-slate-50 px-6">
         <div className="max-w-sm w-full text-center space-y-4">
           <div className="text-5xl" aria-hidden="true">😕</div>
           <h1 className="text-lg font-bold text-slate-900">

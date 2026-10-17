@@ -68,8 +68,49 @@ async function main() {
     assert(false, 'Storage emulator reachable for the file copy check', String(err?.message || err));
   }
 
+  // 4b. Two changes handled at the same time: the slower one must not leave an older version or
+  //     bring back a deleted copy
+  const gated = () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let holdFirst = true;
+    const t = {
+      put: async (key: string, body: Buffer | string, type: string) => {
+        if (holdFirst) {
+          holdFirst = false;
+          await gate;
+        }
+        await target.put(key, body, type);
+      },
+      remove: (key: string) => target.remove(key),
+    };
+    return { t, release: () => release() };
+  };
+  const racePath = `requestContacts/req_race_${tail}`;
+  const raceKey = `firestore/${racePath}.json`;
+  await db.doc(racePath).set({ customerId: 'u1', version: 1 });
+  const slow = gated();
+  const slowRun = m.mirrorDocument(racePath, slow.t);
+  await new Promise((r) => setTimeout(r, 300));
+  await db.doc(racePath).update({ version: 2 });
+  await m.mirrorDocument(racePath, target);
+  slow.release();
+  await slowRun;
+  assert(JSON.parse(kz.get(raceKey)?.body || '{}').data?.version === 2, 'A slow older write is corrected: the copy ends at the newest version');
+
+  const delPath = `requestContacts/req_racedel_${tail}`;
+  await db.doc(delPath).set({ customerId: 'u1', version: 1 });
+  const slow2 = gated();
+  const slowRun2 = m.mirrorDocument(delPath, slow2.t);
+  await new Promise((r) => setTimeout(r, 300));
+  await db.doc(delPath).delete();
+  await m.mirrorDocument(delPath, target);
+  slow2.release();
+  await slowRun2;
+  assert(!kz.has(`firestore/${delPath}.json`), 'A slow write after a deletion does not bring the deleted copy back');
+
   // 5. Every collection with personal data is copied
-  for (const c of ['users', 'providers', 'requests', 'requestContacts', 'offers', 'reviews', 'conversations', 'appointments', 'notifications', 'reports', 'pushTokens']) {
+  for (const c of ['users', 'providers', 'requests', 'requestContacts', 'offers', 'reviews', 'conversations', 'appointments', 'notifications', 'reports', 'pushTokens', 'customerReviews', 'bans', 'reviewSubmissions', 'accountSignals', 'consents', 'adminLog']) {
     assert(m.MIRRORED_PATHS.some((p: string) => p.startsWith(`${c}/`)), `Collection ${c} is copied`);
   }
   assert(m.MIRRORED_PATHS.includes('conversations/{cid}/messages/{id}'), 'Chat messages are copied');

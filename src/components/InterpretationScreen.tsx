@@ -5,28 +5,8 @@ import { ALL_CITIES_LIST } from '../services/analyzer';
 import { SERVICE_CATALOG, getGroup, getService, groupName, searchServices } from '../data/serviceCatalog';
 import { isCityOpen, normalizeCategoryId, normalizeCityId } from '../services/taxonomy';
 import { RequestMediaView } from './RequestMediaView';
-import {
-  ArrowRight,
-  ArrowLeft,
-  MapPin,
-  Tag,
-  Briefcase,
-  Calendar,
-  Wallet,
-  Flame,
-  Sparkles,
-  Edit3,
-  AlertCircle,
-  AlertTriangle,
-  Info,
-  Wrench,
-  Smartphone,
-  HelpCircle,
-  Send,
-  Check,
-  Loader2,
-} from 'lucide-react';
-import { CategoryIcon, Emoji3D } from './CategoryIcon';
+import { AlertCircle, AlertTriangle, ArrowLeft, ArrowRight, Briefcase, Calendar, Check, Edit3, FilePenLine, Flame, HelpCircle, Info, Loader2, MapPin, Send, Smartphone, Sparkles, Tag, Wallet, Wrench } from 'lucide-react';
+import { CategoryIcon, Emoji3D, Photo } from './CategoryIcon';
 import { requestVisual } from './RequestIcon';
 
 interface InterpretationScreenProps {
@@ -216,14 +196,14 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
   };
 
   return (
-    <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col min-h-[calc(100vh-56px)] justify-between">
+    <div className="w-full max-w-md mx-auto px-4 py-5 flex flex-col min-h-[calc(100dvh-56px)] justify-between">
       <div className="space-y-4">
         {/* --- 1. AI CONFIRMATION CARD (When confidence >= 0.70 and user hasn't toggled edit) --- */}
         {!isEditingManual && isHighConfidence ? (
           <div className="space-y-4 animate-fadeIn">
             {/* Header */}
             <div className="text-center pt-1">
-              <Emoji3D code={visual.emoji} size={72} eager className="mx-auto mb-2 animate-popIn" />
+              {visual.photo ? <Photo name={visual.photo} eager className="mx-auto mb-3 w-20 h-20 rounded-3xl shadow-md animate-popIn" /> : <Emoji3D code={visual.emoji} size={72} eager className="mx-auto mb-2 animate-popIn" />}
               <h2 className="text-2xl font-bold text-slate-900 tracking-tight font-display">
                 {t.aiConfirmTitle}
               </h2>
@@ -260,7 +240,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
 
                 {/* Category */}
                 <div className="flex items-start gap-3">
-                  <CategoryIcon emoji={visual.emoji} color={visual.color} size="xs" />
+                  <CategoryIcon emoji={visual.emoji} color={visual.color} photo={visual.photo} size="xs" />
                   <div>
                     <span className="text-[11px] font-semibold text-slate-400 block uppercase tracking-wider">
                       {t.fieldCategory}
@@ -418,7 +398,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                     <button
                       type="submit"
                       disabled={!clarificationInput.trim()}
-                      className="h-9 px-3 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 text-white disabled:text-slate-400 font-semibold text-xs rounded-xl flex items-center gap-1 transition-all"
+                      className="h-9 px-3 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 text-white disabled:text-slate-400 font-semibold text-xs rounded-xl flex items-center gap-1 transition"
                     >
                       <span>{t.btnSubmitClarification}</span>
                       <Send className="w-3 h-3" />
@@ -507,7 +487,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   type="button"
                   onClick={handleProceed}
                   disabled={isSubmitting}
-                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/25 active:scale-[0.99] transition-all"
+                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/25 active:scale-[0.99] transition"
                 >
                   {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                   <span>{t.aiConfirmBtn}</span>
@@ -518,7 +498,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsEditingManual(true)}
-                  className="w-full min-h-[44px] rounded-xl border border-slate-200 hover:bg-slate-50 bg-white text-slate-700 font-semibold text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
+                  className="w-full min-h-[44px] rounded-xl border border-slate-200 hover:bg-slate-50 bg-white text-slate-700 font-semibold text-sm flex items-center justify-center gap-2 transition active:scale-[0.99]"
                 >
                   <Edit3 className="w-4 h-4 text-slate-500" />
                   <span>{t.aiEditBtn}</span>
@@ -528,7 +508,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <button
                   type="button"
                   onClick={onBack}
-                  className="w-full min-h-[40px] text-slate-500 hover:text-slate-800 text-xs font-medium flex items-center justify-center gap-1.5 transition-all"
+                  className="w-full min-h-[40px] text-slate-500 hover:text-slate-800 text-xs font-medium flex items-center justify-center gap-1.5 transition"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
                   <span>{t.backButton}</span>
@@ -541,7 +521,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
           <div className="space-y-4 animate-fadeIn">
             {/* Header */}
             <div className="text-center pt-1">
-              <Emoji3D code="1f4dd" size={64} eager className="mx-auto mb-2 animate-popIn" />
+              <span className="mx-auto mb-3 w-16 h-16 rounded-3xl bg-sky-50 text-sky-700 flex items-center justify-center animate-popIn"><FilePenLine className="w-7 h-7" /></span>
               <h2 className="text-2xl font-bold text-slate-900 tracking-tight font-display">
                 {t.interpretationTitle}
               </h2>
@@ -721,7 +701,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                         key={quickDate}
                         type="button"
                         onClick={() => setDate(quickDate)}
-                        className={`min-h-[32px] px-2.5 text-xs rounded-md transition-all ${
+                        className={`min-h-[32px] px-2.5 text-xs rounded-md transition ${
                           date === quickDate
                             ? 'bg-sky-600 text-white font-medium'
                             : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -758,7 +738,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                         key={bVal}
                         type="button"
                         onClick={() => setBudget(bVal)}
-                        className={`min-h-[32px] px-2.5 text-xs rounded-md transition-all ${
+                        className={`min-h-[32px] px-2.5 text-xs rounded-md transition ${
                           budget === bVal
                             ? 'bg-sky-600 text-white font-medium'
                             : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -781,7 +761,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setUrgency('high')}
-                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition-all ${
+                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition ${
                       urgency === 'high'
                         ? 'bg-amber-50 border-amber-400 text-amber-900 shadow-2xs'
                         : 'border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -792,7 +772,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setUrgency('normal')}
-                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition-all ${
+                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition ${
                       urgency === 'normal'
                         ? 'bg-sky-50 border-sky-400 text-sky-900 shadow-2xs'
                         : 'border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -803,7 +783,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setUrgency('low')}
-                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition-all ${
+                    className={`min-h-[40px] px-2 text-xs font-semibold rounded-lg border transition ${
                       urgency === 'low'
                         ? 'bg-slate-200 border-slate-400 text-slate-900 shadow-2xs'
                         : 'border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -819,7 +799,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all"
+                  className="w-full min-h-[52px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 text-white font-bold text-base flex items-center justify-center gap-2 shadow-md shadow-sky-600/20 active:scale-[0.99] transition"
                 >
                   {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                   <span>{t.continueButton}</span>
@@ -830,7 +810,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setIsEditingManual(false)}
-                    className="w-full min-h-[40px] rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all"
+                    className="w-full min-h-[40px] rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 font-semibold text-xs flex items-center justify-center gap-1.5 transition"
                   >
                     <Sparkles className="w-3.5 h-3.5 text-sky-600" />
                     <span>{language === 'kz' ? 'AI қорытындысына оралу' : 'Вернуться к карточке AI'}</span>
@@ -840,7 +820,7 @@ export const InterpretationScreen: React.FC<InterpretationScreenProps> = ({
                 <button
                   type="button"
                   onClick={onBack}
-                  className="w-full min-h-[44px] rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium text-xs flex items-center justify-center gap-1.5 transition-all"
+                  className="w-full min-h-[44px] rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 font-medium text-xs flex items-center justify-center gap-1.5 transition"
                 >
                   <ArrowLeft className="w-4 h-4" />
                   <span>{t.backButton}</span>

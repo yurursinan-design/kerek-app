@@ -174,7 +174,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 overflow-y-auto space-y-4">
+        <form onSubmit={handleSubmit} className="p-5 overflow-y-auto overscroll-contain space-y-4">
           {isSelfReview && (
             <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 font-medium flex items-center gap-2">
               <CheckCircle className="w-4 h-4 text-amber-600 shrink-0" />
@@ -260,7 +260,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
             <button
               type="submit"
               disabled={rating === 0 || isSubmitting || isSelfReview}
-              className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold text-sm shadow-md shadow-sky-600/20 active:scale-[0.99] transition-all flex items-center justify-center gap-2"
+              className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold text-sm shadow-md shadow-sky-600/20 active:scale-[0.99] transition flex items-center justify-center gap-2"
             >
               {isSubmitting ? (
                 <>

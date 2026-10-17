@@ -15,6 +15,7 @@ import {
   paymentMethodLabel,
   Provider,
   ProviderOffer,
+  RatingSummary,
   ServiceRequest,
 } from '../types';
 import { translations } from '../i18n/translations';
@@ -31,35 +32,20 @@ import {
 } from '../services/taxonomy';
 import { ProviderProfileModal } from './ProviderProfileModal';
 import { PortfolioEditor } from './PortfolioPhotos';
-import { formatTenge, getPriceRange, PriceRange } from '../services/publicStats';
+import { formatTenge, getPriceRange, PriceRange, reviewsCountLabel } from '../services/publicStats';
+import { getCustomerRating, getCustomerReview, rateCustomer } from '../services/reviewsExtra';
 import { ProviderOnboarding } from './ProviderOnboarding';
 import { ChatScreen } from './ChatScreen';
 import { AppointmentSection } from './AppointmentSection';
 import { RequestMediaView } from './RequestMediaView';
 import { getGroup, groupName, providerGroupIds } from '../data/serviceCatalog';
-import { Emoji3D } from './CategoryIcon';
+import { groupPhoto } from '../data/photos';
+import { Emoji3D, Photo } from './CategoryIcon';
 import { RequestIcon } from './RequestIcon';
-import {
-  Briefcase,
-  CheckCircle,
-  MapPin,
-  Calendar,
-  Send,
-  X,
-  Edit3,
-  Flame,
-  ThumbsDown,
-  Clock,
-  Wallet,
-  Star,
-  UserCheck,
-  MessageSquare,
-  Share2,
-  ShieldCheck,
-} from 'lucide-react';
+import { Briefcase, BriefcaseBusiness, Calendar, CheckCircle, Clock, Edit3, Flame, Inbox, MapPin, MessageSquare, Send, Share2, ShieldCheck, Star, ThumbsDown, UserCheck, Wallet, X } from 'lucide-react';
 import { requestWhenLabel } from '../services/dateFormat';
 import { masterProfileLink } from '../services/favorites';
-import { SUPPORT_EMAIL } from '../config/support';
+import { SUPPORT_EMAIL, supportWhatsAppHref } from '../config/support';
 
 export type ProviderTab = 'new' | 'offers' | 'active';
 
@@ -96,6 +82,9 @@ function isSelfRequest(
 }
 
 // The master's usual offer extras and last messages, kept on this phone so the next offer starts with them
+/** Offered requests watched live at most (the newest); older and finished ones are read once */
+const MAX_LIVE_JOBS = 50;
+
 const OFFER_PREFS_KEY = 'kerek_offer_prefs';
 interface OfferPrefs {
   paymentMethods: OfferPaymentMethod[];
@@ -156,7 +145,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [provider, setProvider] = useState<Provider | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isProfilePreviewOpen, setIsProfilePreviewOpen] = useState(false);
-  const [providerRating, setProviderRating] = useState<{ avg: number; count: number }>({ avg: 0, count: 0 });
+  const [providerRating, setProviderRating] = useState<RatingSummary>({ avg: 0, count: 0 });
   const [activeChatRequestId, setActiveChatRequestId] = useState<string | null>(null);
 
   // Profile fallbacks used when saving
@@ -187,6 +176,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [sentOffersMap, setSentOffersMap] = useState<Record<string, ProviderOffer>>({});
   // Same map for the live request feed, which keeps one subscription for the whole screen
   const offersMapRef = useRef<Record<string, ProviderOffer>>({});
+  const offersUnsubscribeRef = useRef<(() => void) | null>(null);
   const mountedRef = useRef(true);
   useEffect(() => {
     mountedRef.current = true;
@@ -234,6 +224,9 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   const [debugInfo, setDebugInfo] = useState<string>('');
   const requestsUnsubscribeRef = useRef<(() => void) | null>(null);
   const requestWatchersRef = useRef(new Map<string, () => void>());
+  // Offered requests that are finished (no live watcher any more) and those already read once
+  const finishedRequestsRef = useRef(new Set<string>());
+  const readOnceRef = useRef(new Set<string>());
 
   const handlePriceAmountChange = (val: string) => {
     const digitsOnly = val.replace(/[^\d]/g, '');
@@ -248,7 +241,6 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
   // Load provider profile and matching requests
   useEffect(() => {
     let isMounted = true;
-    let stopOffers: (() => void) | null = null;
     const watchers = requestWatchersRef.current;
 
     const loadData = async () => {
@@ -268,24 +260,8 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
           setCategory(myProv.category);
         }
 
-        // The provider's offers, live: an accepted or declined offer shows at once, and each
-        // offered request is watched so a job the customer completes or cancels updates here
         if (!isMounted) return;
-        stopOffers?.();
-        stopOffers = repository.subscribeToOffers(
-          { providerId: myProv.id, providerUserId: myProv.userId || myProv.id },
-          (myOffers) => {
-            if (!isMounted) return;
-            const offersMap: Record<string, ProviderOffer> = {};
-            myOffers.forEach((o) => {
-              offersMap[o.requestId] = o;
-            });
-            offersMapRef.current = offersMap;
-            setSentOffersMap(offersMap);
-            syncRequestWatchers(offersMap);
-          }
-        );
-
+        startOffersFeed(myProv, () => isMounted);
         startRequestFeed(myProv, () => isMounted);
 
         try {
@@ -307,41 +283,92 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
         requestsUnsubscribeRef.current();
         requestsUnsubscribeRef.current = null;
       }
-      stopOffers?.();
+      offersUnsubscribeRef.current?.();
+      offersUnsubscribeRef.current = null;
       watchers.forEach((stop) => stop());
       watchers.clear();
     };
   }, []);
 
-  // One live watcher per offered request (declined offers lead nowhere and are not watched).
-  // A request the provider can no longer read (another provider chosen, closed) drops out;
-  // nothing is made up in its place.
+  // Live watchers for the offered requests that can still change: declined offers lead nowhere, a
+  // finished or cancelled job is read once and then left alone, and at most MAX_LIVE_JOBS of the
+  // newest offers are watched live (older ones are read once), so a master with hundreds of past
+  // offers doesn't hold hundreds of open connections. A request the provider can no longer read
+  // (another provider chosen, closed) drops out; nothing is made up in its place.
   const syncRequestWatchers = (offersMap: Record<string, ProviderOffer>) => {
-    const wanted = new Set(Object.keys(offersMap).filter((id) => offersMap[id]?.status !== 'REJECTED'));
+    const byNewest = Object.keys(offersMap)
+      .filter((id) => offersMap[id]?.status !== 'REJECTED')
+      .sort((a, b) => String(offersMap[b]?.createdAt || '').localeCompare(String(offersMap[a]?.createdAt || '')));
+    const live = new Set(byNewest.filter((id) => !finishedRequestsRef.current.has(id)).slice(0, MAX_LIVE_JOBS));
     const dropFromOffered = (id: string) =>
       setOfferedRequests((prev) => {
         if (!(id in prev)) return prev;
         const { [id]: _gone, ...rest } = prev;
         return rest;
       });
+    const wanted = new Set(byNewest);
     requestWatchersRef.current.forEach((stop, id) => {
-      if (wanted.has(id)) return;
+      if (live.has(id)) return;
       stop();
       requestWatchersRef.current.delete(id);
-      dropFromOffered(id);
+      if (!wanted.has(id)) dropFromOffered(id);
     });
-    wanted.forEach((id) => {
+    byNewest.forEach((id) => {
       if (requestWatchersRef.current.has(id)) return;
+      if (!live.has(id)) {
+        // Finished, or older than the newest MAX_LIVE_JOBS: read once
+        if (readOnceRef.current.has(id)) return;
+        readOnceRef.current.add(id);
+        repository
+          .getRequest(id)
+          .then((req) => {
+            if (!mountedRef.current) return;
+            if (req) setOfferedRequests((prev) => ({ ...prev, [id]: req }));
+            else dropFromOffered(id);
+          })
+          .catch(() => readOnceRef.current.delete(id));
+        return;
+      }
       const stop = repository.subscribeToRequest(id, (req) => {
         if (!mountedRef.current) return;
-        if (req) setOfferedRequests((prev) => ({ ...prev, [id]: req }));
-        else dropFromOffered(id);
+        if (!req) {
+          dropFromOffered(id);
+          return;
+        }
+        setOfferedRequests((prev) => ({ ...prev, [id]: req }));
+        if (req.status === 'COMPLETED' || req.status === 'CANCELLED') {
+          // Nothing changes any more: stop watching
+          finishedRequestsRef.current.add(id);
+          readOnceRef.current.add(id);
+          requestWatchersRef.current.get(id)?.();
+          requestWatchersRef.current.delete(id);
+        }
       });
       requestWatchersRef.current.set(id, stop);
     });
   };
 
   // Live list of the provider's city requests (open ones; offered requests are watched separately)
+  // The provider's offers, live: an accepted or declined offer shows at once, and each offered
+  // request is watched so a job the customer completes or cancels updates here. Started on load and
+  // again when a master saves their profile for the first time.
+  const startOffersFeed = (myProv: Provider, isAlive: () => boolean) => {
+    offersUnsubscribeRef.current?.();
+    offersUnsubscribeRef.current = repository.subscribeToOffers(
+      { providerId: myProv.id, providerUserId: myProv.userId || myProv.id },
+      (myOffers) => {
+        if (!isAlive()) return;
+        const offersMap: Record<string, ProviderOffer> = {};
+        myOffers.forEach((o) => {
+          offersMap[o.requestId] = o;
+        });
+        offersMapRef.current = offersMap;
+        setSentOffersMap(offersMap);
+        syncRequestWatchers(offersMap);
+      }
+    );
+  };
+
   const startRequestFeed = (myProv: Provider, isAlive: () => boolean) => {
     // Clean up previous subscription if any
     if (requestsUnsubscribeRef.current) {
@@ -432,6 +459,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
       }
 
       // Refresh the request feed for the updated profile (city may have changed)
+      if (!offersUnsubscribeRef.current) startOffersFeed(savedProvider, () => mountedRef.current);
       startRequestFeed(savedProvider, () => mountedRef.current);
     } catch (err) {
       setErrorMessage(getFriendlyErrorMessage(err, language));
@@ -758,6 +786,61 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
     return sum + (Number.isFinite(amount) ? amount : 0);
   }, 0);
 
+  // Two-sided reviews: the master rates customers of finished jobs, and sees a customer's rating
+  // from other masters before answering a request
+  const [customerRatings, setCustomerRatings] = useState<Record<string, { avg: number; count: number } | null>>({});
+  const feedCustomerKey = Array.from(new Set(newRequests.map((r) => r.customerId).filter(Boolean))).slice(0, 20).join(',');
+  useEffect(() => {
+    let alive = true;
+    const ids = feedCustomerKey ? feedCustomerKey.split(',') : [];
+    ids
+      .filter((id) => !(id in customerRatings))
+      .forEach((id) => {
+        getCustomerRating(id).then((r) => alive && setCustomerRatings((m) => ({ ...m, [id]: r })));
+      });
+    return () => {
+      alive = false;
+    };
+    // Each customer is looked up once
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedCustomerKey]);
+
+  const jobsToRate = completedJobs
+    .slice()
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    .slice(0, 10);
+  const [myCustomerRatings, setMyCustomerRatings] = useState<Record<string, number>>({});
+  const [rateDraft, setRateDraft] = useState<{ requestId: string; stars: number; comment: string } | null>(null);
+  const [rateSaving, setRateSaving] = useState(false);
+  const jobsToRateKey = jobsToRate.map((r) => r.id).join(',');
+  useEffect(() => {
+    let alive = true;
+    (jobsToRateKey ? jobsToRateKey.split(',') : [])
+      .filter((id) => !(id in myCustomerRatings))
+      .forEach((id) => {
+        getCustomerReview(id).then((r) => alive && setMyCustomerRatings((m) => ({ ...m, [id]: r ? r.rating : 0 })));
+      });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobsToRateKey]);
+
+  const submitCustomerRating = async (req: ServiceRequest) => {
+    if (!rateDraft || rateDraft.requestId !== req.id || rateSaving) return;
+    setRateSaving(true);
+    try {
+      await rateCustomer({ requestId: req.id, customerId: req.customerId, rating: rateDraft.stars, comment: rateDraft.comment });
+      setMyCustomerRatings((m) => ({ ...m, [req.id]: rateDraft.stars }));
+      setRateDraft(null);
+    } catch (err) {
+      setErrorMessage(getFriendlyErrorMessage(err, language));
+      setTimeout(() => setErrorMessage(null), 4000);
+    } finally {
+      setRateSaving(false);
+    }
+  };
+
   const newCount = newRequests.length;
   const offersCount = myOffersRequests.length;
   const activeCount = activeJobRequests.length;
@@ -907,11 +990,16 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                       <div className="inline-flex items-center gap-1 text-xs font-bold text-amber-900 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg">
                         <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
                         <span>
-                          {providerRating.avg.toFixed(1)} / 5 ({providerRating.count} {t.reviewsCountUnit})
+                          {providerRating.avg.toFixed(1)} / 5 ({reviewsCountLabel(providerRating.reviews ?? providerRating.count, language === 'kz' ? 'kz' : 'ru')})
                         </span>
                       </div>
                     </div>
                   )}
+                  <p className="pt-1.5 text-[10px] leading-snug text-slate-500">
+                    {language === 'kz'
+                      ? 'Пікірлерді ИИ мен модератор тексереді. Шебердің өтініші бойынша таныстары жазған пікірлер жойылады, профиль бұғатталуы мүмкін.'
+                      : 'Отзывы проверяют ИИ и модератор. Отзывы, написанные знакомыми по просьбе мастера, удаляются, профиль может быть заблокирован.'}
+                  </p>
 
                 {providerGroupIds(provider).length > 0 && (
                   <div className="flex flex-wrap gap-1.5 pt-1">
@@ -919,7 +1007,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                       const g = getGroup(normalizeCategoryId(gid));
                       return (
                         <span key={gid} className="inline-flex items-center gap-1 h-7 pl-1 pr-2.5 rounded-full bg-slate-100 text-[11px] font-semibold text-slate-700">
-                          {g && <Emoji3D code={g.emoji} size={18} />}
+                          {g && (groupPhoto(g.id) ? <Photo name={groupPhoto(g.id)!} className="w-5 h-5 rounded-full" /> : <Emoji3D code={g.emoji} size={18} />)}
                           {g ? groupName(g, language) : getCategoryDisplayName(gid, language)}
                         </span>
                       );
@@ -970,7 +1058,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     </span>
                   </span>
                   <span className={`relative w-11 h-6 rounded-full shrink-0 transition-colors ${provider.paused ? 'bg-slate-300' : 'bg-emerald-500'}`}>
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${provider.paused ? 'left-0.5' : 'left-[22px]'}`} />
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition ${provider.paused ? 'left-0.5' : 'left-[22px]'}`} />
                   </span>
                 </button>
 
@@ -1004,15 +1092,19 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     <Share2 className="w-3.5 h-3.5" />
                     {language === 'kz' ? 'Профиль сілтемесін WhatsApp-та бөлісу' : 'Поделиться профилем в WhatsApp'}
                   </button>
-                  {!provider.iinVerified && SUPPORT_EMAIL && (
+                  {!provider.iinVerified && (supportWhatsAppHref() || SUPPORT_EMAIL) && (
                     <a
-                      href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
-                        language === 'kz' ? 'Жеке басты тексеру (Tapsyr шебері)' : 'Проверка личности (мастер Tapsyr)'
-                      )}&body=${encodeURIComponent(
-                        language === 'kz'
-                          ? `Сәлеметсіз бе! Жеке басымды тексертіп, «Жеке басы тексерілген» белгісін алғым келеді.\nШебер: ${provider.name}\nID: ${provider.id}`
-                          : `Здравствуйте! Хочу пройти проверку личности и получить значок «Личность проверена».\nМастер: ${provider.name}\nID: ${provider.id}`
-                      )}`}
+                      // WhatsApp when the support number is set, otherwise an e-mail with the same text
+                      href={(() => {
+                        const body =
+                          language === 'kz'
+                            ? `Сәлеметсіз бе! Жеке басымды тексертіп, «Жеке басы тексерілген» белгісін алғым келеді.\nШебер: ${provider.name}\nID: ${provider.id}`
+                            : `Здравствуйте! Хочу пройти проверку личности и получить значок «Личность проверена».\nМастер: ${provider.name}\nID: ${provider.id}`;
+                        const subject = language === 'kz' ? 'Жеке басты тексеру (Tapsyr шебері)' : 'Проверка личности (мастер Tapsyr)';
+                        return supportWhatsAppHref(body) || `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+                      })()}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="min-h-[34px] px-2.5 rounded-lg bg-sky-50 text-sky-800 text-[11px] font-bold inline-flex items-center gap-1"
                     >
                       <ShieldCheck className="w-3.5 h-3.5" />
@@ -1028,7 +1120,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab('new')}
-                className={`flex-1 py-2.5 px-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                className={`flex-1 py-2.5 px-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
                   activeTab === 'new'
                     ? 'bg-white text-sky-700 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -1052,7 +1144,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab('offers')}
-                className={`flex-1 py-2.5 px-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                className={`flex-1 py-2.5 px-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
                   activeTab === 'offers'
                     ? 'bg-white text-sky-700 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -1076,7 +1168,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab('active')}
-                className={`flex-1 py-2.5 px-1.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                className={`flex-1 py-2.5 px-1.5 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
                   activeTab === 'active'
                     ? 'bg-white text-emerald-800 shadow-xs'
                     : 'text-slate-600 hover:text-slate-900'
@@ -1110,7 +1202,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                 )}
                 {newRequests.length === 0 ? (
                   <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
-                    <Emoji3D code="1f4e5" size={84} className="mx-auto animate-float" />
+                    <span className="mx-auto w-20 h-20 rounded-full bg-sky-100 text-sky-600 flex items-center justify-center"><Inbox className="w-9 h-9" strokeWidth={1.75} /></span>
                     <h4 className="text-base font-bold text-slate-900">
                       {language === 'kz' ? 'Әзірге жаңа өтініш жоқ' : 'Пока новых заявок нет'}
                     </h4>
@@ -1165,6 +1257,15 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                             {formatDynamicBudget(req.budget, language)}
                           </span>
                         )}
+                        {/* The customer's rating from other masters */}
+                        <span className="flex items-center gap-1 text-slate-500">
+                          <Star className={`w-3.5 h-3.5 ${customerRatings[req.customerId]?.count ? 'fill-amber-400 text-amber-500' : 'text-slate-300'}`} />
+                          {customerRatings[req.customerId]?.count
+                            ? `${customerRatings[req.customerId]!.avg.toFixed(1)} (${customerRatings[req.customerId]!.count})`
+                            : language === 'kz'
+                            ? 'Жаңа тапсырыс беруші'
+                            : 'Новый заказчик'}
+                        </span>
                         {/* How many masters already answered (a request takes 5) */}
                         <span className="flex items-center gap-1 text-slate-500">
                           <Send className="w-3.5 h-3.5 text-slate-400" />
@@ -1188,7 +1289,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         <button
                           type="button"
                           onClick={() => handleOpenOfferModal(req)}
-                          className="min-h-[44px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                          className="min-h-[44px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition cursor-pointer"
                         >
                           <Send className="w-3.5 h-3.5" />
                           <span>{t.btnCanFulfill}</span>
@@ -1197,7 +1298,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         <button
                           type="button"
                           onClick={() => handleDismissRequest(req.id)}
-                          className="min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-[0.98] text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          className="min-h-[44px] rounded-xl bg-slate-100 hover:bg-slate-200 active:scale-[0.98] text-slate-700 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                         >
                           <ThumbsDown className="w-3.5 h-3.5 text-slate-500" />
                           <span>{t.btnCannotFulfill}</span>
@@ -1214,7 +1315,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               <div className="space-y-3">
                 {myOffersRequests.length === 0 ? (
                   <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
-                    <Emoji3D code="1f4e4" size={84} className="mx-auto animate-float" />
+                    <span className="mx-auto w-20 h-20 rounded-full bg-sky-100 text-sky-600 flex items-center justify-center"><Send className="w-8 h-8" strokeWidth={1.75} /></span>
                     <h4 className="text-base font-bold text-slate-900">
                       {language === 'kz'
                         ? 'Жіберілген ұсыныстар жоқ'
@@ -1320,9 +1421,66 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                     </span>
                   </div>
                 </div>
+
+                {/* Rate the customers of finished jobs (other masters see it) */}
+                {jobsToRate.some((r) => myCustomerRatings[r.id] === 0) && (
+                  <div className="p-3 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-2">
+                    <span className="block text-xs font-bold text-slate-800">
+                      {language === 'kz' ? 'Тапсырыс берушіні бағалаңыз' : 'Оцените заказчиков'}
+                    </span>
+                    <span className="block text-[11px] text-slate-500">
+                      {language === 'kz'
+                        ? 'Бағаңызды басқа шеберлер өтінімге жауап бермес бұрын көреді.'
+                        : 'Вашу оценку увидят другие мастера, прежде чем ответить на заявку.'}
+                    </span>
+                    {jobsToRate
+                      .filter((r) => myCustomerRatings[r.id] === 0)
+                      .map((req) => {
+                        const draft = rateDraft?.requestId === req.id ? rateDraft : null;
+                        return (
+                          <div key={req.id} className="pt-2 border-t border-slate-100 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-semibold text-slate-700 truncate">{getRequestTitle(req, language)}</span>
+                              <div className="flex shrink-0">
+                                {[1, 2, 3, 4, 5].map((n) => (
+                                  <button
+                                    key={n}
+                                    type="button"
+                                    aria-label={`${n}`}
+                                    onClick={() => setRateDraft({ requestId: req.id, stars: n, comment: draft?.comment || '' })}
+                                    className="w-7 h-7 flex items-center justify-center"
+                                  >
+                                    <Star className={`w-5 h-5 ${draft && n <= draft.stars ? 'fill-amber-400 text-amber-500' : 'text-slate-300'}`} />
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            {draft && (
+                              <div className="flex gap-2">
+                                <input
+                                  value={draft.comment}
+                                  onChange={(e) => setRateDraft({ ...draft, comment: e.target.value.slice(0, 500) })}
+                                  placeholder={language === 'kz' ? 'Пікір (міндетті емес)' : 'Комментарий (необязательно)'}
+                                  className="flex-1 min-w-0 h-9 px-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs outline-none focus:border-sky-500"
+                                />
+                                <button
+                                  type="button"
+                                  disabled={rateSaving}
+                                  onClick={() => submitCustomerRating(req)}
+                                  className="shrink-0 h-9 px-3 rounded-lg bg-sky-600 text-white text-xs font-bold disabled:opacity-50"
+                                >
+                                  {language === 'kz' ? 'Жіберу' : 'Отправить'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                )}
                 {activeJobRequests.length === 0 ? (
                   <div className="p-8 bg-linear-to-b from-sky-50 to-white rounded-[28px] border border-sky-100 text-center space-y-3 animate-fadeUp">
-                    <Emoji3D code="1f4bc" size={84} className="mx-auto animate-float" />
+                    <span className="mx-auto w-20 h-20 rounded-full bg-sky-100 text-sky-600 flex items-center justify-center"><BriefcaseBusiness className="w-9 h-9" strokeWidth={1.75} /></span>
                     <h4 className="text-base font-bold text-slate-900">
                       {language === 'kz'
                         ? 'Белсенді жұмыстар жоқ'
@@ -1428,7 +1586,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                           <button
                             type="button"
                             onClick={() => setActiveChatRequestId(req.id)}
-                            className="w-full min-h-[42px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer"
+                            className="w-full min-h-[42px] rounded-xl bg-sky-600 hover:bg-sky-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition cursor-pointer"
                           >
                             <MessageSquare className="w-4 h-4" />
                             <span>{t.chatWithCustomerBtn}</span>
@@ -1451,7 +1609,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                               type="button"
                               onClick={() => handleStartWork(req.id)}
                               disabled={actionLoadingReqId === req.id}
-                              className="w-full min-h-[46px] rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-50"
+                              className="w-full min-h-[46px] rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm shadow-amber-500/20 transition cursor-pointer disabled:opacity-50"
                             >
                               <Flame className="w-4 h-4" />
                               <span>
@@ -1524,7 +1682,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                               type="button"
                               onClick={() => openDoneForm(req.id)}
                               disabled={actionLoadingReqId === req.id}
-                              className="w-full min-h-[46px] rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm shadow-emerald-600/20 transition-all cursor-pointer disabled:opacity-50"
+                              className="w-full min-h-[46px] rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm shadow-emerald-600/20 transition cursor-pointer disabled:opacity-50"
                             >
                               <CheckCircle className="w-4 h-4" />
                               <span>
@@ -1598,7 +1756,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setOfferPriceType('fixed')}
-                    className={`py-2 px-1 text-center rounded-lg text-xs font-bold transition-all ${
+                    className={`py-2 px-1 text-center rounded-lg text-xs font-bold transition ${
                       offerPriceType === 'fixed'
                         ? 'bg-white text-sky-700 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
@@ -1609,7 +1767,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setOfferPriceType('from')}
-                    className={`py-2 px-1 text-center rounded-lg text-xs font-bold transition-all ${
+                    className={`py-2 px-1 text-center rounded-lg text-xs font-bold transition ${
                       offerPriceType === 'from'
                         ? 'bg-white text-sky-700 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
@@ -1620,7 +1778,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => setOfferPriceType('inspection')}
-                    className={`py-2 px-1 text-center rounded-lg text-xs font-bold transition-all ${
+                    className={`py-2 px-1 text-center rounded-lg text-xs font-bold transition ${
                       offerPriceType === 'inspection'
                         ? 'bg-white text-sky-700 shadow-xs'
                         : 'text-slate-600 hover:text-slate-900'
@@ -1774,7 +1932,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                         onClick={() =>
                           setOfferPayments((prev) => (on ? prev.filter((x) => x !== m) : [...prev, m]))
                         }
-                        className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
+                        className={`px-3 py-2 rounded-xl text-xs font-bold border transition ${
                           on ? 'bg-sky-50 border-sky-400 text-sky-800' : 'bg-white border-slate-200 text-slate-500'
                         }`}
                       >
@@ -1810,7 +1968,7 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
               <button
                 type="submit"
                 disabled={sendingOffer}
-                className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-sky-600/20 transition-all flex items-center justify-center gap-2"
+                className="w-full min-h-[48px] rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-70 active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-sky-600/20 transition flex items-center justify-center gap-2"
               >
                 {sendingOffer ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Send className="w-4 h-4" />}
                 <span>{t.btnSendOffer}</span>

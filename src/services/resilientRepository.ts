@@ -9,6 +9,7 @@ import {
   ProviderOffer,
   RequestAttachment,
   RequestStatus,
+  RatingSummary,
   Review,
   ServiceRequest,
   User,
@@ -24,9 +25,32 @@ import {
 import { localRepository, getCurrentUserId } from './localRepository';
 import { firebaseRepository, FirebaseRepository } from './firebaseRepository';
 import { auth, isFirebaseConfigured } from './firebase';
-import { logTechnicalError } from './errorHandler';
+import { isCloudRejection, logTechnicalError } from './errorHandler';
 import { notificationService } from './notificationService';
 import { offlineQueueService } from './offlineQueueService';
+import { providerOfferId } from './ids';
+
+/**
+ * Requests and offers this device created or changed while offline and has not sent yet. Only
+ * these may come from the device copy when the cloud answers: everything else follows the cloud,
+ * so a record deleted, taken away or moved on elsewhere never comes back from the cache.
+ */
+function unsyncedIds(): { requests: Set<string>; offers: Set<string> } {
+  const requests = new Set<string>();
+  const offers = new Set<string>();
+  for (const m of offlineQueueService.getQueue()) {
+    if (m.status === 'FAILED_FATAL' || m.status === 'FAILED_PERMANENT') continue;
+    const p = m.payload || {};
+    if (m.type === 'createRequest' && p.id) requests.add(p.id);
+    if ((m.type === 'updateRequest' || m.type === 'updateRequestStatus') && p.requestId) requests.add(p.requestId);
+    if (m.type === 'createOffer') {
+      const id = p.id || (p.requestId && m.authUid ? providerOfferId(p.requestId, m.authUid) : '');
+      if (id) offers.add(id);
+    }
+    if (m.type === 'updateOffer' && p.offerId) offers.add(p.offerId);
+  }
+  return { requests, offers };
+}
 
 /**
  * Saving needs the connection: offline, Firestore would wait silently until the phone is back online
@@ -218,14 +242,23 @@ export class ResilientRepository implements Repository {
 
   async getRequest(requestId: string): Promise<ServiceRequest | null> {
     let cloudReq: ServiceRequest | null = null;
+    let cloudAnswered = false;
     if (this.firebaseRepo.isAvailable()) {
       try {
         cloudReq = await this.firebaseRepo.getRequest(requestId);
-      } catch {}
+        cloudAnswered = true;
+      } catch (err) {
+        // Access taken away (security rules): the device copy must not keep showing it
+        if (isCloudRejection(err)) return null;
+      }
     }
     const localReq = await this.localRepo.getRequest(requestId);
-    if (!cloudReq) return localReq;
-    if (!localReq) return cloudReq;
+    const unsynced = unsyncedIds().requests.has(requestId);
+    // No cloud answer (offline, or device mode): the device copy is all there is
+    if (!cloudAnswered) return localReq;
+    // The cloud has no such request (deleted, never sent): only an unsent local one counts
+    if (!cloudReq) return unsynced ? localReq : null;
+    if (!localReq || !unsynced) return cloudReq;
 
     const statusOrder: Record<string, number> = {
       OPEN: 1,
@@ -240,7 +273,7 @@ export class ResilientRepository implements Repository {
     };
     const cRank = statusOrder[cloudReq.status] || 0;
     const lRank = statusOrder[localReq.status] || 0;
-    // A local copy only wins when it is further along (a change not yet synced). Otherwise the
+    // A local copy only wins when it holds a change not yet sent and is further along. Otherwise the
     // cloud document is the current one: the device copy can lack fields other people wrote
     // (for example the provider reporting the job finished) and its createdAt can be rewritten
     // by the local cache, so it is not a reliable tie-breaker.
@@ -251,8 +284,10 @@ export class ResilientRepository implements Repository {
   async getRequests(filter?: RequestFilter): Promise<ServiceRequest[]> {
     if (this.firebaseRepo.isAvailable()) {
       let cloudReqs: ServiceRequest[] = [];
+      let cloudAnswered = false;
       try {
         cloudReqs = await this.firebaseRepo.getRequests(filter);
+        cloudAnswered = true;
       } catch (err: any) {
         console.warn(
           `[KEREK Firebase Fallback] Operation "getRequests" on Cloud Firestore fell back to LocalRepository:`,
@@ -268,15 +303,16 @@ export class ResilientRepository implements Repository {
         console.warn('[ResilientRepository.getRequests] Local read note:', err?.message || err);
       }
 
-      // Merge cloud and local requests so requests created in either store are available!
+      // The cloud list is the truth; from the device only requests not sent yet are added (when the
+      // cloud didn't answer at all, the device copy is shown as it is)
+      if (!cloudAnswered) return localReqs;
       const map = new Map<string, ServiceRequest>();
       (cloudReqs || []).forEach((r) => map.set(r.id, r));
       // One write for the whole list, fields kept as they are
       this.localRepo.cacheRequests?.(cloudReqs || [])?.catch(() => {});
+      const unsent = unsyncedIds().requests;
       (localReqs || []).forEach((r) => {
-        if (!map.has(r.id)) {
-          map.set(r.id, r);
-        }
+        if (!map.has(r.id) && unsent.has(r.id)) map.set(r.id, r);
       });
       return Array.from(map.values());
     }
@@ -388,8 +424,10 @@ export class ResilientRepository implements Repository {
   async getOffers(filter?: OfferFilter): Promise<ProviderOffer[]> {
     if (this.firebaseRepo.isAvailable()) {
       let cloudOffers: ProviderOffer[] = [];
+      let cloudAnswered = false;
       try {
         cloudOffers = await this.firebaseRepo.getOffers(filter);
+        cloudAnswered = true;
       } catch (err: any) {
         console.warn(
           `[KEREK Firebase Fallback] Operation "getOffers" on Cloud Firestore fell back to LocalRepository:`,
@@ -405,13 +443,13 @@ export class ResilientRepository implements Repository {
         console.warn('[ResilientRepository.getOffers] Local read note:', err?.message || err);
       }
 
-      // Merge cloud and local offers so offers are never lost across offline / Spark / fallback sessions!
+      // The cloud list is the truth; from the device only offers not sent yet are added
+      if (!cloudAnswered) return localOffers;
       const map = new Map<string, ProviderOffer>();
       (cloudOffers || []).forEach((o) => map.set(o.id, o));
+      const unsent = unsyncedIds().offers;
       (localOffers || []).forEach((o) => {
-        if (!map.has(o.id)) {
-          map.set(o.id, o);
-        }
+        if (!map.has(o.id) && unsent.has(o.id)) map.set(o.id, o);
       });
       return Array.from(map.values());
     }
@@ -512,7 +550,7 @@ export class ResilientRepository implements Repository {
     return Array.from(map.values());
   }
 
-  async getRatingSummary(providerIds: string[]): Promise<{ avg: number; count: number }> {
+  async getRatingSummary(providerIds: string[]): Promise<RatingSummary> {
     return this.executeWithFallback(
       'getRatingSummary',
       () => this.firebaseRepo.getRatingSummary(providerIds),
