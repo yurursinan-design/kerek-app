@@ -72,17 +72,6 @@ jobs:
           workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
           service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
 
-      - uses: google-github-actions/setup-gcloud@v2
-        if: vars.DEPLOY_FUNCTIONS == 'true'
-
-      - name: Claude anahtarının yeri
-        if: vars.DEPLOY_FUNCTIONS == 'true'
-        # The review check's Claude key (functions/src/reviewModeration.ts): a placeholder until the owner
-        # stores a real one (scripts/cloudshell-claude-key.sh), so a deploy never waits for it
-        run: |
-          gcloud secrets describe ANTHROPIC_API_KEY --project "$FIREBASE_PROJECT_ID" >/dev/null 2>&1 \
-            || printf 'henuz-yok' | gcloud secrets create ANTHROPIC_API_KEY --data-file=- --project "$FIREBASE_PROJECT_ID" -q
-
       - name: Firebase'e yükle
         env:
           DEPLOY_STORAGE: ${{ vars.DEPLOY_STORAGE }}

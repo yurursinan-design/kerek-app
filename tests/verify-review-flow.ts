@@ -1,5 +1,5 @@
 /**
- * The review check against the Firestore and Auth emulators (no Gemini or Claude call): the login
+ * The review check against the Firestore and Auth emulators (no Gemini call): the login
  * signals (functions/src/signals.ts), the signals found between a customer, a master and the master's
  * other reviewers, holding, publishing and rejecting (functions/src/reviewModeration.ts), the rating
  * that counts each customer once (functions/src/stats.ts) and forgetting a deleted account.
@@ -123,11 +123,6 @@ async function main() {
   assert(!friendCodes.includes('ring_network'), 'Different networks among the reviewers are not flagged', friendFacts.signals);
   const burst = friendFacts.signals.find((s: { code: string }) => s.code === 'review_burst');
   assert(!!burst && burst.detail === 3, 'Three reviews from first-time customers within a week are a burst', friendFacts.signals);
-  assert(
-    friendFacts.earlier.length === 2 && friendFacts.earlier.every((e: { text: string; firstJob: boolean }) => e.text.startsWith('Отличный') && e.firstJob),
-    "Claude reads the master's earlier reviews",
-    friendFacts.earlier
-  );
 
   // --- 3. Holding, publishing, rejecting
   const subRef = db.collection('reviewSubmissions').doc(requestId);

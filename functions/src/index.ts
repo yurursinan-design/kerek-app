@@ -22,7 +22,7 @@ export {
 export { claimAdmin } from './admin';
 // Jobs done, answer speed and typical prices, counted from real events; see stats.ts
 export { statsOnOfferCreated, statsOnRequestCompleted, ratingsOnReviewWritten } from './stats';
-// Reviews are checked (suspicion signals, Gemini and Claude) before they are published; see reviewModeration.ts
+// Reviews are checked (suspicion signals and Gemini) before they are published; see reviewModeration.ts
 export { moderateReviewSubmission, decideReview, reviewerPhone } from './reviewModeration';
 // Which phone and network accounts log in from, for the review check; see signals.ts
 export { cleanupAccountData } from './signals';

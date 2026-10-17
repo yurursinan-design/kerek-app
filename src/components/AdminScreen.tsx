@@ -157,26 +157,20 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
     off_topic: ['жұмысқа қатысы жоқ', 'не о работе'],
     self_promotion: ['шебер өзін мақтағандай', 'похоже, пишет сам мастер'],
     rating_mismatch: ['жұлдыз мәтінге сай емес', 'звёзды не совпадают с текстом'],
-    coordinated: ['келісіп жазылғанға ұқсайды', 'похоже на договорённость'],
-    suspicious_pattern: ['тапсырыс жасанды сияқты', 'заказ похож на постановку'],
     unclear: ['сенімді емес', 'не уверен'],
     unavailable: ['жауап бермеді', 'не ответил'],
   };
 
-  /** One AI's verdict as a chip: "Gemini: текст в порядке", "Claude: похоже на договорённость" */
-  const verdictChip = (who: 'Gemini' | 'Claude', v: { decision: string; reason: string }) => {
-    const label = who === 'Claude' && v.reason === 'ok' ? tx('күдік жоқ', 'подозрений нет') : (reasonLabels[v.reason] || reasonLabels.unclear)[kz ? 0 : 1];
-    return (
-      <span
-        key={who}
-        className={`px-2 py-1 rounded-full border text-[11px] font-bold ${
-          v.decision === 'approve' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'
-        }`}
-      >
-        {who}: {label}
-      </span>
-    );
-  };
+  /** Gemini's verdict on the text as a chip: "ИИ: текст в порядке" */
+  const verdictChip = (v: { decision: string; reason: string }) => (
+    <span
+      className={`px-2 py-1 rounded-full border text-[11px] font-bold ${
+        v.decision === 'approve' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'
+      }`}
+    >
+      {tx('ИИ', 'ИИ')}: {(reasonLabels[v.reason] || reasonLabels.unclear)[kz ? 0 : 1]}
+    </span>
+  );
 
   /** 25 мин / 3 ч / 2 дн. */
   const duration = (m: number) =>
@@ -369,7 +363,6 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
               )}
               {visibleChecks.map((r) => {
                 const status = reviewStatus(r);
-                const claudeNote = r.claude ? (kz ? r.claude.noteKz || r.claude.noteRu : r.claude.noteRu || r.claude.noteKz) : '';
                 const facts = contextLines(r.context);
                 return (
                   <div key={r.id} className="p-3 bg-white rounded-2xl border border-slate-200 space-y-2">
@@ -388,10 +381,9 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
                     ) : (
                       <p className="text-[11px] text-slate-400">{tx('Мәтінсіз, тек жұлдыздар', 'Без текста, только звёзды')}</p>
                     )}
-                    {(r.ai || r.claude || r.signals.length > 0) && (
+                    {(r.ai || r.signals.length > 0) && (
                       <div className="flex flex-wrap gap-1.5">
-                        {r.ai && verdictChip('Gemini', r.ai)}
-                        {r.claude && verdictChip('Claude', r.claude)}
+                        {r.ai && verdictChip(r.ai)}
                         {r.signals.map((s) => (
                           <span
                             key={s.code}
@@ -407,11 +399,6 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
                           </span>
                         ))}
                       </div>
-                    )}
-                    {claudeNote && (
-                      <p className="text-[11px] text-slate-700 bg-violet-50 border border-violet-100 rounded-xl p-2 leading-relaxed break-words">
-                        <span className="font-bold">Claude:</span> {claudeNote}
-                      </p>
                     )}
                     {facts.length > 0 && (
                       <div className="text-[11px] text-slate-500 leading-relaxed">

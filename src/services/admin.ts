@@ -228,8 +228,6 @@ export interface ReviewCheck {
   signals: { code: ReviewSignalCode; detail?: number }[];
   /** Gemini's reading of the text */
   ai?: { decision: 'approve' | 'hold'; reason: string };
-  /** Claude's judgment of the whole picture, once its key is stored */
-  claude?: { decision: 'approve' | 'hold'; reason: string; noteRu: string; noteKz: string };
   context?: ReviewContext;
   decidedBy?: 'ai' | 'operator';
 }
@@ -260,15 +258,6 @@ export async function loadReviewChecks(): Promise<ReviewCheck[]> {
       status: ['published', 'held', 'rejected'].includes(x.status) ? x.status : undefined,
       signals: Array.isArray(x.signals) ? x.signals.filter((s: unknown) => typeof (s as { code?: unknown })?.code === 'string') : [],
       ai: x.ai && typeof x.ai.decision === 'string' ? { decision: x.ai.decision, reason: String(x.ai.reason || '') } : undefined,
-      claude:
-        x.claude && typeof x.claude.decision === 'string'
-          ? {
-              decision: x.claude.decision,
-              reason: String(x.claude.reason || ''),
-              noteRu: String(x.claude.noteRu || ''),
-              noteKz: String(x.claude.noteKz || ''),
-            }
-          : undefined,
       context: x.context && typeof x.context === 'object' ? numbersOnly(x.context) : undefined,
       decidedBy: x.decidedBy === 'ai' || x.decidedBy === 'operator' ? x.decidedBy : undefined,
     };
