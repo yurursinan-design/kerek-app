@@ -188,7 +188,30 @@ export async function unblockAccount(uid: string): Promise<void> {
 
 // ------------------------------------------------------------ Review check (functions/src/reviewModeration.ts)
 
-export type ReviewSignalCode = 'same_device' | 'same_network' | 'quick_job' | 'new_account' | 'contact_in_text';
+export type ReviewSignalCode =
+  | 'same_device'
+  | 'same_network'
+  | 'ring_device'
+  | 'ring_network'
+  | 'quick_job'
+  | 'instant_pick'
+  | 'new_account'
+  | 'new_master'
+  | 'review_burst'
+  | 'contact_in_text';
+
+/** What the check knew about the two accounts and the job (functions/src/reviewModeration.ts) */
+export interface ReviewContext {
+  customerAgeDays?: number;
+  customerJobs?: number;
+  customerMasters?: number;
+  masterAgeDays?: number;
+  masterPublished?: number;
+  masterRejected?: number;
+  minutesToChoose?: number;
+  minutesToDone?: number;
+  offers?: number;
+}
 
 export interface ReviewCheck {
   id: string;
@@ -201,14 +224,24 @@ export interface ReviewCheck {
   createdAt: string;
   /** Not set while the check is still running */
   status?: 'published' | 'held' | 'rejected';
-  /** detail: minutes (quick_job) or hours (new_account) */
+  /** detail: minutes (quick_job, instant_pick), hours (new_account) or a number of reviews */
   signals: { code: ReviewSignalCode; detail?: number }[];
+  /** Gemini's reading of the text */
   ai?: { decision: 'approve' | 'hold'; reason: string };
+  /** Claude's judgment of the whole picture, once its key is stored */
+  claude?: { decision: 'approve' | 'hold'; reason: string; noteRu: string; noteKz: string };
+  context?: ReviewContext;
   decidedBy?: 'ai' | 'operator';
 }
 
 /** Whether the operator still has to decide: held by the check, or the check never finished. */
 export const reviewNeedsDecision = (r: ReviewCheck) => r.status === 'held' || !r.status;
+
+function numbersOnly(raw: Record<string, unknown>): ReviewContext {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw)) if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  return out as ReviewContext;
+}
 
 /** The newest submitted reviews, with what the check found. */
 export async function loadReviewChecks(): Promise<ReviewCheck[]> {
@@ -227,6 +260,16 @@ export async function loadReviewChecks(): Promise<ReviewCheck[]> {
       status: ['published', 'held', 'rejected'].includes(x.status) ? x.status : undefined,
       signals: Array.isArray(x.signals) ? x.signals.filter((s: unknown) => typeof (s as { code?: unknown })?.code === 'string') : [],
       ai: x.ai && typeof x.ai.decision === 'string' ? { decision: x.ai.decision, reason: String(x.ai.reason || '') } : undefined,
+      claude:
+        x.claude && typeof x.claude.decision === 'string'
+          ? {
+              decision: x.claude.decision,
+              reason: String(x.claude.reason || ''),
+              noteRu: String(x.claude.noteRu || ''),
+              noteKz: String(x.claude.noteKz || ''),
+            }
+          : undefined,
+      context: x.context && typeof x.context === 'object' ? numbersOnly(x.context) : undefined,
       decidedBy: x.decidedBy === 'ai' || x.decidedBy === 'operator' ? x.decidedBy : undefined,
     };
   });
@@ -240,4 +283,11 @@ export async function decideReviewCheck(id: string, action: 'publish' | 'reject'
     'decideReview'
   )({ id, action });
   return data.status === 'published' ? 'published' : 'rejected';
+}
+
+/** The reviewing customer's phone number, for a check call before deciding (looked up on the server). */
+export async function reviewerPhone(id: string): Promise<string> {
+  if (!app) throw new Error('Firebase is not configured');
+  const { data } = await httpsCallable<{ id: string }, { phone: string }>(getFunctions(app, 'asia-south1'), 'reviewerPhone')({ id });
+  return String(data.phone || '');
 }

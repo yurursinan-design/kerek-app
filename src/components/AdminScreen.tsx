@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Flag, Loader2, MessageSquareText, Search, ShieldCheck, Users, X } from 'lucide-react';
+import { BarChart3, Flag, Loader2, MessageSquareText, Phone, Search, ShieldCheck, Users, X } from 'lucide-react';
 import { Language, Provider } from '../types';
 import { getFriendlyErrorMessage } from '../services';
 import { REPORT_REASONS } from '../services/reports';
+import { toTelHref } from '../services/phoneLinks';
+import { reviewsCountLabel } from '../services/publicStats';
 import {
   AdminReport,
   blockAccount,
@@ -17,6 +19,8 @@ import {
   reportedAccount,
   resolveReport,
   ReviewCheck,
+  ReviewContext,
+  reviewerPhone,
   reviewNeedsDecision,
   setMasterFlag,
   unblockAccount,
@@ -44,6 +48,8 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
   const [masters, setMasters] = useState<Provider[] | null>(null);
   const [reviewChecks, setReviewChecks] = useState<ReviewCheck[] | null>(null);
   const [showDecided, setShowDecided] = useState(false);
+  // Customers' numbers the operator looked up for a check call, by review
+  const [phones, setPhones] = useState<Record<string, string>>({});
   const [showResolved, setShowResolved] = useState(false);
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -120,6 +126,12 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
       setReviewChecks((list) => (list || []).map((x) => (x.id === r.id ? { ...x, status, decidedBy: 'operator' } : x)));
     });
 
+  const showPhone = (r: ReviewCheck) =>
+    run(`${r.id}_phone`, async () => {
+      const phone = await reviewerPhone(r.id);
+      setPhones((p) => ({ ...p, [r.id]: phone }));
+    });
+
   const toggleBlockMaster = (m: Provider) =>
     run(`${m.id}_block`, async () => {
       const isBlocked = blocked[m.id] ?? (await isAccountBlocked(m.id));
@@ -137,16 +149,59 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
     { id: 'masters', label: tx('Шеберлер', 'Мастера'), icon: <Users className="w-4 h-4" /> },
   ];
 
-  const aiLabels: Record<string, [string, string]> = {
-    ok: ['ИИ: мәтін дұрыс', 'ИИ: текст в порядке'],
-    insult: ['ИИ: балағат немесе қорлау', 'ИИ: мат или оскорбления'],
-    contacts: ['ИИ: байланыс деректері', 'ИИ: контакты или личные данные'],
-    advert: ['ИИ: жарнама', 'ИИ: реклама'],
-    off_topic: ['ИИ: жұмысқа қатысы жоқ', 'ИИ: не о работе'],
-    self_promotion: ['ИИ: шебер өзін мақтағандай', 'ИИ: похоже, пишет сам мастер'],
-    rating_mismatch: ['ИИ: жұлдыз мәтінге сай емес', 'ИИ: звёзды не совпадают с текстом'],
-    unclear: ['ИИ: сенімді емес', 'ИИ: не уверен'],
-    unavailable: ['ИИ жауап бермеді', 'ИИ не ответил'],
+  const reasonLabels: Record<string, [string, string]> = {
+    ok: ['мәтін дұрыс', 'текст в порядке'],
+    insult: ['балағат немесе қорлау', 'мат или оскорбления'],
+    contacts: ['байланыс деректері', 'контакты или личные данные'],
+    advert: ['жарнама', 'реклама'],
+    off_topic: ['жұмысқа қатысы жоқ', 'не о работе'],
+    self_promotion: ['шебер өзін мақтағандай', 'похоже, пишет сам мастер'],
+    rating_mismatch: ['жұлдыз мәтінге сай емес', 'звёзды не совпадают с текстом'],
+    coordinated: ['келісіп жазылғанға ұқсайды', 'похоже на договорённость'],
+    suspicious_pattern: ['тапсырыс жасанды сияқты', 'заказ похож на постановку'],
+    unclear: ['сенімді емес', 'не уверен'],
+    unavailable: ['жауап бермеді', 'не ответил'],
+  };
+
+  /** One AI's verdict as a chip: "Gemini: текст в порядке", "Claude: похоже на договорённость" */
+  const verdictChip = (who: 'Gemini' | 'Claude', v: { decision: string; reason: string }) => {
+    const label = who === 'Claude' && v.reason === 'ok' ? tx('күдік жоқ', 'подозрений нет') : (reasonLabels[v.reason] || reasonLabels.unclear)[kz ? 0 : 1];
+    return (
+      <span
+        key={who}
+        className={`px-2 py-1 rounded-full border text-[11px] font-bold ${
+          v.decision === 'approve' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-rose-200 bg-rose-50 text-rose-800'
+        }`}
+      >
+        {who}: {label}
+      </span>
+    );
+  };
+
+  /** 25 мин / 3 ч / 2 дн. */
+  const duration = (m: number) =>
+    m < 60 ? `${m} ${tx('мин', 'мин')}` : m < 2880 ? `${Math.round(m / 60)} ${tx('сағ', 'ч')}` : `${Math.round(m / 1440)} ${tx('күн', 'дн.')}`;
+
+  /** What the check knew about the two accounts and the job, in up to three short lines */
+  const contextLines = (c?: ReviewContext): string[] => {
+    if (!c) return [];
+    const lines: string[] = [];
+    const customer: string[] = [];
+    if (c.customerAgeDays !== undefined) customer.push(tx(`тіркелгіге ${c.customerAgeDays} күн`, `аккаунту ${c.customerAgeDays} дн.`));
+    if (c.customerJobs !== undefined) customer.push(tx(`${c.customerJobs} тапсырыс`, `заказов ${c.customerJobs}`));
+    if (c.customerMasters !== undefined) customer.push(tx(`${c.customerMasters} шеберге пікір`, `отзывов мастерам ${c.customerMasters}`));
+    if (customer.length) lines.push(`${tx('Клиент', 'Клиент')}: ${customer.join(', ')}`);
+    const master: string[] = [];
+    if (c.masterAgeDays !== undefined) master.push(tx(`тіркелгіге ${c.masterAgeDays} күн`, `аккаунту ${c.masterAgeDays} дн.`));
+    if (c.masterPublished !== undefined) master.push(tx(`${c.masterPublished} пікір жарияланған`, `опубликовано ${c.masterPublished}`));
+    if (c.masterRejected) master.push(tx(`${c.masterRejected} қабылданбаған`, `отклонено ${c.masterRejected}`));
+    if (master.length) lines.push(`${tx('Шебер', 'Мастер')}: ${master.join(', ')}`);
+    const job: string[] = [];
+    if (c.minutesToChoose !== undefined) job.push(tx(`таңдау: ${duration(c.minutesToChoose)}`, `выбран через ${duration(c.minutesToChoose)}`));
+    if (c.minutesToDone !== undefined) job.push(tx(`аяқталуы: ${duration(c.minutesToDone)}`, `готово через ${duration(c.minutesToDone)}`));
+    if (c.offers !== undefined) job.push(tx(`${c.offers} ұсыныс`, `предложений ${c.offers}`));
+    if (job.length) lines.push(`${tx('Тапсырыс', 'Заказ')}: ${job.join(', ')}`);
+    return lines;
   };
 
   const signalLabel = (s: ReviewCheck['signals'][number]) => {
@@ -156,6 +211,20 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
         return tx('Клиент пен шебер бір телефоннан', 'Клиент и мастер с одного телефона');
       case 'same_network':
         return tx('Бір желіден кірген', 'Вход из одной сети');
+      case 'ring_device':
+        return tx('Шебердің басқа клиентімен бір телефон', 'Один телефон с другим клиентом мастера');
+      case 'ring_network':
+        return tx('Шебердің басқа клиентімен бір желі', 'Одна сеть с другим клиентом мастера');
+      case 'instant_pick':
+        return n === null
+          ? tx('Бірден таңдалды', 'Выбран сразу')
+          : tx(`${n} минутта таңдалды, басқа ұсыныс жоқ`, `Выбран через ${n} мин, других предложений нет`);
+      case 'new_master':
+        return tx('Жаңа шебер: алғашқы 3 пікірді сіз тексересіз', 'Новый мастер: первые 3 отзыва проверяете вы');
+      case 'review_burst':
+        return n === null
+          ? tx('Қысқа уақытта көп пікір', 'Много отзывов за короткое время')
+          : tx(`7 күнде жаңа клиенттерден ${n} пікір`, `${reviewsCountLabel(n, 'ru')} от новых клиентов за 7 дней`);
       case 'quick_job':
         return n === null ? tx('Тез аяқталған', 'Завершён очень быстро') : tx(`Таңдаудан ${n} мин кейін аяқталды`, `Завершён через ${n} мин после выбора`);
       case 'new_account':
@@ -287,8 +356,8 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
             <>
               <p className="text-[11px] text-slate-500 leading-relaxed">
                 {tx(
-                  'Әр пікірді ИИ (Gemini) тексереді. Күдікті пікір сіз шешкенше жарияланбайды. Шебер бағасында әр клиент бір рет есептеледі.',
-                  'Каждый отзыв проверяет ИИ (Gemini). Подозрительный отзыв не публикуется, пока вы не решите. В оценке мастера каждый клиент учитывается один раз.'
+                  'Әр пікірді ИИ мен жалған пікір белгілерін іздейтін жүйе тексереді. Күдікті пікір сіз шешкенше жарияланбайды: клиентке қоңырау шалып тексеруге болады. Әр шебердің алғашқы 3 пікірін сіз тексересіз. Шебер бағасында әр клиент бір рет есептеледі.',
+                  'Каждый отзыв проверяют ИИ и система, которая ищет признаки накрутки. Подозрительный отзыв не публикуется, пока вы не решите: можно проверить звонком клиенту. Первые 3 отзыва каждого мастера проверяете вы. В оценке мастера каждый клиент учитывается один раз.'
                 )}
               </p>
               <label className="flex items-center gap-2 text-xs text-slate-600">
@@ -300,7 +369,8 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
               )}
               {visibleChecks.map((r) => {
                 const status = reviewStatus(r);
-                const aiHolds = r.ai && r.ai.decision !== 'approve';
+                const claudeNote = r.claude ? (kz ? r.claude.noteKz || r.claude.noteRu : r.claude.noteRu || r.claude.noteKz) : '';
+                const facts = contextLines(r.context);
                 return (
                   <div key={r.id} className="p-3 bg-white rounded-2xl border border-slate-200 space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -318,23 +388,18 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
                     ) : (
                       <p className="text-[11px] text-slate-400">{tx('Мәтінсіз, тек жұлдыздар', 'Без текста, только звёзды')}</p>
                     )}
-                    {(r.ai || r.signals.length > 0) && (
+                    {(r.ai || r.claude || r.signals.length > 0) && (
                       <div className="flex flex-wrap gap-1.5">
-                        {r.ai && (
-                          <span
-                            className={`px-2 py-1 rounded-full border text-[11px] font-bold ${
-                              aiHolds ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                            }`}
-                          >
-                            {(aiLabels[r.ai.reason] || aiLabels.unclear)[kz ? 0 : 1]}
-                          </span>
-                        )}
+                        {r.ai && verdictChip('Gemini', r.ai)}
+                        {r.claude && verdictChip('Claude', r.claude)}
                         {r.signals.map((s) => (
                           <span
                             key={s.code}
                             className={`px-2 py-1 rounded-full border text-[11px] font-bold ${
-                              s.code === 'same_device' || s.code === 'contact_in_text'
+                              s.code === 'same_device' || s.code === 'ring_device' || s.code === 'contact_in_text'
                                 ? 'border-rose-200 bg-rose-50 text-rose-800'
+                                : s.code === 'new_master'
+                                ? 'border-sky-200 bg-sky-50 text-sky-800'
                                 : 'border-amber-200 bg-amber-50 text-amber-800'
                             }`}
                           >
@@ -343,7 +408,44 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
                         ))}
                       </div>
                     )}
+                    {claudeNote && (
+                      <p className="text-[11px] text-slate-700 bg-violet-50 border border-violet-100 rounded-xl p-2 leading-relaxed break-words">
+                        <span className="font-bold">Claude:</span> {claudeNote}
+                      </p>
+                    )}
+                    {facts.length > 0 && (
+                      <div className="text-[11px] text-slate-500 leading-relaxed">
+                        {facts.map((line) => (
+                          <div key={line}>{line}</div>
+                        ))}
+                      </div>
+                    )}
                     <p className={`text-[11px] font-bold ${status.tone}`}>{status.text}</p>
+                    {reviewNeedsDecision(r) &&
+                      (phones[r.id] ? (
+                        <a
+                          href={toTelHref(phones[r.id]) || undefined}
+                          className="w-full h-9 rounded-xl border border-sky-200 bg-sky-50 text-sky-800 text-xs font-bold flex items-center justify-center gap-2"
+                        >
+                          <Phone className="w-4 h-4" />
+                          {tx('Қоңырау шалу', 'Позвонить')}: {phones[r.id]}
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => showPhone(r)}
+                          disabled={busy === `${r.id}_phone`}
+                          className="w-full h-9 rounded-xl border border-slate-200 bg-white text-slate-700 text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                          <Phone className="w-4 h-4" />
+                          {tx('Клиентке қоңырау шалып тексеру', 'Проверить звонком клиенту')}
+                        </button>
+                      ))}
+                    {reviewNeedsDecision(r) && phones[r.id] && (
+                      <p className="text-[10px] text-slate-500">
+                        {tx('Сұраңыз: не істелді, қашан, қанша төледіңіз?', 'Спросите: что сделали, когда, сколько заплатили?')}
+                      </p>
+                    )}
                     <div className="flex gap-2">
                       {reviewNeedsDecision(r) && (
                         <>

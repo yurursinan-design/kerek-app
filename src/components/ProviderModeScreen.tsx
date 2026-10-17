@@ -953,6 +953,11 @@ export const ProviderModeScreen: React.FC<ProviderModeScreenProps> = ({
                       </div>
                     </div>
                   )}
+                  <p className="pt-1.5 text-[10px] leading-snug text-slate-500">
+                    {language === 'kz'
+                      ? 'Пікірлерді ИИ мен модератор тексереді. Шебердің өтініші бойынша таныстары жазған пікірлер жойылады, профиль бұғатталуы мүмкін.'
+                      : 'Отзывы проверяют ИИ и модератор. Отзывы, написанные знакомыми по просьбе мастера, удаляются, профиль может быть заблокирован.'}
+                  </p>
 
                 {providerGroupIds(provider).length > 0 && (
                   <div className="flex flex-wrap gap-1.5 pt-1">

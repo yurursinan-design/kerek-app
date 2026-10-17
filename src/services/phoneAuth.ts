@@ -113,7 +113,7 @@ async function sendCodeViaWhatsApp(phoneE164: string, lang: Lang): Promise<Confi
     verificationId: 'whatsapp-code',
     confirm: async (code: string) => {
       if (!auth) throw new Error('Firebase Auth is not configured');
-      const deviceId = getDeviceId();
+      const deviceId = await getDeviceId();
       const { data } = await httpsCallable<{ phone: string; code: string; deviceId?: string }, { token: string }>(functions, 'verifyLoginCode')({
         phone: phoneE164,
         code,

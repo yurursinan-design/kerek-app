@@ -476,7 +476,7 @@ export const ProviderProfileModal: React.FC<ProviderProfileModalProps> = ({
                     {reviewsFromCustomersLabel(totalReviews, reviewsCount, language === 'kz' ? 'kz' : 'ru')}
                   </span>
                   <span className="text-[10px] text-slate-500">
-                    {language === 'kz' ? 'Әр клиент бір рет есептеледі' : 'Каждый клиент учтён один раз'}
+                    {language === 'kz' ? 'Әр клиент бір рет есептеледі · пікірлер тексерілген' : 'Каждый клиент учтён один раз · отзывы проверены'}
                   </span>
                 </div>
               </div>

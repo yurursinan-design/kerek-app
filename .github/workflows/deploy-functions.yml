@@ -19,7 +19,7 @@ concurrency:
 
 env:
   FIREBASE_PROJECT_ID: kerek-9d153
-  ONLY: functions:requestLoginCode,functions:verifyLoginCode,functions:onNewRequestNotifyProviders,functions:notifyOnOfferCreated,functions:notifyOnOfferUpdated,functions:notifyOnMessageCreated,functions:notifyOnRequestUpdated,functions:notifyOnAppointmentWritten,functions:pushOnNotificationCreated,functions:kzMirrorUsers,functions:kzMirrorProviders,functions:kzMirrorRequests,functions:kzMirrorRequestContacts,functions:kzMirrorOffers,functions:kzMirrorReviews,functions:kzMirrorConversations,functions:kzMirrorMessages,functions:kzMirrorAppointments,functions:kzMirrorNotifications,functions:kzMirrorReports,functions:kzMirrorPushTokens,functions:statsOnOfferCreated,functions:statsOnRequestCompleted,functions:claimAdmin,functions:kzMirrorCustomerReviews,functions:kzMirrorBans,functions:kzMirrorFileSaved,functions:kzMirrorFileDeleted,functions:ratingsOnReviewWritten,functions:moderateReviewSubmission,functions:decideReview,functions:cleanupAccountData,functions:kzMirrorReviewSubmissions,functions:kzMirrorAccountSignals
+  ONLY: functions:requestLoginCode,functions:verifyLoginCode,functions:onNewRequestNotifyProviders,functions:notifyOnOfferCreated,functions:notifyOnOfferUpdated,functions:notifyOnMessageCreated,functions:notifyOnRequestUpdated,functions:notifyOnAppointmentWritten,functions:pushOnNotificationCreated,functions:kzMirrorUsers,functions:kzMirrorProviders,functions:kzMirrorRequests,functions:kzMirrorRequestContacts,functions:kzMirrorOffers,functions:kzMirrorReviews,functions:kzMirrorConversations,functions:kzMirrorMessages,functions:kzMirrorAppointments,functions:kzMirrorNotifications,functions:kzMirrorReports,functions:kzMirrorPushTokens,functions:statsOnOfferCreated,functions:statsOnRequestCompleted,functions:claimAdmin,functions:kzMirrorCustomerReviews,functions:kzMirrorBans,functions:kzMirrorFileSaved,functions:kzMirrorFileDeleted,functions:ratingsOnReviewWritten,functions:moderateReviewSubmission,functions:decideReview,functions:reviewerPhone,functions:cleanupAccountData,functions:kzMirrorReviewSubmissions,functions:kzMirrorAccountSignals
 
 jobs:
   deploy:
@@ -43,6 +43,13 @@ jobs:
           service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
 
       - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Claude anahtarının yeri
+        # The review check's Claude key (functions/src/reviewModeration.ts): a placeholder until the owner
+        # stores a real one (scripts/cloudshell-claude-key.sh), so a deploy never waits for it
+        run: |
+          gcloud secrets describe ANTHROPIC_API_KEY --project "$FIREBASE_PROJECT_ID" >/dev/null 2>&1 \
+            || printf 'henuz-yok' | gcloud secrets create ANTHROPIC_API_KEY --data-file=- --project "$FIREBASE_PROJECT_ID" -q
 
       - name: Cloud Storage hizmet hesabı
         # Storage triggers need the Cloud Storage service agent, which Google creates the first time
