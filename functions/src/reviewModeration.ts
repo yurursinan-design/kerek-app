@@ -20,6 +20,7 @@ import { GEMINI_CONFIG } from './config';
 import { isOperator } from './admin';
 import { allowCall, DAY_MS } from './limits';
 import { redactPersonalDetails } from './redact';
+import { writeAdminLog } from './adminLog';
 
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
 const REGION = 'asia-south1';
@@ -425,6 +426,13 @@ export const decideReview = onCall<{ id?: string; action?: string }, Promise<{ s
     const status = action === 'publish' ? 'published' : 'rejected';
     const done = await settle(db, db.collection('reviewSubmissions').doc(id), status, { decidedBy: 'operator', decidedByUid: uid });
     if (!done) throw new HttpsError('not-found', 'No such review.');
+    await writeAdminLog(`review_${id}_${action}_${Date.now()}`, {
+      action: `review_${action}`,
+      target: `reviewSubmissions/${id}`,
+      actorUid: uid,
+      actorType: 'app_user',
+      after: { status },
+    });
     return { status };
   }
 );
@@ -444,8 +452,13 @@ export const reviewerPhone = onCall<{ id?: string }, Promise<{ phone: string }>>
     const customerId = String((await getFirestore().collection('reviewSubmissions').doc(id).get()).get('customerId') || '');
     const phone = customerId ? await getAuth().getUser(customerId).then((u) => u.phoneNumber || '', () => '') : '';
     if (!phone) throw new HttpsError('not-found', 'No phone number for this review.');
-    // Who looked up whose number stays in the logs, without the number itself
-    console.info(`[reviewerPhone] operator ${uid} looked up the customer of review ${id}`);
+    // Who looked up whose number is kept in the operator's history, without the number itself
+    await writeAdminLog(`reviewer_phone_${id}_${Date.now()}`, {
+      action: 'viewed_reviewer_phone',
+      target: `reviewSubmissions/${id}`,
+      actorUid: uid,
+      actorType: 'app_user',
+    });
     return { phone };
   }
 );

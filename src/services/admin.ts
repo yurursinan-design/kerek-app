@@ -280,3 +280,52 @@ export async function reviewerPhone(id: string): Promise<string> {
   const { data } = await httpsCallable<{ id: string }, { phone: string }>(getFunctions(app, 'asia-south1'), 'reviewerPhone')({ id });
   return String(data.phone || '');
 }
+
+// ------------------------------------------------------------ Operator history and chat evidence
+
+export interface AdminLogEntry {
+  id: string;
+  action: string;
+  target: string;
+  actorUid?: string;
+  actorType?: string;
+  changed?: string[];
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+  reason?: string;
+  /** ISO time from the server timestamp */
+  at: string;
+}
+
+/** The newest records of what operators did (functions/src/adminLog.ts). */
+export async function loadAdminLog(max = 50): Promise<AdminLogEntry[]> {
+  const snap = await getDocs(query(collection(firestore(), 'adminLog'), orderBy('at', 'desc'), limit(max)));
+  return snap.docs.map((d) => {
+    const x = d.data();
+    const at = x.at && typeof x.at.toDate === 'function' ? x.at.toDate().toISOString() : '';
+    return {
+      id: d.id,
+      action: String(x.action || ''),
+      target: String(x.target || ''),
+      actorUid: typeof x.actorUid === 'string' ? x.actorUid : undefined,
+      actorType: typeof x.actorType === 'string' ? x.actorType : undefined,
+      changed: Array.isArray(x.changed) ? x.changed.map(String) : undefined,
+      before: x.before && typeof x.before === 'object' ? x.before : undefined,
+      after: x.after && typeof x.after === 'object' ? x.after : undefined,
+      reason: typeof x.reason === 'string' ? x.reason : undefined,
+      at,
+    };
+  });
+}
+
+export interface ConversationEvidence {
+  reported: { uid: string; isMaster: boolean };
+  messages: { senderRole: 'customer' | 'provider'; text: string; createdAt: string; files: string[] }[];
+}
+
+/** For a chat report: the last 50 messages and the account reported (looked up on the server, logged). */
+export async function loadConversationEvidence(reportId: string): Promise<ConversationEvidence> {
+  if (!app) throw new Error('Firebase is not configured');
+  const { data } = await httpsCallable<{ reportId: string }, ConversationEvidence>(getFunctions(app, 'asia-south1'), 'reportEvidence')({ reportId });
+  return { reported: data.reported, messages: Array.isArray(data.messages) ? data.messages : [] };
+}

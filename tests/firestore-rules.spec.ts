@@ -2537,6 +2537,31 @@ async function runTestSuite() {
       await assertFails(counted('up2'));
     });
 
+    // =========================================================================
+    // SECTION 23: Operator history and consent records are server-only (O02, consent)
+    // =========================================================================
+    console.log('\n--- SECTION 23: Operator history and consent records ---');
+    await test('O02: nobody writes the operator history from the app; only operators read it', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'adminLog', 'ev1'), { action: 'ban', target: 'bans/x' });
+        await setDoc(doc(c.firestore(), 'consents', 'cons_u'), { uid: 'cons_u', version: '2026-10-17.3' });
+        await setDoc(doc(c.firestore(), 'consents', 'cons_u', 'history', 'h1'), { version: '2026-10-17.3' });
+      });
+      await assertFails(setDoc(doc(adminDb(), 'adminLog', 'ev2'), { action: 'fake' }));
+      await assertFails(deleteDoc(doc(adminDb(), 'adminLog', 'ev1')));
+      await assertFails(getDoc(doc(phoneUser('cons_u').firestore(), 'adminLog', 'ev1')));
+      await assertSucceeds(getDoc(doc(adminDb(), 'adminLog', 'ev1')));
+    });
+    await test('Consent: the account and the operator read the consent record; nobody writes it from the app', async () => {
+      const own = phoneUser('cons_u').firestore();
+      await assertSucceeds(getDoc(doc(own, 'consents', 'cons_u')));
+      await assertSucceeds(getDocs(collection(own, 'consents', 'cons_u', 'history')));
+      await assertFails(getDoc(doc(phoneUser('other_u').firestore(), 'consents', 'cons_u')));
+      await assertFails(setDoc(doc(own, 'consents', 'cons_u'), { uid: 'cons_u', version: '2099-01-01' }));
+      await assertFails(setDoc(doc(own, 'consents', 'cons_u', 'history', 'h2'), { version: 'x' }));
+      await assertSucceeds(getDoc(doc(adminDb(), 'consents', 'cons_u')));
+    });
+
   } finally {
     // Isolated Emulator Cleanup
     console.log('\n--- CLEANUP: Clearing Emulator Data ---');

@@ -880,6 +880,23 @@ service cloud.firestore {
     // =================== Reports Collection ===================
     // "Report" button: a phone-verified user flags a provider, offer, request or chat. One report per
     // user and target (the id is bound to both), write-once; only operators (admin claim) read them.
+    // The operator's history (functions/src/adminLog.ts): written by the server only, read by operators
+    match /adminLog/{logId} {
+      allow get, list: if isAdmin();
+      allow write: if false;
+    }
+
+    // Consent records written by the server when a phone login is confirmed (verifyLoginCode):
+    // the account and the operator read them; nobody changes or deletes them from the app
+    match /consents/{uid} {
+      allow get: if isSignedIn() && (uid == request.auth.uid || isAdmin());
+      allow list, write: if false;
+      match /history/{entryId} {
+        allow read: if isSignedIn() && (uid == request.auth.uid || isAdmin());
+        allow write: if false;
+      }
+    }
+
     // Today's counters of the account (see countedToday): only ever one up, only its own, only today
     match /usage/{usageId} {
       allow get: if isSignedIn() && usageId.matches(request.auth.uid + '_[0-9]{8}');

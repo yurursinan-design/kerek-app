@@ -11,7 +11,11 @@ import {
   checkAdminRole,
   decideReviewCheck,
   HealthNumbers,
+  AdminLogEntry,
+  ConversationEvidence,
   isAccountBlocked,
+  loadAdminLog,
+  loadConversationEvidence,
   loadHealthNumbers,
   loadMasters,
   loadReports,
@@ -55,6 +59,8 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [blocked, setBlocked] = useState<Record<string, boolean>>({});
+  const [evidence, setEvidence] = useState<Record<string, ConversationEvidence>>({});
+  const [adminLog, setAdminLog] = useState<AdminLogEntry[] | null>(null);
   // Opening the panel asks the server again, which also refreshes the operator list the rules check
   const [ready, setReady] = useState(false);
 
@@ -69,10 +75,11 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
     setError(null);
     const fail = (err: unknown) => setError(getFriendlyErrorMessage(err, language));
     if (tab === 'health' && !health) loadHealthNumbers().then(setHealth).catch(fail);
+    if (tab === 'health' && !adminLog) loadAdminLog().then(setAdminLog).catch(() => setAdminLog([]));
     if (tab === 'reports' && !reports) loadReports().then(setReports).catch(fail);
     if (tab === 'masters' && !masters) loadMasters().then(setMasters).catch(fail);
     if (tab === 'reviews' && !reviewChecks) loadReviewChecks().then(setReviewChecks).catch(fail);
-  }, [ready, tab, health, reports, masters, reviewChecks, language]);
+  }, [ready, tab, health, adminLog, reports, masters, reviewChecks, language]);
 
   // Loaded at once so the tab shows how many reviews wait for a decision
   useEffect(() => {
@@ -120,7 +127,7 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
   const reportAction = (r: AdminReport, action: 'block' | 'resolve') =>
     run(`${r.id}_${action}`, async () => {
       if (action === 'block') {
-        const who = await reportedAccount(r);
+        const who = r.targetType === 'conversation' ? (evidence[r.id] || (await loadConversationEvidence(r.id))).reported : await reportedAccount(r);
         if (!who) throw new Error('Validation Error: ' + tx('Тіркелгі табылмады', 'Аккаунт не найден'));
         await blockAccount(who.uid, r.reason, who.isMaster);
         setBlocked((b) => ({ ...b, [who.uid]: true }));
@@ -129,6 +136,13 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
         await resolveReport(r.id, tx('Қаралды', 'Рассмотрено'));
       }
       setReports((list) => (list || []).map((x) => (x.id === r.id ? { ...x, status: 'resolved' } : x)));
+    });
+
+  /** A chat report: the conversation is shown only on request, and every look is logged */
+  const showEvidence = (r: AdminReport) =>
+    run(`${r.id}_evidence`, async () => {
+      const ev = await loadConversationEvidence(r.id);
+      setEvidence((e) => ({ ...e, [r.id]: ev }));
     });
 
   const decideReview = (r: ReviewCheck, action: 'publish' | 'reject') =>
@@ -351,6 +365,37 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
                   'Если предложений на заявку мало или мастера отвечают долго, привлеките больше мастеров.'
                 )}
               </p>
+              <h3 className="text-sm font-bold text-slate-900 pt-2">{tx('Әрекеттер тарихы', 'История действий')}</h3>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                {tx(
+                  'Бұғаттау, белгілер, шағым мен пікір шешімдері және жеке деректерді қарау серверде жазылады; оны өзгерту не өшіру мүмкін емес.',
+                  'Блокировки, значки, решения по жалобам и отзывам и просмотр личных данных записываются на сервере; изменить или удалить запись нельзя.'
+                )}
+              </p>
+              {!adminLog ? (
+                <Loader2 className="w-5 h-5 animate-spin text-sky-600 mx-auto" />
+              ) : adminLog.length === 0 ? (
+                <p className="text-xs text-slate-500">{tx('Әзірге жазба жоқ', 'Записей пока нет')}</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {adminLog.map((e) => (
+                    <div key={e.id} className="p-2 bg-white rounded-xl border border-slate-200 text-[11px] leading-snug">
+                      <div className="flex justify-between gap-2">
+                        <span className="font-bold text-slate-900">{e.action}</span>
+                        <span className="text-slate-400 shrink-0">{e.at.slice(0, 16).replace('T', ' ')}</span>
+                      </div>
+                      <div className="text-slate-600 font-mono break-all">{e.target}</div>
+                      {e.changed && e.changed.length > 0 && (
+                        <div className="text-slate-500 break-words">
+                          {e.changed.map((k) => `${k}: ${JSON.stringify(e.before?.[k] ?? '—')} → ${JSON.stringify(e.after?.[k] ?? '—')}`).join('; ')}
+                        </div>
+                      )}
+                      {e.reason && <div className="text-slate-500">{e.reason}</div>}
+                      <div className="text-slate-400 font-mono break-all">{e.actorUid || e.actorType || ''}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           ))}
 
@@ -473,7 +518,9 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
               {visibleReports.length === 0 && <p className="text-sm text-slate-500 text-center py-6">{tx('Жаңа шағым жоқ', 'Новых жалоб нет')}</p>}
               {visibleReports.map((r) => {
                 const reason = REPORT_REASONS.find((x) => x.id === r.reason);
-                const canBlock = r.targetType !== 'conversation';
+                const isChat = r.targetType === 'conversation';
+                const ev = evidence[r.id];
+                const canBlock = !isChat || Boolean(ev?.reported.uid);
                 return (
                   <div key={r.id} className="p-3 bg-white rounded-2xl border border-slate-200 space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -486,6 +533,34 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
                       <span className="font-mono">{r.targetId.slice(0, 24)}</span>
                     </div>
                     {r.details && <p className="text-xs text-slate-700 bg-slate-50 rounded-xl p-2">{r.details}</p>}
+                    {isChat && !ev && (
+                      <button
+                        type="button"
+                        onClick={() => showEvidence(r)}
+                        disabled={busy === `${r.id}_evidence`}
+                        className="w-full h-9 rounded-xl border border-slate-200 text-slate-800 text-xs font-bold disabled:opacity-50"
+                      >
+                        {tx('Хат алмасуды көру (тіркеледі)', 'Посмотреть переписку (записывается)')}
+                      </button>
+                    )}
+                    {ev && (
+                      <div className="max-h-64 overflow-y-auto space-y-1.5 bg-slate-50 rounded-xl p-2">
+                        {ev.messages.length === 0 && <p className="text-[11px] text-slate-500">{tx('Хабарлама жоқ', 'Сообщений нет')}</p>}
+                        {ev.messages.map((m, i) => (
+                          <div key={i} className="text-[11px] leading-snug">
+                            <span className={`font-bold ${m.senderRole === 'provider' ? 'text-sky-700' : 'text-amber-700'}`}>
+                              {m.senderRole === 'provider' ? tx('Шебер', 'Мастер') : tx('Клиент', 'Клиент')}
+                            </span>
+                            <span className="text-slate-400"> · {(m.createdAt || '').slice(5, 16).replace('T', ' ')}</span>
+                            <div className="text-slate-800 whitespace-pre-wrap break-words">{m.text}</div>
+                            {m.files.length > 0 && <div className="text-slate-500">📎 {m.files.join(', ')}</div>}
+                          </div>
+                        ))}
+                        <p className="text-[10px] text-slate-500 pt-1">
+                          {ev.reported.isMaster ? tx('Шағым шебер туралы', 'Жалоба на мастера') : tx('Шағым клиент туралы', 'Жалоба на клиента')}
+                        </p>
+                      </div>
+                    )}
                     {r.status === 'resolved' ? (
                       <p className="text-[11px] font-bold text-emerald-700">✓ {r.resolution || tx('Қаралды', 'Рассмотрено')}</p>
                     ) : (

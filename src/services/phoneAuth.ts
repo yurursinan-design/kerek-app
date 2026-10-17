@@ -13,6 +13,7 @@ import { app, auth, ensureFirebaseAuth, isFirebaseConfigured } from './firebase'
 import { clearPersonalLocalData } from './storage';
 import { forgetPushToken } from './pushNotifications';
 import { getDeviceId } from './deviceId';
+import { LEGAL_VERSION } from '../data/legalTexts';
 
 /**
  * Phone login.
@@ -114,9 +115,14 @@ async function sendCodeViaWhatsApp(phoneE164: string, lang: Lang): Promise<Confi
     confirm: async (code: string) => {
       if (!auth) throw new Error('Firebase Auth is not configured');
       const deviceId = await getDeviceId();
-      const { data } = await httpsCallable<{ phone: string; code: string; deviceId?: string }, { token: string }>(functions, 'verifyLoginCode')({
+      // The login form is sent only with the consent box ticked; the server records this version
+      const { data } = await httpsCallable<{ phone: string; code: string; deviceId?: string; consentVersion: string }, { token: string }>(
+        functions,
+        'verifyLoginCode'
+      )({
         phone: phoneE164,
         code,
+        consentVersion: LEGAL_VERSION,
         ...(deviceId ? { deviceId } : {}),
       });
       return signInWithCustomToken(auth, data.token);

@@ -1,5 +1,5 @@
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { app, isFirebaseConfigured, ensureFirebaseAuth } from './firebase';
+import { app, auth, isFirebaseConfigured, ensureFirebaseAuth } from './firebase';
 import { checkClientRateLimit, resetClientRateLimit } from './rateLimiter';
 
 /**
@@ -122,6 +122,19 @@ export async function parseServiceRequest(text: string): Promise<AiParserRespons
         error: {
           code: 'UNAUTHENTICATED',
           message: 'Пользователь должен быть авторизован для вызова AI парсера.',
+        },
+      };
+    }
+
+    // Request texts go to Gemini only after the privacy policy was accepted at phone login (the
+    // server checks the same, functions/src/index.ts); before that the app's own analysis is used
+    if (!auth?.currentUser?.phoneNumber) {
+      return {
+        success: false,
+        data: null,
+        error: {
+          code: 'UNAUTHENTICATED',
+          message: 'AI-анализ доступен после входа по номеру телефона. Выполняется локальный анализ.',
         },
       };
     }

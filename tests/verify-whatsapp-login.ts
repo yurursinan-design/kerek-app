@@ -56,8 +56,13 @@ async function main() {
   const { getFirestore } = requireFromFunctions('firebase-admin/firestore');
   const auth = getAuth();
 
+  // The app sends the privacy policy version the user accepted with every code check
   const run = (fn: any, uid: string, data: any, ip = '10.0.0.1') =>
-    fn.run({ data, auth: { uid, token: {} }, rawRequest: { headers: { 'x-forwarded-for': ip }, ip } });
+    fn.run({
+      data: fn === verifyLoginCode && !('consentVersion' in data) ? { ...data, consentVersion: '2026-10-17.3' } : data,
+      auth: { uid, token: {} },
+      rawRequest: { headers: { 'x-forwarded-for': ip }, ip },
+    });
   const errCode = async (p: Promise<unknown>) => {
     try {
       await p;
@@ -97,6 +102,7 @@ async function main() {
   // 3. Wrong code counts, right code links the number to the caller's account
   const wrong = code === '000000' ? '111111' : '000000';
   assert((await errCode(run(verifyLoginCode, uidA, { phone, code: wrong }))) === 'invalid-argument', 'Wrong code is refused');
+  assert((await errCode(run(verifyLoginCode, uidA, { phone, code, consentVersion: '' }))) === 'failed-precondition', 'Without the consent the code is not accepted');
   const res = await run(verifyLoginCode, uidA, { phone, code });
   assert(typeof res?.token === 'string' && res.token.length > 20, 'Right code returns a sign-in token');
   assert((await auth.getUser(uidA)).phoneNumber === phone, 'Number is now on the caller’s own account');
@@ -110,6 +116,9 @@ async function main() {
   assert((await errCode(run(requestLoginCode, uidB, { phone, lang: 'kz' }, '10.0.0.2'))) === 'ok', 'Second device requests a code');
   const code2 = sent[sent.length - 1].bodyCode;
   assert(sent[sent.length - 1].lang === 'kk', 'Kazakh template for the Kazakh app');
+  const consent = (await getFirestore().collection('consents').doc(uidA).get()).data();
+  const history = await getFirestore().collection('consents').doc(uidA).collection('history').get();
+  assert(consent?.version === '2026-10-17.3' && typeof consent?.acceptedAt?.toMillis === 'function' && history.size >= 1, 'The consent is recorded on the server with its version and server time');
   const res2 = await run(verifyLoginCode, uidB, { phone, code: code2 });
   const claims = JSON.parse(Buffer.from(String(res2.token).split('.')[1], 'base64url').toString());
   assert(claims.uid === uidA, 'Second device signs in to the account that has the number', claims.uid);

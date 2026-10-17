@@ -30,6 +30,8 @@ export { cleanupAccountData } from './signals';
 export { renewRequestFileLinks } from './fileLinks';
 // Uploaded files must be what their type says; photos lose hidden metadata; see uploadCheck.ts
 export { checkUploadedFile } from './uploadCheck';
+// The operator's history and the evidence of a reported conversation; see adminLog.ts
+export { adminLogBans, adminLogMasterFlags, adminLogReports, adminLogConfig, reportEvidence } from './adminLog';
 // Copy of all personal data in Kazakhstan (Law 94-V art. 12 p. 2); see kzMirror.ts
 export {
   kzMirrorUsers,
@@ -48,6 +50,9 @@ export {
   kzMirrorBans,
   kzMirrorReviewSubmissions,
   kzMirrorAccountSignals,
+  kzMirrorConsents,
+  kzMirrorConsentHistory,
+  kzMirrorAdminLog,
   kzMirrorFileSaved,
   kzMirrorFileDeleted,
 } from './kzMirror';
@@ -106,6 +111,12 @@ export const parseServiceRequest = onCall<
 
     const uid = request.auth.uid;
     const isAnonymous = (request.auth.token as any)?.firebase?.sign_in_provider === 'anonymous';
+
+    // Request texts go to Gemini only for accounts that accepted the privacy policy (the phone login
+    // records the consent, whatsappLogin.ts); visitors get the app's own analysis instead
+    if (!(await db.collection('consents').doc(uid).get()).exists) {
+      throw new HttpsError('failed-precondition', 'Accept the privacy policy (phone login) to use the AI analysis.');
+    }
 
     // 2. Server-side rate limits: per account (stricter for anonymous visitors), per day, per
     // network address (so new anonymous accounts don't get around the account limit), and one

@@ -110,7 +110,7 @@ async function main() {
   assert(!kz.has(`firestore/${delPath}.json`), 'A slow write after a deletion does not bring the deleted copy back');
 
   // 5. Every collection with personal data is copied
-  for (const c of ['users', 'providers', 'requests', 'requestContacts', 'offers', 'reviews', 'conversations', 'appointments', 'notifications', 'reports', 'pushTokens', 'customerReviews', 'bans', 'reviewSubmissions', 'accountSignals']) {
+  for (const c of ['users', 'providers', 'requests', 'requestContacts', 'offers', 'reviews', 'conversations', 'appointments', 'notifications', 'reports', 'pushTokens', 'customerReviews', 'bans', 'reviewSubmissions', 'accountSignals', 'consents', 'adminLog']) {
     assert(m.MIRRORED_PATHS.some((p: string) => p.startsWith(`${c}/`)), `Collection ${c} is copied`);
   }
   assert(m.MIRRORED_PATHS.includes('conversations/{cid}/messages/{id}'), 'Chat messages are copied');

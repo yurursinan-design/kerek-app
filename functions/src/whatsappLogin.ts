@@ -1,6 +1,6 @@
 import * as crypto from 'crypto';
 import { getAuth } from 'firebase-admin/auth';
-import { getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { FieldValue, getFirestore, Timestamp } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret, defineString } from 'firebase-functions/params';
 import { allowCall, clientIp, DAY_MS } from './limits';
@@ -162,7 +162,27 @@ export const requestLoginCode = onCall<{ phone?: string; lang?: string }, Promis
   }
 );
 
-export const verifyLoginCode = onCall<{ phone?: string; code?: string; deviceId?: string }, Promise<{ token: string }>>(
+/**
+ * The consent given in the login form (privacy policy and terms of this version), kept on the server:
+ * consents/{uid} holds the latest, consents/{uid}/history one entry per login. Server time, never
+ * written by the app (firestore.rules).
+ */
+export async function recordConsent(uid: string, version: string, ip: string, now = Date.now()): Promise<void> {
+  const db = getFirestore();
+  const entry = {
+    version,
+    acceptedAt: FieldValue.serverTimestamp(),
+    method: 'phone_login',
+    // Only a short fingerprint of the network address, enough to tell logins apart
+    ...(ip ? { ipHash: sha256(`consent:${ip}`).slice(0, 16) } : {}),
+  };
+  const batch = db.batch();
+  batch.set(db.collection('consents').doc(uid), { uid, ...entry }, { merge: true });
+  batch.set(db.collection('consents').doc(uid).collection('history').doc(String(now)), entry);
+  await batch.commit();
+}
+
+export const verifyLoginCode = onCall<{ phone?: string; code?: string; deviceId?: string; consentVersion?: string }, Promise<{ token: string }>>(
   { region: REGION, maxInstances: 5, timeoutSeconds: 20 },
   async (request) => {
     const callerUid = request.auth?.uid;
@@ -177,6 +197,11 @@ export const verifyLoginCode = onCall<{ phone?: string; code?: string; deviceId?
     const phone = normalizeKzPhone(request.data?.phone);
     const code = String(request.data?.code || '').replace(/\D/g, '');
     if (!phone || code.length !== 6) throw new HttpsError('invalid-argument', 'Invalid code.');
+    // The login form can only be sent with the consent box ticked; the version it showed comes along
+    const consentVersion = String(request.data?.consentVersion || '').trim();
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}(\.[0-9]+)?$/.test(consentVersion)) {
+      throw new HttpsError('failed-precondition', 'Consent to the privacy policy is required.');
+    }
 
     const db = getFirestore();
     const ref = db.collection('loginCodes').doc(codeDocId(phone));
@@ -217,6 +242,7 @@ export const verifyLoginCode = onCall<{ phone?: string; code?: string; deviceId?
         uid = (await auth.getUserByPhoneNumber(phone)).uid;
       }
     }
+    await recordConsent(uid, consentVersion, ip);
     const token = await auth.createCustomToken(uid);
     // Which phone and network the account uses, for the review check (signals.ts); never fails the login
     await recordLoginSignals(uid, request.data?.deviceId, ip);
