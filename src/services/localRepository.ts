@@ -624,7 +624,15 @@ export class LocalRepository implements Repository {
     if (selectedOfferId && selectedOfferId.trim()) {
       updates.selectedOfferId = selectedOfferId.trim();
     }
-    return this.updateRequest(requestId, updates);
+    const updated = await this.updateRequest(requestId, updates);
+    // A cancelled request cancels its agreed visit too, as in the cloud (firestore.rules)
+    if (updated && normalizeRequestStatus(status) === 'CANCELLED') {
+      const visit = await this.getAppointment(requestId);
+      if (visit && visit.status !== 'CANCELLED' && visit.status !== 'COMPLETED') {
+        await this.updateAppointment(visit.id, { status: 'CANCELLED' });
+      }
+    }
+    return updated;
   }
 
   /**
@@ -2028,8 +2036,8 @@ export class LocalRepository implements Repository {
       workStatusUpdatedAt: now,
     };
 
-    // If work status reaches WORK_COMPLETED, also mark appointment completed
-    if (workStatus === 'WORK_COMPLETED' && (existing.status === 'CONFIRMED' || existing.status === 'PROPOSED' || existing.status === 'RESCHEDULED')) {
+    // An agreed visit is completed together with the work report, as in the cloud (firestore.rules)
+    if (workStatus === 'WORK_COMPLETED' && existing.status === 'CONFIRMED') {
       updates.status = 'COMPLETED';
     }
 

@@ -151,6 +151,41 @@ async function run() {
     await assertSucceeds(deleteObject(ref(phoneStorage('pat'), 'providers/pat/portfolio/p0')));
   });
 
+  console.log('\n--- Blocked accounts and hidden profiles (external audit S04) ---');
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'providers', 'hid'), { id: 'hid', cityId: 'almaty', hidden: true });
+    await setDoc(doc(db, 'providers', 'blk'), { id: 'blk', cityId: 'almaty', blocked: true });
+    await setDoc(doc(db, 'requests', 'REQ-B1'), { id: 'REQ-B1', customerId: 'bob', cityId: 'almaty', status: 'OPEN' });
+    await setDoc(doc(db, 'requests', 'REQ-B2'), { id: 'REQ-B2', customerId: 'bob', cityId: 'almaty', status: 'PROVIDER_SELECTED', selectedOfferId: 'OFFER-B2' });
+    await setDoc(doc(db, 'offers', 'OFFER-B2'), { id: 'OFFER-B2', requestId: 'REQ-B2', providerId: 'sam', providerUserId: 'sam' });
+    await setDoc(doc(db, 'conversations', 'conv_b'), { id: 'conv_b', requestId: 'REQ-B2', customerId: 'bob', providerUserId: 'sam', providerId: 'sam' });
+  });
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await uploadBytes(ref(ctx.storage(), 'providers/hid/portfolio/p0'), new Uint8Array([1, 2, 3]), { contentType: 'image/jpeg' });
+    await uploadBytes(ref(ctx.storage(), 'providers/blk/portfolio/p0'), new Uint8Array([1, 2, 3]), { contentType: 'image/jpeg' });
+  });
+  await test('Before a block, the customer and the master add files', async () => {
+    await assertSucceeds(put('bob', 'requests/REQ-B1/att0', 'image/jpeg'));
+    await assertSucceeds(put('bob', 'chat/conv_b/m1/a.jpg', 'image/jpeg'));
+    await assertSucceeds(putPhoto('hid', 'providers/hid/portfolio/p1'));
+  });
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'bans', 'bob'), { uid: 'bob', reason: 'test' });
+    await setDoc(doc(ctx.firestore(), 'bans', 'hid'), { uid: 'hid', reason: 'test' });
+  });
+  await test('A blocked account adds no request files, chat files or work photos', async () => {
+    await assertFails(put('bob', 'requests/REQ-B1/att1', 'image/jpeg'));
+    await assertFails(put('bob', 'chat/conv_b/m2/a.jpg', 'image/jpeg'));
+    await assertFails(putPhoto('hid', 'providers/hid/portfolio/p2'));
+  });
+  await test('The other side of a blocked account still adds chat files', () => assertSucceeds(put('sam', 'chat/conv_b/m3/a.jpg', 'image/jpeg')));
+  await test('Work photos of a hidden or blocked profile: only its master sees them', async () => {
+    await assertFails(getBytes(ref(phoneStorage('alice'), 'providers/hid/portfolio/p0')));
+    await assertFails(getBytes(ref(phoneStorage('alice'), 'providers/blk/portfolio/p0')));
+    await assertSucceeds(getBytes(ref(phoneStorage('hid'), 'providers/hid/portfolio/p0')));
+  });
+
   console.log('\n--- Other paths ---');
   await test('Upload outside the known folders is refused', () => assertFails(put('alice', 'public/x.jpg', 'image/jpeg')));
 

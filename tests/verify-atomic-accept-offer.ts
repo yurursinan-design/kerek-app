@@ -292,7 +292,6 @@ async function runAcceptOfferFixTests() {
       await setDoc(doc(db, 'requests', emuReqId), {
         id: emuReqId,
         customerId: currentUid,
-        customerName: 'Aigerim',
         city: 'Almaty',
         cityId: 'almaty',
         category: 'appliances',

@@ -104,7 +104,6 @@ async function runMessagingSecurityTests() {
   await setDoc(reqRef, {
     id: testReqId,
     customerId: customerUid,
-    customerName: 'Test Müşteri',
     city: 'Қызылорда',
     cityId: 'kyzylorda',
     category: 'Тұрмыстық техника жөндеу',

@@ -31,6 +31,11 @@ service firebase.storage {
             || c.get('providerId', '') == request.auth.uid);
     }
 
+    // An account the operator blocked (bans/{uid} in Firestore) adds or changes no files
+    function notBanned() {
+      return !firestore.exists(/databases/(default)/documents/bans/$(request.auth.uid));
+    }
+
     function isImage(maxBytes) {
       return request.resource.contentType.matches('image/(jpeg|png|webp)')
         && request.resource.size <= maxBytes;
@@ -44,6 +49,7 @@ service firebase.storage {
       // Files can be added only while the job is active.
       allow create: if resource == null
                     && isConversationParticipant(conversationId)
+                    && notBanned()
                     && requestDoc(conversationDoc(conversationId).get('requestId', '-')).get('status', '') in ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS']
                     && request.resource.size > 0
                     && (isImage(10 * 1024 * 1024)
@@ -88,6 +94,7 @@ service firebase.storage {
       allow create: if resource == null
                     && fileName.matches('att(1[0-4]|[0-9])')
                     && isRequestOwner(requestId)
+                    && notBanned()
                     && isOpenRequest(requestId)
                     && request.resource.size > 0
                     && (isImage(10 * 1024 * 1024)
@@ -100,12 +107,17 @@ service firebase.storage {
     }
 
     // A master's work photos: shown with the profile (to phone-verified accounts, like the profile
-    // itself); only the master adds, replaces or removes them
+    // itself; a profile the operator hid or blocked only to its master); only the master adds,
+    // replaces or removes them
     match /providers/{uid}/portfolio/{slot} {
-      allow read: if isSignedIn() && ('phone_number' in request.auth.token);
+      allow read: if isSignedIn() && ('phone_number' in request.auth.token) && (
+        request.auth.uid == uid
+        || (firestore.get(/databases/(default)/documents/providers/$(uid)).data.get('hidden', false) != true
+            && firestore.get(/databases/(default)/documents/providers/$(uid)).data.get('blocked', false) != true));
       allow create, update: if isSignedIn()
                             && request.auth.uid == uid
                             && ('phone_number' in request.auth.token)
+                            && notBanned()
                             && slot.matches('p[0-7]')
                             && request.resource.size > 0
                             && isImage(5 * 1024 * 1024);

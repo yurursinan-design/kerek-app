@@ -61,8 +61,9 @@ async function main() {
   assert(created.length === 1 && created[0].recipientUserId === 'prov1' && created[0].type === 'PROVIDER_APPOINTMENT_CREATED', 'Customer proposes a time: the provider is told');
   const confirmed = n.forAppointmentChange('appointment_r1', appt, { ...appt, status: 'CONFIRMED' }, 'prov1', 'ev2');
   assert(confirmed[0]?.recipientUserId === 'cust1' && confirmed[0]?.title.ru.includes('подтверждено'), 'Provider confirms: the customer is told');
-  const moved = n.forAppointmentChange('appointment_r1', appt, { ...appt, status: 'RESCHEDULED', scheduledAt: '2026-10-21 12:00', proposedBy: 'provider' }, 'prov1', 'ev3');
-  assert(moved[0]?.title.ru.includes('перенесено') && moved[0]?.body.ru.includes('2026-10-21'), 'New time proposed: the other side is told');
+  const moved = n.forAppointmentChange('appointment_r1', appt, { ...appt, status: 'RESCHEDULED', scheduledAt: '2026-10-21T12:00+05:00', proposedBy: 'provider' }, 'prov1', 'ev3');
+  assert(moved[0]?.title.ru.includes('перенесено') && moved[0]?.body.ru.includes('21.10.2026, 12:00'), 'New time proposed: the other side is told, in Kyzylorda time', moved[0]?.body.ru);
+  assert(n.scheduleLabel('2026-10-20 10:00') === '20.10.2026, 10:00' && n.scheduleLabel('ертең кешке') === 'ертең кешке', 'Older visit times are shown readably, free text as it is');
   const cancel = n.forAppointmentChange('appointment_r1', appt, { ...appt, status: 'CANCELLED', note: 'Заболел' }, 'cust1', 'ev4');
   assert(cancel[0]?.recipientUserId === 'prov1' && cancel[0]?.body.ru.includes('(Заболел)'), 'Cancelled with a reason: the other side sees the reason');
   const onWay = n.forAppointmentChange('appointment_r1', { ...appt, status: 'CONFIRMED' }, { ...appt, status: 'CONFIRMED', workStatus: 'PROVIDER_ON_THE_WAY' }, 'prov1', 'ev5');

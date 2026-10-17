@@ -30,6 +30,10 @@ import * as path from 'node:path';
 import { firebaseRepository } from '../src/services/firebaseRepository';
 import { ensureFirebaseAuth, auth } from '../src/services/firebase';
 import { setCurrentUserId } from '../src/services/localRepository';
+import { scheduleValueAt } from '../src/services/dateFormat';
+
+/** A valid visit time some hours from now, as the app stores it ("2026-10-18T10:00+05:00") */
+const visitIn = (hours: number) => scheduleValueAt(Date.now() + hours * 3600 * 1000);
 
 const PROJECT_ID = 'kerek-emulator-security-test';
 const RULES_PATH = path.resolve(process.cwd(), 'firestore.rules');
@@ -839,8 +843,9 @@ async function runTestSuite() {
       const aliceDb = phoneUser('user_alice').firestore();
       await assertSucceeds(
         setDoc(doc(aliceDb, 'requestContacts', 'req_alice_01'), {
+          requestId: 'req_alice_01',
           customerId: 'user_alice',
-          phone: '+7 701 555 1234',
+          customerPhone: '+7 701 555 1234',
         })
       );
     });
@@ -979,7 +984,7 @@ async function runTestSuite() {
       // Accepted provider reads customer contact
       const provSnap = await getDoc(doc(master1Db, 'requestContacts', 'req_alice_01'));
       await assertSucceeds(getDoc(doc(master1Db, 'requestContacts', 'req_alice_01')));
-      if (provSnap.data()?.phone !== '+7 701 555 1234') {
+      if (provSnap.data()?.customerPhone !== '+7 701 555 1234') {
         throw new Error('Expected accepted provider to read verified customer contact details');
       }
     });
@@ -1059,7 +1064,7 @@ async function runTestSuite() {
           providerId: 'prov_master1',
           providerUserId: 'prov_master1',
           proposedBy: 'customer',
-          scheduledAt: '2026-10-15 14:00',
+          scheduledAt: visitIn(24),
           durationMinutes: 60,
           status: 'PROPOSED',
           createdAt: createdAtIso,
@@ -1940,7 +1945,7 @@ async function runTestSuite() {
     await test('Appointment is created as a proposal only (no self-confirmed or completed work)', async () => {
       const base = {
         id: 'appointment_req_a', requestId: 'req_a', customerId: 'cust_a', providerId: 'prov_a', providerUserId: 'prov_a',
-        proposedBy: 'customer', scheduledAt: '2026-10-20 10:00', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        proposedBy: 'customer', scheduledAt: visitIn(72), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
       };
       await assertFails(setDoc(doc(custA(), 'appointments', 'appointment_req_a'), { ...base, status: 'CONFIRMED' }));
       await assertFails(setDoc(doc(custA(), 'appointments', 'appointment_req_a'), { ...base, status: 'PROPOSED', workStatus: 'WORK_COMPLETED' }));
@@ -2146,10 +2151,11 @@ async function runTestSuite() {
         await setDoc(doc(db, 'appointments', 'appointment_req_ap3'), { ...base, id: 'appointment_req_ap3', status: 'CANCELLED' });
       });
       const cust = phoneUser('cust_ap2').firestore();
-      const later = '2026-10-21T10:00:00.000Z';
-      await assertFails(updateDoc(doc(cust, 'appointments', 'appointment_req_ap2'), { scheduledAt: later, updatedAt: later }));
-      await assertSucceeds(updateDoc(doc(cust, 'appointments', 'appointment_req_ap2'), { scheduledAt: later, status: 'RESCHEDULED', updatedAt: later }));
-      await assertSucceeds(updateDoc(doc(cust, 'appointments', 'appointment_req_ap3'), { status: 'PROPOSED', scheduledAt: later, updatedAt: later }));
+      const later = visitIn(96);
+      const now = new Date().toISOString();
+      await assertFails(updateDoc(doc(cust, 'appointments', 'appointment_req_ap2'), { scheduledAt: later, updatedAt: now }));
+      await assertSucceeds(updateDoc(doc(cust, 'appointments', 'appointment_req_ap2'), { scheduledAt: later, status: 'RESCHEDULED', updatedAt: now }));
+      await assertSucceeds(updateDoc(doc(cust, 'appointments', 'appointment_req_ap3'), { status: 'PROPOSED', scheduledAt: later, updatedAt: now }));
     });
 
     // =========================================================================
@@ -2243,6 +2249,170 @@ async function runTestSuite() {
       await assertSucceeds(byCustomer('cust_cr'));
       await assertFails(byCustomer('cust_r'));
       await assertSucceeds(deleteDoc(doc(adminDb(), 'customerReviews', 'req_cr')));
+    });
+
+    // =========================================================================
+    // SECTION 21: External audit — suspension, private names, visit/work coupling, visit times
+    // =========================================================================
+    console.log('\n--- SECTION 21: External audit (S04, S05, B03, B05) ---');
+
+    // A job with a chosen master, an agreed visit and a blocked-account record ready to switch on
+    const seedAuditJob = async (id: string, appt: Record<string, unknown> | null, reqExtra: Record<string, unknown> = {}) => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        const offerId = `OFFER-${id}-prov_${id}`;
+        await setDoc(doc(db, 'requests', id), {
+          id, customerId: `cust_${id}`, city: 'Қызылорда', cityId: 'kyzylorda', category: 'x', service: 'x',
+          status: 'IN_PROGRESS', selectedOfferId: offerId, createdAt: '2026-10-16T10:00:00.000Z', ...reqExtra,
+        });
+        await setDoc(doc(db, 'offers', offerId), {
+          id: offerId, requestId: id, providerId: `prov_${id}`, providerUserId: `prov_${id}`, providerName: 'P', price: '1', status: 'ACCEPTED',
+        });
+        await setDoc(doc(db, 'conversations', `conv_${id}`), {
+          id: `conv_${id}`, requestId: id, customerId: `cust_${id}`, providerUserId: `prov_${id}`, providerId: `prov_${id}`, status: 'ACTIVE',
+        });
+        if (appt) {
+          await setDoc(doc(db, 'appointments', `appointment_${id}`), {
+            id: `appointment_${id}`, requestId: id, customerId: `cust_${id}`, providerId: `prov_${id}`, providerUserId: `prov_${id}`,
+            proposedBy: 'customer', scheduledAt: visitIn(24), createdAt: '2026-10-16T10:00:00.000Z', updatedAt: '2026-10-16T10:00:00.000Z',
+            ...appt,
+          });
+        }
+      });
+    };
+    const ban = (uid: string) =>
+      testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'bans', uid), { uid, reason: 'test', createdAt: new Date().toISOString() });
+      });
+
+    await test('S04: a blocked master cannot edit a pending offer; before the block they could', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'offers', 'OFFER-req_bo-prov_bo'), {
+          id: 'OFFER-req_bo-prov_bo', requestId: 'req_bo', providerId: 'prov_bo', providerUserId: 'prov_bo', providerName: 'P', price: '1000', status: 'PENDING',
+        });
+      });
+      const edit = (price: string) => updateDoc(doc(phoneUser('prov_bo').firestore(), 'offers', 'OFFER-req_bo-prov_bo'), { price, updatedAt: new Date().toISOString() });
+      await assertSucceeds(edit('900'));
+      await ban('prov_bo');
+      await assertFails(edit('800'));
+      await assertFails(updateDoc(doc(phoneUser('prov_bo').firestore(), 'offers', 'OFFER-req_bo-prov_bo'), { updatedAt: new Date().toISOString() }));
+    });
+
+    await test('S04: a blocked participant sends no messages or previews, but can still mark the chat read', async () => {
+      await seedAuditJob('req_bm', null);
+      const msg = (id: string) => ({
+        id, conversationId: 'conv_req_bm', requestId: 'req_bm', senderId: 'prov_req_bm', senderRole: 'provider', type: 'text', text: 'Сәлем', createdAt: new Date().toISOString(),
+      });
+      const pdb = () => phoneUser('prov_req_bm').firestore();
+      await assertSucceeds(setDoc(doc(pdb(), 'conversations', 'conv_req_bm', 'messages', 'm1'), msg('m1')));
+      await ban('prov_req_bm');
+      await assertFails(setDoc(doc(pdb(), 'conversations', 'conv_req_bm', 'messages', 'm2'), msg('m2')));
+      await assertFails(updateDoc(doc(pdb(), 'conversations', 'conv_req_bm'), { lastMessageText: 'call me', lastMessageSenderId: 'prov_req_bm', updatedAt: new Date().toISOString() }));
+      await assertSucceeds(updateDoc(doc(pdb(), 'conversations', 'conv_req_bm'), { providerLastReadAt: new Date().toISOString() }));
+    });
+
+    await test('S04: a blocked master cannot change their profile', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        await setDoc(doc(c.firestore(), 'providers', 'prov_bp'), { id: 'prov_bp', userId: 'prov_bp', name: 'B', city: 'Қызылорда', cityId: 'kyzylorda', category: 'x' });
+      });
+      const rename = (name: string) => updateDoc(doc(phoneUser('prov_bp').firestore(), 'providers', 'prov_bp'), { name });
+      await assertSucceeds(rename('B2'));
+      await ban('prov_bp');
+      await assertFails(rename('Tapsyr support'));
+    });
+
+    await test('S04: a hidden or blocked profile is readable only by its master and the operator', async () => {
+      await testEnv.withSecurityRulesDisabled(async (c) => {
+        const db = c.firestore();
+        await setDoc(doc(db, 'providers', 'prov_hid'), { id: 'prov_hid', userId: 'prov_hid', name: 'H', phone: '+77010000001', cityId: 'kyzylorda', hidden: true });
+        await setDoc(doc(db, 'providers', 'prov_blk'), { id: 'prov_blk', userId: 'prov_blk', name: 'K', phone: '+77010000002', cityId: 'kyzylorda', blocked: true });
+        await setDoc(doc(db, 'providers', 'prov_vis'), { id: 'prov_vis', userId: 'prov_vis', name: 'V', phone: '+77010000003', cityId: 'kyzylorda' });
+      });
+      const other = phoneUser('cust_reader').firestore();
+      await assertFails(getDoc(doc(other, 'providers', 'prov_hid')));
+      await assertFails(getDoc(doc(other, 'providers', 'prov_blk')));
+      await assertSucceeds(getDoc(doc(other, 'providers', 'prov_vis')));
+      await assertSucceeds(getDoc(doc(phoneUser('prov_hid').firestore(), 'providers', 'prov_hid')));
+      await assertSucceeds(getDoc(doc(adminDb(), 'providers', 'prov_blk')));
+    });
+
+    await test('S05: a request cannot carry the customer\'s name; the private contacts can', async () => {
+      const base = {
+        id: 'req_nm', customerId: 'cust_nm', city: 'Қызылорда', cityId: 'kyzylorda', category: 'Сантехника', service: 'Кран', status: 'OPEN',
+        createdAt: new Date().toISOString(),
+      };
+      const db = phoneUser('cust_nm').firestore();
+      await assertFails(setDoc(doc(db, 'requests', 'req_nm'), { ...base, customerName: 'Айгүл Серікова' }));
+      await assertSucceeds(setDoc(doc(db, 'requests', 'req_nm'), base));
+      await assertFails(updateDoc(doc(db, 'requests', 'req_nm'), { customerName: 'Айгүл', updatedAt: new Date().toISOString() }));
+      await assertFails(setDoc(doc(db, 'requestContacts', 'req_nm'), { requestId: 'req_nm', customerId: 'cust_nm', customerName: 'Айгүл', secret: 'x' }));
+      await assertSucceeds(setDoc(doc(db, 'requestContacts', 'req_nm'), { requestId: 'req_nm', customerId: 'cust_nm', customerName: 'Айгүл', customerPhone: '+77011234567' }));
+    });
+
+    await test('B03: the master cannot mark a visit COMPLETED without the work and the request (audit probe)', async () => {
+      await seedAuditJob('req_cp', { status: 'CONFIRMED', workStatus: 'NOT_STARTED' });
+      const pdb = phoneUser('prov_req_cp').firestore();
+      const now = new Date().toISOString();
+      await assertFails(updateDoc(doc(pdb, 'appointments', 'appointment_req_cp'), { status: 'COMPLETED', updatedAt: now }));
+      await assertFails(updateDoc(doc(pdb, 'appointments', 'appointment_req_cp'), { status: 'COMPLETED', workStatus: 'WORK_COMPLETED', updatedAt: now }));
+    });
+
+    await test('B03: the master completes the visit only with the work report on the request in the same write', async () => {
+      await seedAuditJob('req_wd', { status: 'CONFIRMED', workStatus: 'WORK_STARTED' });
+      const pdb = phoneUser('prov_req_wd').firestore();
+      const now = new Date().toISOString();
+      await assertFails(updateDoc(doc(pdb, 'appointments', 'appointment_req_wd'), { status: 'COMPLETED', workStatus: 'WORK_COMPLETED', workStatusUpdatedAt: now, updatedAt: now }));
+      const b = writeBatch(pdb);
+      b.update(doc(pdb, 'appointments', 'appointment_req_wd'), { status: 'COMPLETED', workStatus: 'WORK_COMPLETED', workStatusUpdatedAt: now, updatedAt: now });
+      b.update(doc(pdb, 'requests', 'req_wd'), { providerDoneAt: now, updatedAt: now });
+      await assertSucceeds(b.commit());
+    });
+
+    await test('B03: the customer completes the visit together with the request', async () => {
+      await seedAuditJob('req_cc', { status: 'CONFIRMED', workStatus: 'WORK_STARTED' });
+      const cdb = phoneUser('cust_req_cc').firestore();
+      const now = new Date().toISOString();
+      await assertFails(updateDoc(doc(cdb, 'appointments', 'appointment_req_cc'), { status: 'COMPLETED', workStatus: 'WORK_COMPLETED', workStatusUpdatedAt: now, updatedAt: now }));
+      const b = writeBatch(cdb);
+      b.update(doc(cdb, 'appointments', 'appointment_req_cc'), { status: 'COMPLETED', workStatus: 'WORK_COMPLETED', workStatusUpdatedAt: now, updatedAt: now });
+      b.update(doc(cdb, 'requests', 'req_cc'), { status: 'COMPLETED', updatedAt: now });
+      await assertSucceeds(b.commit());
+    });
+
+    await test('B03: cancelling a request cancels its agreed visit in the same write', async () => {
+      await seedAuditJob('req_cx', { status: 'CONFIRMED', workStatus: 'NOT_STARTED' });
+      const cdb = phoneUser('cust_req_cx').firestore();
+      const now = new Date().toISOString();
+      await assertFails(updateDoc(doc(cdb, 'requests', 'req_cx'), { status: 'CANCELLED', updatedAt: now }));
+      const b = writeBatch(cdb);
+      b.update(doc(cdb, 'requests', 'req_cx'), { status: 'CANCELLED', updatedAt: now });
+      b.update(doc(cdb, 'appointments', 'appointment_req_cx'), { status: 'CANCELLED', updatedAt: now });
+      await assertSucceeds(b.commit());
+      // Without a visit, cancelling alone is fine
+      await seedAuditJob('req_cx2', null);
+      await assertSucceeds(updateDoc(doc(phoneUser('cust_req_cx2').firestore(), 'requests', 'req_cx2'), { status: 'CANCELLED', updatedAt: now }));
+    });
+
+    await test('B05: a visit time is Kyzylorda time with +05:00, a real date, in the future and within a year', async () => {
+      await seedAuditJob('req_tm', null, { status: 'PROVIDER_SELECTED' });
+      const cdb = phoneUser('cust_req_tm').firestore();
+      const appt = (scheduledAt: string) => ({
+        id: 'appointment_req_tm', requestId: 'req_tm', customerId: 'cust_req_tm', providerId: 'prov_req_tm', providerUserId: 'prov_req_tm',
+        proposedBy: 'customer', scheduledAt, status: 'PROPOSED', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+      });
+      const ref = doc(cdb, 'appointments', 'appointment_req_tm');
+      const nextYear = new Date().getUTCFullYear() + 1;
+      await assertFails(setDoc(ref, appt(visitIn(24).replace('T', ' ').replace('+05:00', ''))));
+      await assertFails(setDoc(ref, appt(visitIn(24).replace('+05:00', 'Z'))));
+      await assertFails(setDoc(ref, appt('ертең кешке')));
+      await assertFails(setDoc(ref, appt(visitIn(-5))));
+      await assertFails(setDoc(ref, appt(visitIn(24 * 400))));
+      await assertFails(setDoc(ref, appt(`${nextYear}-02-30T10:00+05:00`)));
+      await assertFails(setDoc(ref, appt(`${nextYear}-03-10T24:00+05:00`)));
+      await assertSucceeds(setDoc(ref, appt(visitIn(24))));
+      // Moving it: the new time is checked too
+      await assertFails(updateDoc(ref, { scheduledAt: visitIn(-48), status: 'RESCHEDULED', updatedAt: new Date().toISOString() }));
+      await assertSucceeds(updateDoc(ref, { scheduledAt: visitIn(48), status: 'RESCHEDULED', updatedAt: new Date().toISOString() }));
     });
 
   } finally {

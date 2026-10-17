@@ -354,7 +354,8 @@ async function runTests() {
   assert(!storageRulesContent.includes("matches('application/.*')"));
   // Uploads require an existing request owned by the uploader
   assert(storageRulesContent.includes('function isRequestOwner(requestId)'));
-  assert(!storageRulesContent.includes('!firestore.exists('));
+  // (no rule that lets files in when the request does not exist)
+  assert(!/!firestore\.exists\(\/databases\/\(default\)\/documents\/requests/.test(storageRulesContent));
   // Deletion is prohibited
   assert(storageRulesContent.includes('allow update, delete: if false;'));
 

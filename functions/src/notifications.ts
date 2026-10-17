@@ -260,6 +260,16 @@ const WORK_STATUS_TEXT: Record<string, { type: string; title: Text; body: Text }
  * Appointment created or changed. actorUid is who made the change (from the event's auth
  * context); the other side is told. eventId makes the notice id unique per change.
  */
+/**
+ * A visit time for a notice: "18.10.2026, 10:00" in Kyzylorda time, as stored
+ * ("2026-10-18T10:00+05:00"); older free-text entries as they are.
+ */
+export function scheduleLabel(value: unknown): string {
+  const raw = str(value, 40);
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}:\d{2})/.exec(raw);
+  return m ? `${m[3]}.${m[2]}.${m[1]}, ${m[4]}` : raw;
+}
+
 export function forAppointmentChange(apptId: string, before: any, after: any, actorUid: string, eventId: string): NotificationDoc[] {
   if (!after) return [];
   const customerId = str(after.customerId, 128);
@@ -270,7 +280,7 @@ export function forAppointmentChange(apptId: string, before: any, after: any, ac
   const recipientUserId = recipientRole === 'customer' ? customerId : providerUserId;
   if (!recipientUserId || recipientUserId === actorUid) return [];
   const requestId = str(after.requestId, 128);
-  const when = str(after.scheduledAt, 40);
+  const when = scheduleLabel(after.scheduledAt);
   const byCustomer = actor === 'customer';
   const tag = short(eventId);
   const base = { recipientUserId, recipientRole, requestId, targetScreen: 'request_detail' as const };
@@ -314,7 +324,7 @@ export function forAppointmentChange(apptId: string, before: any, after: any, ac
         ? { kz: `Клиент кездесу уақытын растады: ${when}`, ru: `Клиент подтвердил время встречи: ${when}` }
         : { kz: `Маман кездесу уақытын растады: ${when}`, ru: `Мастер подтвердил время встречи: ${when}` },
     });
-  } else if (str(before.scheduledAt, 40) !== when && (after.status === 'RESCHEDULED' || after.status === 'PROPOSED')) {
+  } else if (str(before.scheduledAt, 40) !== str(after.scheduledAt, 40) && (after.status === 'RESCHEDULED' || after.status === 'PROPOSED')) {
     out.push({
       ...base,
       id: `notif_appt_upd_${apptId}_${tag}`,

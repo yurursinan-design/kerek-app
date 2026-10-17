@@ -402,6 +402,9 @@ export default function App() {
 
   // Continue from interpretation: creates request in repository with customerId
   const submittingRequestRef = useRef(false);
+  // One id per submission: sending the same request again after an error reuses it, so a request
+  // that was stored before the error is returned instead of created twice (createRequest)
+  const draftRequestRef = useRef<{ key: string; id: string } | null>(null);
   const [isSubmittingRequest, setIsSubmittingRequest] = useState(false);
 
   const handleContinue = async (updatedNeed: ExtractedNeed) => {
@@ -435,7 +438,9 @@ export default function App() {
       const service = (updatedNeed.service || rawText || category).trim();
       const text = rawText || service;
 
-      const targetRequestId = generateRequestId();
+      const draftKey = JSON.stringify([currentUserId, text, service, cityId, categoryId, updatedNeed.date, updatedNeed.budget, updatedNeed.pendingAttachments?.length || 0]);
+      if (draftRequestRef.current?.key !== draftKey) draftRequestRef.current = { key: draftKey, id: generateRequestId() };
+      const targetRequestId = draftRequestRef.current.id;
 
       // Create the request first: storage only accepts files for a request that already exists
       // and belongs to the uploader, so nobody can claim someone else's request folder.
@@ -484,16 +489,23 @@ export default function App() {
         }
 
         if (uploadedAttachments.length > 0) {
-          try {
-            const withFiles = await repository.updateRequest(newReq.id, { attachments: uploadedAttachments });
-            if (withFiles) newReq = withFiles;
-          } catch (attachErr) {
-            console.warn('[App] attaching uploaded files to request failed:', attachErr);
-            failedUploads += uploadedAttachments.length;
+          // Listing the files on the request is tried twice (a short network drop shouldn't leave
+          // uploaded files that nobody sees); the server removes unlisted files with the account
+          let attached = false;
+          for (let attempt = 0; attempt < 2 && !attached; attempt++) {
+            try {
+              const withFiles = await repository.updateRequest(newReq.id, { attachments: uploadedAttachments });
+              if (withFiles) newReq = withFiles;
+              attached = true;
+            } catch (attachErr) {
+              console.warn('[App] attaching uploaded files to request failed:', attachErr);
+            }
           }
+          if (!attached) failedUploads += uploadedAttachments.length;
         }
       }
 
+      draftRequestRef.current = null;
       setActiveRequest(newReq);
       await refreshData();
 

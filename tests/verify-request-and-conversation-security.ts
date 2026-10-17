@@ -68,7 +68,6 @@ async function runSecurityAudit() {
     await setDoc(reqRef, {
       id: testReqId,
       customerId: customerUid,
-      customerName: 'Test Müşteri',
       city: 'Қызылорда',
       cityId: 'kyzylorda',
       category: 'Тұрмыстық техника жөндеу',
@@ -82,7 +81,6 @@ async function runSecurityAudit() {
     await setDoc(otherReqRef, {
       id: otherReqId,
       customerId: customerUid,
-      customerName: 'Test Müşteri',
       city: 'Қызылорда',
       cityId: 'kyzylorda',
       category: 'Тұрмыстық техника жөндеу',

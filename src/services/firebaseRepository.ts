@@ -23,6 +23,7 @@ import {
   type QuerySnapshot,
 } from 'firebase/firestore';
 import {
+  getMetadata,
   ref as storageRef,
   uploadBytes,
 } from 'firebase/storage';
@@ -501,9 +502,17 @@ export class FirebaseRepository implements Repository {
 
     try {
       const reqRef = doc(firestore, 'requests', id);
-      await setDoc(reqRef, sanitizeForFirestore(newRequest));
+      // The same submission sent again with the same id (the answer was lost, or the customer
+      // tapped "send" again after an error): the request already stored is the result, no copy
+      const already = await getDoc(reqRef);
+      if (already.exists()) {
+        const stored = already.data() as ServiceRequest;
+        if (stored.customerId !== customerId) throw new Error(`Validation Error: request id ${id} is taken`);
+        return await this.withContacts(firestore, id, stored);
+      }
 
-      // Privacy: phone number and exact location live in the restricted requestContacts document
+      // Privacy: the name, phone number and exact location live in the restricted requestContacts
+      // document (the customer and the chosen master); the request itself carries none of them
       let customerPhone: string | undefined = undefined;
       // The phone-verified number of the signed-in customer, so the chosen provider can call them
       const verifiedPhone = auth?.currentUser?.phoneNumber || '';
@@ -512,20 +521,27 @@ export class FirebaseRepository implements Repository {
       } else if (requestData.customerPhone && requestData.customerPhone.trim()) {
         customerPhone = requestData.customerPhone.trim();
       }
-      if (customerPhone || newRequest.location) {
-        const contactRef = doc(firestore, 'requestContacts', id);
-        await setDoc(
-          contactRef,
+      const realName = newRequest.customerName !== 'Клиент' ? newRequest.customerName.slice(0, 100) : '';
+      const { customerName: _shownName, ...sharedRequest } = newRequest;
+
+      // Request and contacts in one write: either both are stored or neither (firestore.rules
+      // checks the contacts against the request written in the same batch)
+      const batch = writeBatch(firestore);
+      batch.set(reqRef, sanitizeForFirestore(sharedRequest));
+      if (customerPhone || newRequest.location || realName) {
+        batch.set(
+          doc(firestore, 'requestContacts', id),
           sanitizeForFirestore({
             requestId: id,
-            customerId: customerId || auth?.currentUser?.uid || id,
+            customerId,
+            ...(realName ? { customerName: realName } : {}),
             ...(customerPhone ? { customerPhone } : {}),
             ...(newRequest.location && preciseLocation ? { location: preciseLocation } : {}),
             createdAt: new Date().toISOString(),
-          }),
-          { merge: true }
+          })
         );
       }
+      await batch.commit();
 
       return {
         ...newRequest,
@@ -603,6 +619,8 @@ export class FirebaseRepository implements Repository {
         requestId: cleanId,
         uploadedBy: authUid || effectiveCustId,
         fileName: sanitizedName,
+        // With the name, recognises this file in its slot when the same submission is sent again
+        originalSize: String(file.size),
       },
     };
 
@@ -613,16 +631,23 @@ export class FirebaseRepository implements Repository {
       let uploadResult: Awaited<ReturnType<typeof uploadBytes>> | null = null;
       let storagePath = '';
       let lastErr: unknown = null;
-      for (let s = firstSlot; s <= 14 && !uploadResult; s++) {
+      let reused = false;
+      for (let s = firstSlot; s <= 14 && !uploadResult && !reused; s++) {
         storagePath = `requests/${cleanId}/att${s}`;
         try {
           uploadResult = await uploadBytes(storageRef(storage, storagePath), blobPayload, metadata);
         } catch (e: any) {
           lastErr = e;
           if (e?.code !== 'storage/unauthorized') break;
+          // The slot is taken. If it holds this very file from an earlier try of the same submission
+          // (the upload went through but the app never heard back), use it instead of a second copy.
+          const held = await getMetadata(storageRef(storage, storagePath)).catch(() => null);
+          reused = Boolean(
+            held?.customMetadata?.fileName === sanitizedName && held?.customMetadata?.originalSize === String(file.size)
+          );
         }
       }
-      if (!uploadResult) throw lastErr || new Error('No free attachment slot');
+      if (!uploadResult && !reused) throw lastErr || new Error('No free attachment slot');
       const attachmentId = storagePath.split('/').pop() as string;
 
       const attachment: RequestAttachment = {
@@ -652,6 +677,7 @@ export class FirebaseRepository implements Repository {
         : undefined;
 
     let customerPhone = data.customerPhone;
+    let customerName = data.customerName;
     let preciseLocation: RequestLocation | undefined;
     try {
       // Readable only by the customer and the selected provider; everyone else keeps the approximate point
@@ -660,6 +686,7 @@ export class FirebaseRepository implements Repository {
       if (contactSnap.exists()) {
         const contact = contactSnap.data();
         customerPhone = customerPhone || contact?.customerPhone;
+        if (typeof contact?.customerName === 'string' && contact.customerName) customerName = contact.customerName;
         if (contact?.location && typeof contact.location.latitude === 'number') {
           preciseLocation = contact.location as RequestLocation;
         }
@@ -671,6 +698,7 @@ export class FirebaseRepository implements Repository {
     return {
       ...data,
       id: requestId,
+      customerName: customerName || 'Клиент',
       ...(customerPhone ? { customerPhone } : {}),
       ...(preciseLocation ? { location: preciseLocation } : {}),
       status: normalizeRequestStatus(data.status),
@@ -1263,6 +1291,36 @@ export class FirebaseRepository implements Repository {
     }
   }
 
+  /**
+   * Cancels a request and, in the same transaction, the visit agreed for it (the security rules
+   * refuse a cancellation that would leave an active appointment behind).
+   */
+  private async cancelRequestWithVisit(requestId: string): Promise<ServiceRequest | null> {
+    await ensureFirebaseAuth();
+    const firestore = this.ensureDb();
+    const cleanReqId = (requestId || '').trim();
+    try {
+      await runTransaction(firestore, async (transaction) => {
+        const reqRef = doc(firestore, 'requests', cleanReqId);
+        const apptRef = doc(firestore, 'appointments', getAppointmentId(cleanReqId));
+        const [reqSnap, apptSnap] = await Promise.all([transaction.get(reqRef), transaction.get(apptRef)]);
+        if (!reqSnap.exists()) throw new Error(`Request not found: ${cleanReqId}`);
+        const current = normalizeRequestStatus((reqSnap.data() as ServiceRequest).status);
+        if (current === 'CANCELLED') return;
+        if (current === 'COMPLETED') throw new Error('Validation Error: Cannot cancel a completed request');
+        const now = new Date().toISOString();
+        transaction.update(reqRef, { status: 'CANCELLED', updatedAt: now });
+        const visit = apptSnap.exists() ? (apptSnap.data() as Appointment) : null;
+        if (visit && visit.status !== 'CANCELLED' && visit.status !== 'COMPLETED') {
+          transaction.update(apptRef, { status: 'CANCELLED', updatedAt: now });
+        }
+      });
+      return await this.getRequest(cleanReqId);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `requests/${cleanReqId}`);
+    }
+  }
+
   async updateRequestStatus(
     requestId: string,
     status: RequestStatus,
@@ -1272,7 +1330,10 @@ export class FirebaseRepository implements Repository {
     if (selectedOfferId && selectedOfferId.trim()) {
       updates.selectedOfferId = selectedOfferId.trim();
     }
-    const updated = await this.updateRequest(requestId, updates);
+    const updated =
+      normalizeRequestStatus(status) === 'CANCELLED'
+        ? await this.cancelRequestWithVisit(requestId)
+        : await this.updateRequest(requestId, updates);
     if (updated) {
       const norm = normalizeRequestStatus(status);
       if (norm === 'COMPLETED') {
@@ -2942,7 +3003,9 @@ export class FirebaseRepository implements Repository {
         updatedAt: now,
       };
 
-      if (workStatus === 'WORK_COMPLETED' && (existingAppt.status === 'CONFIRMED' || existingAppt.status === 'PROPOSED' || existingAppt.status === 'RESCHEDULED')) {
+      // An agreed visit is completed together with the work report (the request gets providerDoneAt
+      // below, in the same transaction); a time that was never confirmed stays as it is
+      if (workStatus === 'WORK_COMPLETED' && existingAppt.status === 'CONFIRMED') {
         apptUpdates.status = 'COMPLETED';
       }
 

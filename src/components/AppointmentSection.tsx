@@ -11,6 +11,7 @@ import {
 import { translations } from '../i18n/translations';
 import { repository, getCurrentUserId, getFriendlyErrorMessage } from '../services';
 import { auth } from '../services/firebase';
+import { formatSchedule, isPastSchedule, serviceToday, toScheduleValue } from '../services/dateFormat';
 import {
   Calendar,
   Clock,
@@ -63,13 +64,11 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
   const [cancelReason, setCancelReason] = useState('');
 
   const effectiveUserId = currentUserId || auth?.currentUser?.uid || getCurrentUserId();
+  const pastTimeText = language === 'kz' ? 'Өткен уақытты таңдауға болмайды' : 'Нельзя выбрать прошедшее время';
 
-  // Default date: today on the phone's own calendar (toISOString would give the UTC date, which
-  // is yesterday in Kazakhstan between midnight and 05:00)
-  const localToday = (() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  })();
+  // Default date: today in Kyzylorda, where the job is (visit times are Kyzylorda time on every
+  // phone, whatever zone the phone is set to)
+  const localToday = serviceToday();
   // The date field starts at today (set once when the section opens)
   const todayRef = useRef(localToday);
   useEffect(() => {
@@ -114,11 +113,15 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
       setErrorMsg(language === 'kz' ? 'Күні мен уақытын көрсетіңіз' : 'Укажите дату и время');
       return;
     }
+    if (isPastSchedule(dateStr, timeStr)) {
+      setErrorMsg(pastTimeText);
+      return;
+    }
 
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      const scheduledAt = `${dateStr} ${timeStr}`;
+      const scheduledAt = toScheduleValue(dateStr, timeStr);
       await repository.createAppointment({
         requestId: request.id,
         customerId: request.customerId,
@@ -160,10 +163,14 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
   const handleReschedule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!appointment || !dateStr || !timeStr) return;
+    if (isPastSchedule(dateStr, timeStr)) {
+      setErrorMsg(pastTimeText);
+      return;
+    }
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      const scheduledAt = `${dateStr} ${timeStr}`;
+      const scheduledAt = toScheduleValue(dateStr, timeStr);
       await repository.rescheduleAppointment(
         appointment.id,
         scheduledAt,
@@ -489,7 +496,7 @@ export const AppointmentSection: React.FC<AppointmentSectionProps> = ({
               <span className="text-slate-500">{t.appointmentDateLabel}:</span>
               <span className="font-bold text-slate-900 font-mono flex items-center gap-1">
                 <Calendar className="w-3.5 h-3.5 text-sky-600" />
-                {appointment.scheduledAt}
+                {formatSchedule(appointment.scheduledAt, language)}
               </span>
             </div>
 
