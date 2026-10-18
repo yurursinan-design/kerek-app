@@ -11,16 +11,19 @@
  * must be in place before the release.
  */
 
-export const LEGAL_VERSION = '2026-10-18.1';
+export const LEGAL_VERSION = '2026-10-18.2';
 
 export const LEGAL_OPERATOR = {
-  // Registered 13.10.2026, notification № KZ39UUZ00592012 (УГД по г. Кызылорда)
-  name: 'ИП «КЕРЕК» (Ибрагимова Мадина Нышановна)',
+  // Registered 13.10.2026, notification № KZ39UUZ00592012; renamed KEREK → TAPSYR 18.10.2026,
+  // notification № KZ79UUZ00596530 (УГД по г. Кызылорда)
+  name: 'ИП «TAPSYR» (Ибрагимова Мадина Нышановна)',
+  // The registered name alone, exactly as in the state register (Meta business verification checks it)
+  shortName: 'ИП TAPSYR',
   // IIN of the entrepreneur, used as the BIN
   iin: '920104401844',
   // The registered address from the notification, in each language
-  addressKz: 'Қызылорда қ., Сәлихитдин Айтбаев к-сі, 29-үй, 1-пәтер',
-  addressRu: 'г. Кызылорда, ул. Салихитдин Айтбаев, д. 29, кв. 1',
+  addressKz: 'Қызылорда қ., Сәлихитдин Айтбаев к-сі, 29-үй',
+  addressRu: 'г. Кызылорда, ул. Салихитдин Айтбаев, д. 29',
   email: 'support.tapsyrapp@gmail.com',
   whatsapp: '+7 747 969 38 52',
 };
