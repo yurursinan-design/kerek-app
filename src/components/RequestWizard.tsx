@@ -4,6 +4,7 @@ import { ExtractedNeed, Language, PendingAttachment, RequestLocation, Urgency, s
 import { CatalogGroup, CatalogService, groupName, serviceName } from '../data/serviceCatalog';
 import { CANONICAL_CITIES, PILOT_CITY_ID, isCityOpen } from '../services/taxonomy';
 import { servicePhoto } from '../data/photos';
+import { detectLocation } from '../services/geolocation';
 import { CategoryIcon, Emoji3D, Photo, tone } from './CategoryIcon';
 
 interface RequestWizardProps {
@@ -172,23 +173,13 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
     if (photoInput.current) photoInput.current.value = '';
   };
 
-  const detectLocation = () => {
-    if (!('geolocation' in navigator)) {
-      setPhotoError(tx(T.locationFailed));
-      return;
-    }
+  const handleDetectLocation = () => {
+    if (locating) return;
     setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocating(false);
-        setLocation({ latitude: pos.coords.latitude, longitude: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) });
-      },
-      () => {
-        setLocating(false);
-        setPhotoError(tx(T.locationFailed));
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-    );
+    detectLocation()
+      .then(setLocation)
+      .catch(() => setPhotoError(tx(T.locationFailed)))
+      .finally(() => setLocating(false));
   };
 
   const tagText = tags.join(', ');
@@ -410,7 +401,7 @@ export const RequestWizard: React.FC<RequestWizardProps> = ({ language, group, s
             <p className="text-xs text-slate-500 leading-relaxed">{tx(T.pilotNote)}</p>
             <button
               type="button"
-              onClick={detectLocation}
+              onClick={handleDetectLocation}
               disabled={locating}
               className={`press w-full min-h-[56px] rounded-2xl border-2 px-3 text-sm font-semibold flex items-center gap-3 text-left ${
                 location ? 'border-emerald-400 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-700'
