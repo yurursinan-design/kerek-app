@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   ExtractedNeed,
   Language,
@@ -15,6 +16,7 @@ import { ServiceDiscovery } from './ServiceDiscovery';
 import { RequestWizard } from './RequestWizard';
 import type { CatalogGroup, CatalogService } from '../data/serviceCatalog';
 import { RequestMediaView } from './RequestMediaView';
+import { detectLocation, type LocationFailure } from '../services/geolocation';
 
 interface HomeScreenProps {
   language: Language;
@@ -279,35 +281,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   // 4. Geolocation Detection
   const handleDetectLocation = () => {
-    if (!('geolocation' in navigator)) {
-      showMediaError(t.reqLocationFailed);
-      return;
-    }
-
+    if (isDetectingLocation) return;
     setIsDetectingLocation(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setIsDetectingLocation(false);
-        setLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: Math.round(position.coords.accuracy),
-        });
-      },
-      (error) => {
-        setIsDetectingLocation(false);
-        if (error.code === error.PERMISSION_DENIED) {
-          showMediaError(t.reqLocationPermissionRequired);
-        } else {
-          showMediaError(t.reqLocationFailed);
-        }
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 60000,
-      }
-    );
+    detectLocation()
+      .then(setLocation)
+      .catch((failure: LocationFailure) =>
+        showMediaError(failure === 'denied' ? t.reqLocationPermissionRequired : t.reqLocationFailed)
+      )
+      .finally(() => setIsDetectingLocation(false));
   };
 
   // Attachment removals
@@ -647,15 +628,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </section>
       </ServiceDiscovery>
 
-      {/* Footer Info */}
-      <footer className="text-center text-xs text-slate-400 py-3 border-t border-slate-100 space-y-1.5">
-        <LegalLinks language={language} className="block text-slate-500" />
-        <span className="block">Tapsyr 2026 · Қазақстан</span>
-        {/* The registered business behind the app, by its official name (Meta business verification checks it) */}
-        <span className="block">
-          {LEGAL_OPERATOR.shortName} · {language === 'kz' ? LEGAL_OPERATOR.addressKz : LEGAL_OPERATOR.addressRu}
-        </span>
-      </footer>
+      {/* Website only: legal links and the registered business (Meta business verification checks the
+          site for it). The phone app has the legal links in Profile and no footer. */}
+      {!Capacitor.isNativePlatform() && (
+        <footer className="text-center text-xs text-slate-400 py-3 border-t border-slate-100 space-y-1.5">
+          <LegalLinks language={language} className="block text-slate-500" />
+          <span className="block">
+            {LEGAL_OPERATOR.shortName} · {language === 'kz' ? LEGAL_OPERATOR.addressKz : LEGAL_OPERATOR.addressRu}
+          </span>
+        </footer>
+      )}
     </div>
   );
 };

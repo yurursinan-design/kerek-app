@@ -81,50 +81,50 @@ export async function deleteMyAccount(): Promise<void> {
   const accepted = await getDocs(
     query(collection(firestore, 'offers'), where('providerUserId', '==', uid), where('status', '==', 'ACCEPTED'))
   );
-  for (const offer of accepted.docs) {
-    const req = await getDoc(doc(firestore, 'requests', String(offer.data().requestId || '-')));
-    if (req.exists() && ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'].includes(req.data().status)) {
-      throw new ActiveJobsError();
-    }
+  const acceptedRequests = await Promise.all(
+    accepted.docs.map((offer) => getDoc(doc(firestore, 'requests', String(offer.data().requestId || '-'))))
+  );
+  if (acceptedRequests.some((req) => req.exists() && ['PROVIDER_SELECTED', 'ACCEPTED', 'IN_PROGRESS'].includes(req.data().status))) {
+    throw new ActiveJobsError();
   }
 
   const requests = await getDocs(query(collection(firestore, 'requests'), where('customerId', '==', uid)));
-  for (const snap of requests.docs) {
-    const data = snap.data();
-    if (ACTIVE_REQUEST_STATUSES.includes(data.status)) {
-      await updateDoc(snap.ref, { status: 'CANCELLED', updatedAt: now });
-    }
-    await deleteDoc(doc(firestore, 'requestContacts', snap.id));
-    // Photos, videos and voice notes go, then the name, text and location in the request itself
-    await deleteRequestFiles(snap.id, Array.isArray(data.attachments) ? data.attachments.length : 0);
-    const personal = ['customerName', 'requestText', 'description', 'attachments', 'location', 'understanding'].filter((k) => k in data);
-    // The short title can echo the customer's own words; it becomes the category name
-    const titleUpdate = typeof data.category === 'string' && data.service !== data.category ? { service: data.category } : {};
-    if (personal.length || Object.keys(titleUpdate).length) {
-      await updateDoc(snap.ref, { ...Object.fromEntries(personal.map((k) => [k, deleteField()])), ...titleUpdate, updatedAt: now });
-    }
-  }
+  // Each request is cleaned on its own, all at once (one after another took many seconds)
+  await Promise.all(
+    requests.docs.map(async (snap) => {
+      const data = snap.data();
+      if (ACTIVE_REQUEST_STATUSES.includes(data.status)) {
+        await updateDoc(snap.ref, { status: 'CANCELLED', updatedAt: now });
+      }
+      // Photos, videos and voice notes go, then the name, text and location in the request itself
+      await Promise.all([
+        deleteDoc(doc(firestore, 'requestContacts', snap.id)),
+        deleteRequestFiles(snap.id, Array.isArray(data.attachments) ? data.attachments.length : 0),
+      ]);
+      const personal = ['customerName', 'requestText', 'description', 'attachments', 'location', 'understanding'].filter((k) => k in data);
+      // The short title can echo the customer's own words; it becomes the category name
+      const titleUpdate = typeof data.category === 'string' && data.service !== data.category ? { service: data.category } : {};
+      if (personal.length || Object.keys(titleUpdate).length) {
+        await updateDoc(snap.ref, { ...Object.fromEntries(personal.map((k) => [k, deleteField()])), ...titleUpdate, updatedAt: now });
+      }
+    })
+  );
 
-  // Phone numbers in the offers this account sent as a provider
-  const offers = await getDocs(query(collection(firestore, 'offers'), where('providerUserId', '==', uid)));
-  for (const snap of offers.docs) {
-    const data = snap.data();
-    if ('providerPhone' in data || 'providerWhatsapp' in data) {
-      await updateDoc(snap.ref, { providerPhone: deleteField(), providerWhatsapp: deleteField(), updatedAt: now });
-    }
-  }
-
-  // The account's own notifications
-  const notifications = await getDocs(query(collection(firestore, 'notifications'), where('recipientUserId', '==', uid)));
-  for (const snap of notifications.docs) {
-    await deleteDoc(snap.ref);
-  }
-
-  // This phone stops getting push messages for the deleted account
-  await forgetPushToken();
-  await deleteAllPortfolioPhotos(uid);
-  await deleteIfExists(doc(firestore, 'providers', uid));
-  await deleteIfExists(doc(firestore, 'users', uid));
+  // Phone numbers in the offers this account sent as a provider, and the account's own notifications
+  const [offers, notifications] = await Promise.all([
+    getDocs(query(collection(firestore, 'offers'), where('providerUserId', '==', uid))),
+    getDocs(query(collection(firestore, 'notifications'), where('recipientUserId', '==', uid))),
+  ]);
+  await Promise.all([
+    ...offers.docs
+      .filter((snap) => 'providerPhone' in snap.data() || 'providerWhatsapp' in snap.data())
+      .map((snap) => updateDoc(snap.ref, { providerPhone: deleteField(), providerWhatsapp: deleteField(), updatedAt: now })),
+    ...notifications.docs.map((snap) => deleteDoc(snap.ref)),
+    // This phone stops getting push messages for the deleted account
+    forgetPushToken(),
+    deleteAllPortfolioPhotos(uid),
+  ]);
+  await Promise.all([deleteIfExists(doc(firestore, 'providers', uid)), deleteIfExists(doc(firestore, 'users', uid))]);
 
   try {
     await deleteUser(user);
@@ -139,13 +139,14 @@ export async function deleteMyAccount(): Promise<void> {
 /** Request files live in fixed slots att0 … att14 (a failed upload can leave gaps); missing slots are skipped. */
 async function deleteRequestFiles(requestId: string, count: number): Promise<void> {
   if (!storage || count <= 0) return;
-  for (let i = 0; i < 15; i++) {
-    try {
-      await deleteObject(storageRef(storage, `requests/${requestId}/att${i}`));
-    } catch {
-      // already gone, or an older file name: nothing to delete here
-    }
-  }
+  const st = storage;
+  await Promise.all(
+    Array.from({ length: 15 }, (_, i) =>
+      deleteObject(storageRef(st, `requests/${requestId}/att${i}`)).catch(() => {
+        // already gone, or an older file name: nothing to delete here
+      })
+    )
+  );
 }
 
 async function deleteIfExists(ref: ReturnType<typeof doc>): Promise<void> {

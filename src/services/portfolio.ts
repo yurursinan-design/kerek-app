@@ -75,5 +75,5 @@ export async function getPortfolioPhotos(uid: string, slots: string[] = []): Pro
 
 /** Account deletion: every slot goes, filled or not. */
 export async function deleteAllPortfolioPhotos(uid: string): Promise<void> {
-  for (const slot of PORTFOLIO_SLOTS) await deletePortfolioPhoto(uid, slot);
+  await Promise.all(PORTFOLIO_SLOTS.map((slot) => deletePortfolioPhoto(uid, slot)));
 }
