@@ -653,7 +653,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         <span className="block">Tapsyr 2026 · Қазақстан</span>
         {/* The registered business behind the app, by its official name (Meta business verification checks it) */}
         <span className="block">
-          {LEGAL_OPERATOR.shortName} · ИИН {LEGAL_OPERATOR.iin} · {language === 'kz' ? LEGAL_OPERATOR.addressKz : LEGAL_OPERATOR.addressRu}
+          {LEGAL_OPERATOR.shortName} · {language === 'kz' ? LEGAL_OPERATOR.addressKz : LEGAL_OPERATOR.addressRu}
         </span>
       </footer>
     </div>
