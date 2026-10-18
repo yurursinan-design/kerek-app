@@ -147,10 +147,15 @@ jobs:
           t = re.sub(r'(?i)</(tr|p|li|h\d|div)>|<br\s*/?>', '\n', t)
           t = html.unescape(re.sub(r'<[^>]+>', '', t))
           lines = [re.sub(r'\s+', ' ', l).strip() for l in t.split('\n')]
-          for i, l in enumerate(lines):
-              if 'PSL_' in l or 'Question ID' in l or 'Response ID' in l or 'machine readable' in l.lower():
-                  print(l)
+          raw = open('ref.html', encoding='utf-8').read()
+          for m in sorted(set(re.findall(r'href="([^"]+)"', raw))):
+              if re.search(r'csv|template|docs\.google|drive|gstatic|download', m, re.I):
+                  print('LINK', html.unescape(m))
           PY
+          grep -o 'https://[^"<> ]*\.csv[^"<> ]*' ref.html | sort -u | while read -r u; do
+            echo "===== $u"
+            curl -sSL "$u" | head -c 200000
+          done
 
       - name: Firebase Android uygulaması
         if: steps.mode.outputs.mode == 'firebase'
