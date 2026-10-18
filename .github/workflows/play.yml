@@ -6,6 +6,7 @@
 #            the first upload, which Play only accepts by hand in Play Console
 #   release  builds it and uploads it to closed testing as a draft
 #   firebase registers the Play package in Firebase and prints its google-services.json
+#   safetyref prints the Data safety question and answer IDs from Play Console Help (nothing changes)
 # Releases stay drafts: rolling them out to testers or users is done in Play Console.
 #
 # The upload key that signs the bundle lives in Secret Manager (ANDROID_UPLOAD_KEY: password on the
@@ -49,7 +50,7 @@ jobs:
         run: |
           # the word after "[play]", without punctuation ("check:" → check)
           mode=$(printf '%s\n' "$MSG" | head -n1 | awk '{print $2}' | tr -cd 'a-z')
-          case "$mode" in check|listing|bundle|release|firebase) ;; *) echo "Bilinmeyen iş: $mode (check | listing | bundle | release | firebase)"; exit 1 ;; esac
+          case "$mode" in check|listing|bundle|release|firebase|safetyref) ;; *) echo "Bilinmeyen iş: $mode (check | listing | bundle | release | firebase | safetyref)"; exit 1 ;; esac
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           case "$mode" in bundle|release) echo "build=true" >> "$GITHUB_OUTPUT" ;; esac
           echo "İş: $mode"
@@ -133,7 +134,24 @@ jobs:
             --title "Tapsyr Google Play paketi ($KEREK_VERSION_CODE)" \
             --notes "Play Console'a yüklenecek imzalı paket (AAB). Kaynak: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
 
-      # ----
+      # ---- safetyref: prints the machine-readable question and answer IDs of the Data safety form
+      - name: Veri güvenliği kimlikleri
+        if: steps.mode.outputs.mode == 'safetyref'
+        run: |
+          curl -sSL -A 'Mozilla/5.0' 'https://support.google.com/googleplay/android-developer/answer/10787469?hl=en' -o ref.html
+          python3 - <<'PY'
+          import html, re
+          t = open('ref.html', encoding='utf-8').read()
+          t = re.sub(r'(?is)<(script|style).*?</\1>', '', t)
+          t = re.sub(r'(?i)</(td|th)>', ' | ', t)
+          t = re.sub(r'(?i)</(tr|p|li|h\d|div)>|<br\s*/?>', '\n', t)
+          t = html.unescape(re.sub(r'<[^>]+>', '', t))
+          lines = [re.sub(r'\s+', ' ', l).strip() for l in t.split('\n')]
+          for i, l in enumerate(lines):
+              if 'PSL_' in l or 'Question ID' in l or 'Response ID' in l or 'machine readable' in l.lower():
+                  print(l)
+          PY
+
       - name: Firebase Android uygulaması
         if: steps.mode.outputs.mode == 'firebase'
         env:
@@ -141,7 +159,7 @@ jobs:
         run: node scripts/firebase-android-app.mjs kerek.kz.app
 
       - name: Google Play
-        if: steps.mode.outputs.mode != 'bundle' && steps.mode.outputs.mode != 'firebase'
+        if: steps.mode.outputs.mode != 'bundle' && steps.mode.outputs.mode != 'firebase' && steps.mode.outputs.mode != 'safetyref'
         env:
           PLAY_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
