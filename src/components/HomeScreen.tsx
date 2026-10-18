@@ -10,6 +10,7 @@ import {
 import { translations } from '../i18n/translations';
 import { AlertCircle, Image as ImageIcon, Loader2, MapPin, Mic, MicOff, PenLine, Search, ShieldCheck, Square, Video as VideoIcon } from 'lucide-react';
 import { LegalLinks } from './LegalModal';
+import { LEGAL_OPERATOR } from '../data/legalTexts';
 import { ServiceDiscovery } from './ServiceDiscovery';
 import { RequestWizard } from './RequestWizard';
 import type { CatalogGroup, CatalogService } from '../data/serviceCatalog';
@@ -650,6 +651,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       <footer className="text-center text-xs text-slate-400 py-3 border-t border-slate-100 space-y-1.5">
         <LegalLinks language={language} className="block text-slate-500" />
         <span className="block">Tapsyr 2026 · Қазақстан</span>
+        {/* The registered business behind the app, by its official name (Meta business verification checks it) */}
+        <span className="block">
+          ИП КЕРЕК · ИИН {LEGAL_OPERATOR.iin} · {language === 'kz' ? LEGAL_OPERATOR.addressKz : LEGAL_OPERATOR.addressRu}
+        </span>
       </footer>
     </div>
   );
