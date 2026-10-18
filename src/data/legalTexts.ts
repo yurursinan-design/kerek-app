@@ -11,11 +11,13 @@
  * must be in place before the release.
  */
 
-export const LEGAL_VERSION = '2026-10-18.1';
+export const LEGAL_VERSION = '2026-10-18.2';
 
 export const LEGAL_OPERATOR = {
   // Registered 13.10.2026, notification № KZ39UUZ00592012 (УГД по г. Кызылорда)
-  name: 'ИП «КЕРЕК» (Ибрагимова Мадина Нышановна)',
+  name: 'ИП «TAPSYR» (Ибрагимова Мадина Нышановна)',
+  // The registered name alone, exactly as in the state register (Meta business verification checks it)
+  shortName: 'ИП TAPSYR',
   // IIN of the entrepreneur, used as the BIN
   iin: '920104401844',
   // The registered address from the notification, in each language
