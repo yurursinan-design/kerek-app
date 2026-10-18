@@ -1,0 +1,88 @@
+# Connects the app's own domain to the Firebase Hosting site and gets the project ready for it. Runs
+# only for a commit on a claude/** branch whose message starts with "[domain] ":
+#   - adds DOMAIN (the app) and www.DOMAIN (redirects to DOMAIN) to the Hosting site SITE and prints
+#     the DNS records to add at the domain registrar (Cloudflare)
+#   - adds both to the sign-in authorized domains (phone login works only on listed addresses)
+#   - adds both to the browser API keys that are limited to certain websites
+# Nothing is removed; running it again only shows the current state.
+name: Alan adı
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  FIREBASE_PROJECT_ID: kerek-9d153
+  SITE: tapsyr
+  DOMAIN: tapsyrapp.com
+
+jobs:
+  domain:
+    if: startsWith(github.event.head_commit.message, '[domain] ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Google Cloud'a giriş
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
+          service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Alan adını siteye ekle
+        run: |
+          TOKEN=$(gcloud auth print-access-token)
+          H=(-H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $FIREBASE_PROJECT_ID" -H 'Content-Type: application/json')
+          BASE="https://firebasehosting.googleapis.com/v1beta1/projects/$FIREBASE_PROJECT_ID/sites/$SITE/customDomains"
+          add() {
+            code=$(curl -sS -o out.json -w '%{http_code}' -X POST "${H[@]}" "$BASE?customDomainId=$1" -d "$2")
+            if [ "$code" = 200 ]; then echo "$1: eklendi"; else echo "$1: HTTP $code $(jq -r '.error.message // empty' out.json)"; fi
+          }
+          add "$DOMAIN" '{}'
+          add "www.$DOMAIN" "{\"redirectTarget\": \"$DOMAIN\"}"
+          sleep 20
+          for d in "$DOMAIN" "www.$DOMAIN"; do
+            echo "===== $d"
+            curl -sS "${H[@]}" "$BASE/$d" > out.json
+            echo "Durum: sahiplik=$(jq -r '.ownershipState // "-"' out.json), bağlantı=$(jq -r '.hostState // "-"' out.json), sertifika=$(jq -r '.cert.state // "-"' out.json)"
+            echo "Cloudflare'e eklenecek kayıtlar (DNS only / gri bulut):"
+            jq -r '.requiredDnsUpdates.desired[]? | .domainName as $n | .records[]? | "  \(.type)  ad=\($n)  değer=\(.rdata)  (\(.requiredAction // "ADD"))"' out.json
+            echo "Kaldırılması gerekenler:"
+            jq -r '.requiredDnsUpdates.discovered[]? | .domainName as $n | .records[]? | select(.requiredAction == "DELETE") | "  \(.type)  ad=\($n)  değer=\(.rdata)"' out.json
+          done
+          rm -f out.json
+
+      - name: Girişe izinli adresler
+        run: |
+          TOKEN=$(gcloud auth print-access-token)
+          URL="https://identitytoolkit.googleapis.com/admin/v2/projects/$FIREBASE_PROJECT_ID/config"
+          H=(-H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $FIREBASE_PROJECT_ID")
+          current=$(curl -sS "${H[@]}" "$URL" | jq -c '.authorizedDomains // empty')
+          if [ -z "$current" ]; then echo "İzinli adresler okunamadı (yetki yok); konsoldan eklenmeli"; exit 0; fi
+          wanted=$(jq -c --arg a "$DOMAIN" --arg b "www.$DOMAIN" '. + [$a, $b] | unique' <<<"$current")
+          if [ "$wanted" = "$(jq -c 'unique' <<<"$current")" ]; then echo "Zaten listede: $current"; exit 0; fi
+          code=$(curl -sS -o out.json -w '%{http_code}' -X PATCH "${H[@]}" -H 'Content-Type: application/json' \
+            "$URL?updateMask=authorizedDomains" -d "{\"authorizedDomains\": $wanted}")
+          if [ "$code" = 200 ]; then echo "Eklendi: $(jq -c '.authorizedDomains' out.json)"; else echo "Eklenemedi (HTTP $code): $(jq -r '.error.message // empty' out.json)"; fi
+          rm -f out.json
+
+      - name: Tarayıcı anahtarlarına yeni adres
+        continue-on-error: true
+        run: |
+          gcloud services api-keys list --project "$FIREBASE_PROJECT_ID" --format=json > keys.json
+          jq -c '.[] | select(.restrictions.browserKeyRestrictions.allowedReferrers != null)' keys.json | while read -r key; do
+            name=$(jq -r '.name' <<<"$key"); label=$(jq -r '.displayName' <<<"$key")
+            refs=$(jq -r --arg a "https://$DOMAIN/*" --arg b "https://www.$DOMAIN/*" \
+              '.restrictions.browserKeyRestrictions.allowedReferrers + [$a, $b] | unique | join(",")' <<<"$key")
+            if gcloud services api-keys update "$name" --allowed-referrers="$refs" --quiet >/dev/null 2>&1; then
+              echo "$label: web siteleri = $refs"
+            else
+              echo "$label: güncellenemedi (yetki?); şu an: $(jq -r '.restrictions.browserKeyRestrictions.allowedReferrers | join(", ")' <<<"$key")"
+            fi
+          done
+          rm -f keys.json
