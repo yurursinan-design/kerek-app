@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   ExtractedNeed,
   Language,
@@ -647,15 +648,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </section>
       </ServiceDiscovery>
 
-      {/* Footer Info */}
-      <footer className="text-center text-xs text-slate-400 py-3 border-t border-slate-100 space-y-1.5">
-        <LegalLinks language={language} className="block text-slate-500" />
-        <span className="block">Tapsyr 2026 · Қазақстан</span>
-        {/* The registered business behind the app, by its official name (Meta business verification checks it) */}
-        <span className="block">
-          {LEGAL_OPERATOR.shortName} · {language === 'kz' ? LEGAL_OPERATOR.addressKz : LEGAL_OPERATOR.addressRu}
-        </span>
-      </footer>
+      {/* Website only: legal links and the registered business (Meta business verification checks the
+          site for it). The phone app has the legal links in Profile and no footer. */}
+      {!Capacitor.isNativePlatform() && (
+        <footer className="text-center text-xs text-slate-400 py-3 border-t border-slate-100 space-y-1.5">
+          <LegalLinks language={language} className="block text-slate-500" />
+          <span className="block">
+            {LEGAL_OPERATOR.shortName} · {language === 'kz' ? LEGAL_OPERATOR.addressKz : LEGAL_OPERATOR.addressRu}
+          </span>
+        </footer>
+      )}
     </div>
   );
 };
