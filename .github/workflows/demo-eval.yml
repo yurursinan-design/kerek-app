@@ -1,6 +1,7 @@
 # Plays scripted customer conversations against the WhatsApp assistant demo with the real Gemini API
 # and prints the transcripts (scripts/demo-eval.ts), to check answer quality before showing it to
-# businesses. Runs only for a commit on a claude/** branch whose message starts with "[demo-eval]".
+# businesses. Runs only for a commit on a claude/** branch whose message starts with "[demo-eval]";
+# "[demo-smoke]" instead calls the deployed demo functions once, like the page does.
 # Nothing is deployed; the Gemini key is read from Secret Manager and masked in the log.
 name: Demo bot testi
 
@@ -44,3 +45,18 @@ jobs:
           GEMINI_API_KEY="$KEY" npx tsx scripts/demo-eval.ts "${EVAL_FILTER:-}"
         env:
           EVAL_FILTER: ''
+
+  # The deployed demo functions, called like the page calls them (scripts/demo-smoke.ts)
+  smoke:
+    if: startsWith(github.event.head_commit.message, '[demo-smoke]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Canlı demoyu dene
+        run: npx --yes tsx@4.21.0 scripts/demo-smoke.ts
