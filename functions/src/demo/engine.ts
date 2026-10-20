@@ -30,12 +30,14 @@ const HISTORY = 24;
 const TOOL_ROUNDS = 6;
 const CALL_TIMEOUT_MS = 20_000;
 /**
- * Chat answers come from the light model first: under load the main model took a minute or more
- * per answer in tests, the light one a few seconds, and tool use and Kazakh were fine. The main
- * model reads price lists (photos) first, where quality matters more than speed.
+ * Models for the demo, measured on 20 October 2026 (scripts/demo-eval.ts): gemini-3.5-flash answered
+ * with the right tool in 1.5–2.3 s and wrote correct Kazakh; the "latest" aliases were overloaded
+ * (503s and 30 s timeouts) and the light model, while fast, skipped tools and made spelling mistakes.
+ * The light model stays as the fallback.
  */
-export const FAST_FIRST = process.env.DEMO_CHAT_MODELS ? process.env.DEMO_CHAT_MODELS.split(',') : [GEMINI_CONFIG.fallbackModel, GEMINI_CONFIG.model];
-export const QUALITY_FIRST = [GEMINI_CONFIG.model, GEMINI_CONFIG.fallbackModel];
+const DEMO_MODEL = 'gemini-3.5-flash';
+export const FAST_FIRST = process.env.DEMO_CHAT_MODELS ? process.env.DEMO_CHAT_MODELS.split(',') : [DEMO_MODEL, GEMINI_CONFIG.fallbackModel];
+export const QUALITY_FIRST = [DEMO_MODEL, GEMINI_CONFIG.model, GEMINI_CONFIG.fallbackModel];
 
 /**
  * One Gemini call with fallbacks: the main model, then the lighter one. Low thinking keeps answers

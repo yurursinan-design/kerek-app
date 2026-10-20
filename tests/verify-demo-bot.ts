@@ -193,6 +193,11 @@ async function main() {
     check('New order waits for the owner', s.orders[0].status === 'new' && s.alerts.some((a) => a.kind === 'order' && a.refId === s.orders[0].id));
     ownerAction(s, { action: 'confirm', id: String(ok.order_id) }, NOW);
     check('Confirming tells the customer', s.orders[0].status === 'confirmed' && s.messages[s.messages.length - 1].text.includes('подтверждён') && !s.alerts.some((a) => a.refId === s.orders[0].id && !a.done));
+    const placeholder = runTool(s, 'create_order', { items: [{ product_id: 'napoleon', qty: 1 }], date: '2026-10-22', time: '12:00', mode: 'pickup', customer_name: 'Клиент' }, NOW);
+    check('A placeholder instead of a name is refused', placeholder.error === 'no_name');
+    const first = runTool(s, 'create_order', { items: [{ product_id: 'napoleon', qty: 1 }], date: '2026-10-22', time: '12:00', mode: 'pickup', customer_name: 'Дана' }, NOW);
+    const second = runTool(s, 'create_order', { items: [{ product_id: 'napoleon', qty: 1 }], date: '2026-10-22', time: '12:00', mode: 'pickup', customer_name: 'Дана Ахметова', note: 'С днём рождения' }, NOW);
+    check('The same order sent twice is updated, not doubled', second.updated === true && second.order_id === first.order_id && s.orders.filter((o) => o.date === '2026-10-22').length === 1 && s.orders.find((o) => o.id === first.order_id)?.note === 'С днём рождения');
     const late = runTool(s, 'create_order', { items: [{ product_id: 'napoleon', qty: 1 }], date: '2026-10-21', time: '10:30', mode: 'pickup', customer_name: 'Дана' }, NOW);
     check('Too soon today is refused', late.error === 'too_soon');
   }

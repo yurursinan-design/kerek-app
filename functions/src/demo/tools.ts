@@ -133,8 +133,12 @@ const PROBLEM_TEXT: Record<BookingProblem, string> = {
   busy: 'Это время уже занято.',
 };
 
+/** Words a model puts in place of a name it doesn't know; treated as no name */
+const NOT_A_NAME = /^(клиент|клиентка|покупатель|гость|аноним|неизвестно|не указано|нет|customer|client|guest|unknown|n\/a|-|—|тапсырыс беруші|қонақ)$/i;
+
 function cleanName(raw: unknown): string {
-  return String(typeof raw === 'string' ? raw : '').replace(/[\r\n<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const name = String(typeof raw === 'string' ? raw : '').replace(/[\r\n<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40);
+  return NOT_A_NAME.test(name) ? '' : name;
 }
 
 function dayInfo(date: string) {
@@ -170,6 +174,7 @@ export function runTool(session: Session, name: string, args: Record<string, unk
       const result: Result = {
         ...dayInfo(date),
         service: service.ru,
+        service_kz: service.kz,
         minutes: service.minutes,
         price: service.price,
         price_from: !!service.priceFrom,
@@ -220,7 +225,8 @@ export function runTool(session: Session, name: string, args: Record<string, unk
         ...dayInfo(date),
         time: start,
         service: service.ru,
-        staff: staff ? `${staff.name} (${staff.role_ru})` : '',
+        service_kz: service.kz,
+        staff: staff ? `${staff.name} (${staff.role_ru} / ${staff.role_kz})` : '',
         price: service.price,
         price_from: !!service.priceFrom,
         customer,
@@ -235,6 +241,7 @@ export function runTool(session: Session, name: string, args: Record<string, unk
           ...dayInfo(x.date),
           time: x.start,
           service: b.services.find((s) => s.id === x.serviceId)?.ru ?? '',
+          service_kz: b.services.find((s) => s.id === x.serviceId)?.kz ?? '',
           staff: b.staff.find((s) => s.id === x.staffId)?.name ?? '',
         })),
       };
@@ -317,6 +324,18 @@ function createOrder(session: Session, args: Record<string, unknown>, nowMs: num
   if (mode === 'delivery' && !b.delivery) return { error: 'no_delivery', message: 'Доставки нет, только самовывоз.' };
   const subtotal = items.reduce((sum, it) => sum + (b.products.find((p) => p.id === it.productId)?.price ?? 0) * it.qty, 0);
   const delivery = mode === 'delivery' && b.delivery ? (subtotal >= b.delivery.freeFrom ? 0 : b.delivery.price) : 0;
+  const sameItems = (o: Order) => JSON.stringify([...o.items].sort((x, y) => x.productId.localeCompare(y.productId))) === JSON.stringify([...items].sort((x, y) => x.productId.localeCompare(y.productId)));
+  // The same order sent again (with a name or address added) updates the waiting order instead of doubling it
+  const again = session.orders.find((o) => o.source === 'bot' && o.status === 'new' && o.date === date && o.time === toHHMM(t) && sameItems(o));
+  if (again) {
+    again.customer = customer;
+    again.mode = mode;
+    again.address = mode === 'delivery' ? address : '';
+    again.total = subtotal + delivery;
+    const note = String(args.note ?? '').replace(/\s+/g, ' ').trim().slice(0, 140);
+    if (note) again.note = note;
+    return { ok: true, order_id: again.id, updated: true, status: 'ждёт подтверждения администратора (обычно до 15 минут)', total: again.total, ...dayInfo(date), time: again.time, mode, address: again.address };
+  }
   const order: Order = {
     id: nextId(session, 'o'),
     items,
@@ -340,7 +359,7 @@ function createOrder(session: Session, args: Record<string, unknown>, nowMs: num
     status: 'ждёт подтверждения администратора (обычно до 15 минут)',
     items: items.map((it) => {
       const p = b.products.find((x) => x.id === it.productId)!;
-      return { name: p.ru, qty: it.qty, unit: p.unit, price: p.price, price_from: !!p.priceFrom };
+      return { name: p.ru, name_kz: p.kz, qty: it.qty, unit: p.unit, price: p.price, price_from: !!p.priceFrom };
     }),
     subtotal,
     delivery,
