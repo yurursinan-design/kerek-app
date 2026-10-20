@@ -166,6 +166,20 @@ async function main() {
     check('No alert for an ordinary answer', s.alerts.length === before);
   }
 
+  // --- "Booked you" in words only: the model is asked once to use the tool ---
+  {
+    const s = session('salon');
+    s.consent = 'given';
+    const { ai, seen } = fakeAi([
+      { text: 'Записала вас на завтра в 11:00 ✅' },
+      { calls: [{ name: 'book_appointment', args: { service_id: 'brows', date: '2026-10-22', time: '11:00', customer_name: 'Алия' } }] },
+      { text: 'Записала вас на завтра в 11:00 ✅' },
+    ]);
+    await customerTurn(s, { text: 'Брови завтра в 11, Алия' }, ai, NOW);
+    check('A words-only booking is turned into a real one', s.bookings.some((b) => b.source === 'bot' && b.start === '11:00') && seen.length === 3);
+    check('The reminder to the model is not saved in the chat', !s.messages.some((m) => m.text.includes('Система')));
+  }
+
   // --- Orders ---
   {
     const s = session('cake');

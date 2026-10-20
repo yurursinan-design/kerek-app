@@ -9,6 +9,8 @@ import { buildBusiness } from '../functions/src/demo/builder';
 import { seedBookings, seedOrders } from '../functions/src/demo/calendar';
 import { customerTurn, ownerAction, type GeminiLike } from '../functions/src/demo/engine';
 import { cloneTemplate } from '../functions/src/demo/templates';
+import { systemPrompt } from '../functions/src/demo/prompt';
+import { toolDeclarations } from '../functions/src/demo/tools';
 import type { Business, Session } from '../functions/src/demo/types';
 
 const key = process.env.GEMINI_API_KEY;
@@ -110,8 +112,56 @@ const scenarios: [string, () => Promise<void>][] = [
   ],
 ];
 
+/** Speed and tool use of the available Flash models on the same question, to pick the chat model */
+async function benchmark() {
+  const names: string[] = [];
+  try {
+    const pager = await real.models.list({ config: { pageSize: 100 } });
+    for await (const m of pager) {
+      const n = (m.name ?? '').replace(/^models\//, '');
+      if (/flash/.test(n) && !/image|tts|audio|live|embed|exp|thinking/.test(n)) names.push(n);
+    }
+  } catch (err) {
+    console.log('model list failed:', err instanceof Error ? err.message : err);
+  }
+  console.log(`\n=== models: ${names.join(', ')}`);
+  const candidates = Array.from(new Set(['gemini-flash-latest', 'gemini-flash-lite-latest', ...names.filter((n) => /^gemini-[\d.]+-flash(-lite)?$/.test(n))]));
+  const salon = newSession(cloneTemplate('salon')!);
+  const cake = newSession(cloneTemplate('cake')!);
+  for (const model of candidates) {
+    const results: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const t0 = Date.now();
+      try {
+        const r = await real.models.generateContent({
+          model,
+          contents: [{ role: 'user', parts: [{ text: 'Ертең маникюрге бос уақыт бар ма?' }] }],
+          config: { systemInstruction: systemPrompt(salon.business, Date.now()), tools: [{ functionDeclarations: toolDeclarations(salon.business) }], temperature: 0.3, httpOptions: { timeout: 30000 } },
+        });
+        results.push(`${((Date.now() - t0) / 1000).toFixed(1)}s ${r.functionCalls?.length ? 'tool' : 'TEXT'}`);
+      } catch (err) {
+        results.push(`ERR ${((Date.now() - t0) / 1000).toFixed(1)}s ${(err instanceof Error ? err.message : String(err)).slice(0, 60)}`);
+      }
+    }
+    let kz = '';
+    try {
+      const r = await real.models.generateContent({
+        model,
+        contents: [{ role: 'user', parts: [{ text: 'Қантсыз торт жасайсыздар ма? Ал ертеңге 2 кг медовик керек, жеткізу бар ма?' }] }],
+        config: { systemInstruction: systemPrompt(cake.business, Date.now()), temperature: 0.3, httpOptions: { timeout: 30000 } },
+      });
+      kz = (r.text ?? '').replace(/\n+/g, ' ').slice(0, 300);
+    } catch (err) {
+      kz = `ERR ${(err instanceof Error ? err.message : String(err)).slice(0, 60)}`;
+    }
+    console.log(`${model}: ${results.join(' | ')}\n   kz: ${kz}`);
+  }
+}
+
 async function main() {
   const filter = process.argv[2] || '';
+  if (!filter || filter === 'models') await benchmark();
+  if (filter === 'models') return;
   for (const [name, run] of scenarios) {
     if (filter && !name.includes(filter)) continue;
     try {

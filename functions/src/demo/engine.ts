@@ -34,7 +34,7 @@ const CALL_TIMEOUT_MS = 20_000;
  * per answer in tests, the light one a few seconds, and tool use and Kazakh were fine. The main
  * model reads price lists (photos) first, where quality matters more than speed.
  */
-export const FAST_FIRST = [GEMINI_CONFIG.fallbackModel, GEMINI_CONFIG.model];
+export const FAST_FIRST = process.env.DEMO_CHAT_MODELS ? process.env.DEMO_CHAT_MODELS.split(',') : [GEMINI_CONFIG.fallbackModel, GEMINI_CONFIG.model];
 export const QUALITY_FIRST = [GEMINI_CONFIG.model, GEMINI_CONFIG.fallbackModel];
 
 /**
@@ -114,7 +114,10 @@ export function historyContents(session: Session): Content[] {
 }
 
 /** "I passed it to the administrator", "the administrator will reply" (Russian and Kazakh) */
-const PROMISED_OWNER = /(администратор\S*[^.!?\n]{0,40}(свяж|ответ|напиш|перезвон)|(передал|передала|передам)[^.!?\n]{0,40}администратор|әкімші\S*[^.!?\n]{0,40}(жауап бер|хабарлас|жаз)|әкімшіге[^.!?\n]{0,30}(жібердім|жеткіздім|хабарладым|беремін))/i;
+const PROMISED_OWNER = /(администратор\S*[^.!?\n]{0,40}(свяж|ответ|отвеч|напиш|перезвон)|(передал|передала|передам|уточню|уточним|узнаю)[^.!?\n]{0,40}администратор|әкімші\S*[^.!?\n]{0,40}(жауап бер|хабарлас|жаз|нақтыла|сұра)|әкімшіге[^.!?\n]{0,30}(жібердім|жеткіздім|хабарладым|беремін))/i;
+/** "I booked you", "your order is placed" without a tool having done it */
+const CLAIMED_DONE = /(записал[аи]?\s+вас|вы\s+записаны|запись\s+(создана|оформлена)|заказ\s+(принят|оформлен|создан)|жазып\s+қойдым|жазылдыңыз|жазылып\s+қойдыңыз|тапсырыс(ыңыз)?\s+(қабылданды|рәсімделді))/i;
+const CHANGING_TOOLS = new Set(['book_appointment', 'reschedule_booking', 'create_order']);
 
 async function modelReply(session: Session, ai: GeminiLike, nowMs: number): Promise<string> {
   const contents = historyContents(session);
@@ -125,12 +128,21 @@ async function modelReply(session: Session, ai: GeminiLike, nowMs: number): Prom
     maxOutputTokens: 1200,
   };
   let handedOff = false;
+  let changed = false;
+  let nudged = false;
   for (let round = 0; round < TOOL_ROUNDS; round++) {
     const res = await generate(ai, contents, config);
     const calls = res.functionCalls ?? [];
     if (!calls.length) {
       const text = cleanReply(res.text ?? '');
       if (!text) throw new Error('empty answer');
+      // Confirmed a booking or order in words only: asked once to do it with the tool, or correct itself
+      if (!changed && !nudged && CLAIMED_DONE.test(text) && round < TOOL_ROUNDS - 2) {
+        nudged = true;
+        contents.push({ role: 'model', parts: [{ text }] });
+        contents.push({ role: 'user', parts: [{ text: '(Система: ты подтвердил запись или заказ, но не вызвал инструмент, поэтому ничего не создано. Вызови нужный инструмент сейчас или, если данных не хватает, спроси у клиента. Клиент этого сообщения не видит.)' }] });
+        continue;
+      }
       // Told the customer the owner will answer but forgot the tool: the owner is told anyway
       if (!handedOff && PROMISED_OWNER.test(text)) {
         const last = [...session.messages].reverse().find((m) => m.from === 'customer');
@@ -145,9 +157,11 @@ async function modelReply(session: Session, ai: GeminiLike, nowMs: number): Prom
     contents.push(content);
     contents.push({
       role: 'user',
-      parts: calls.map((c) => ({
-        functionResponse: { id: c.id, name: c.name, response: runTool(session, c.name ?? '', (c.args ?? {}) as Record<string, unknown>, nowMs) },
-      })),
+      parts: calls.map((c) => {
+        const response = runTool(session, c.name ?? '', (c.args ?? {}) as Record<string, unknown>, nowMs);
+        if (response.ok && CHANGING_TOOLS.has(c.name ?? '')) changed = true;
+        return { functionResponse: { id: c.id, name: c.name, response } };
+      }),
     });
   }
   throw new Error('too many tool rounds');
