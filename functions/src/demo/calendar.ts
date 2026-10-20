@@ -58,12 +58,16 @@ export function toHHMM(min: number): string {
   return `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
 }
 
-export function dayHours(b: Business, date: string): [number, number] | null {
-  const h = b.hours[weekdayOf(date)];
-  if (!h) return null;
-  const open = toMin(h[0]);
-  const close = toMin(h[1]);
+/** "09:00-20:00" → [540, 1200]; closed or unreadable → null */
+export function parseHours(h: string | null | undefined): [number, number] | null {
+  const [a, b] = String(h ?? '').split('-');
+  const open = toMin(a);
+  const close = toMin(b);
   return open !== null && close !== null && close > open ? [open, close] : null;
+}
+
+export function dayHours(b: Business, date: string): [number, number] | null {
+  return parseHours(b.hours[weekdayOf(date)]);
 }
 
 function overlaps(aStart: number, aLen: number, bStart: number, bLen: number): boolean {

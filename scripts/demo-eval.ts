@@ -106,7 +106,7 @@ const scenarios: [string, () => Promise<void>][] = [
         staff: 'Арман, Ержан',
         address: 'Кызылорда, ул. Абая, 10',
       });
-      console.log(`\n=== builder (${((Date.now() - t0) / 1000).toFixed(1)} s) ===\n${JSON.stringify({ ...business, hours: business.hours.map((h) => (h ? h.join('-') : '—')).join(', ') }, null, 1).slice(0, 2500)}`);
+      console.log(`\n=== builder (${((Date.now() - t0) / 1000).toFixed(1)} s) ===\n${JSON.stringify({ ...business, hours: business.hours.map((h) => h ?? '—').join(', ') }, null, 1).slice(0, 2500)}`);
       await play('builder-barber-chat', newSession(business), ['Сколько стоит стрижка с бородой? Можно сегодня вечером?', { button: 'consent_yes' }]);
     },
   ],

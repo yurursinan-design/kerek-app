@@ -286,7 +286,7 @@ function PriceTab({ view, t, lang }: { view: DemoView; t: Texts; lang: UiLang })
       )}
       <section>
         <h4 className="mb-1.5 font-semibold">{t.hours}</h4>
-        <p className="text-mute">{b.hours.map((h, i) => `${t.days[i]} ${h ? `${h[0]}–${h[1]}` : t.closed}`).join(' · ')}</p>
+        <p className="text-mute">{b.hours.map((h, i) => `${t.days[i]} ${h ? h.replace('-', '–') : t.closed}`).join(' · ')}</p>
       </section>
       <section>
         <h4 className="mb-1.5 font-semibold">{t.address}</h4>

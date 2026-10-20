@@ -6,7 +6,7 @@ const SHORT_DAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 
 function hoursText(b: Business): string {
   return b.hours
-    .map((h, i) => `${SHORT_DAYS[i]} ${h ? `${h[0]}–${h[1]}` : 'выходной'}`)
+    .map((h, i) => `${SHORT_DAYS[i]} ${h ? h.replace('-', '–') : 'выходной'}`)
     .join(', ');
 }
 

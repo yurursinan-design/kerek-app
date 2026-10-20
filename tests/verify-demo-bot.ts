@@ -206,6 +206,27 @@ async function main() {
     check('Too soon today is refused', late.error === 'too_soon');
   }
 
+  // --- Everything the functions save must be storable in Firestore ---
+  {
+    const problems: string[] = [];
+    const walk = (v: unknown, path: string, inArray: boolean) => {
+      if (v === undefined) problems.push(`${path} is undefined`);
+      else if (Array.isArray(v)) {
+        if (inArray) problems.push(`${path} is a list inside a list`);
+        v.forEach((x, i) => walk(x, `${path}[${i}]`, true));
+      } else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) walk(x, `${path}.${k}`, false);
+    };
+    for (const id of ['salon', 'auto', 'cake']) {
+      const s = session(id);
+      s.bookings = seedBookings(s.business, NOW, 'x');
+      s.consent = 'given';
+      const { ai } = fakeAi([{ calls: [{ name: 'book_appointment', args: { service_id: s.business.services[0]?.id ?? 'x', date: '2026-10-23', time: '09:00', customer_name: 'А' } }] }, { text: 'ok' }]);
+      await customerTurn(s, { text: 'Привет' }, ai, NOW);
+      walk(s, id, false);
+    }
+    check('Sessions can be saved in Firestore (no lists inside lists, nothing undefined)', problems.length === 0, problems.slice(0, 3).join('; '));
+  }
+
   if (failed) {
     console.log(`${failed} demo bot check(s) failed`);
     process.exit(1);

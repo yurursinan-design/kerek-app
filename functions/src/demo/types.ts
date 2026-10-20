@@ -48,8 +48,11 @@ export interface Business {
   type_ru: string;
   type_kz: string;
   address: string;
-  /** Opening hours, Monday first; null = closed */
-  hours: (null | [string, string])[];
+  /**
+   * Opening hours, Monday first: "09:00-20:00", or null when closed. (Strings, because Firestore
+   * can't store a list of lists.)
+   */
+  hours: (string | null)[];
   staff: Staff[];
   services: Service[];
   products: Product[];

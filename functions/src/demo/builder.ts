@@ -67,7 +67,7 @@ const SCHEMA = {
   required: ['kind', 'type_ru', 'type_kz'],
 };
 
-const DEFAULT_HOURS: Business['hours'] = [['09:00', '19:00'], ['09:00', '19:00'], ['09:00', '19:00'], ['09:00', '19:00'], ['09:00', '19:00'], ['09:00', '19:00'], ['10:00', '17:00']];
+const DEFAULT_HOURS: Business['hours'] = ['09:00-19:00', '09:00-19:00', '09:00-19:00', '09:00-19:00', '09:00-19:00', '09:00-19:00', '10:00-17:00'];
 
 const clean = (v: unknown, max: number) => String(typeof v === 'string' ? v : '').replace(/[\r\n<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
 
@@ -78,7 +78,7 @@ function parseHours(raw: unknown): Business['hours'] {
     if (!m) return null;
     const open = `${m[1].padStart(2, '0')}:${m[2]}`;
     const close = `${m[3].padStart(2, '0')}:${m[4]}`;
-    return close > open ? ([open, close] as [string, string]) : null;
+    return close > open ? `${open}-${close}` : null;
   });
   return out.some(Boolean) ? out : DEFAULT_HOURS;
 }
