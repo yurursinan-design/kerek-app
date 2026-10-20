@@ -3,7 +3,7 @@
   "short_name": "Tapsyr",
   "description": "Қызметтерді өз сөзіңізбен табыңыз. Поиск услуг своими словами.",
   "lang": "kk",
-  "start_url": "/",
+  "start_url": "/app/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f8fafc",

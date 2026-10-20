@@ -50,11 +50,11 @@ export function onFavoritesChange(cb: () => void): () => void {
   return () => window.removeEventListener(EVENT, cb);
 }
 
-/** Link that opens the master's profile in the app (the visitor logs in with their phone first). */
+/** Link that opens the master's profile in the web app at /app/ (the visitor logs in with their phone first). */
 export function masterProfileLink(id: string): string {
   // Inside the phone app the page address is local, so links point to the website instead
   const origin = /^https?:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(window.location.origin) || !/^https?:/.test(window.location.origin)
     ? PUBLIC_SITE_URL
     : window.location.origin;
-  return `${origin}/?master=${encodeURIComponent(id)}`;
+  return `${origin}/app/?master=${encodeURIComponent(id)}`;
 }
