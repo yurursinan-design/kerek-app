@@ -109,8 +109,10 @@ export const demoStart = onCall(AI_OPTS, async (request) => {
   const ip = ipKey(request);
   await limit([
     [`demo_start_${uid}`, 20, DAY_MS],
-    [`demo_start_ip_${ip}`, 60, DAY_MS],
-    ['demo_start_day', 2000, DAY_MS],
+    [`demo_start_ip_${ip}`, 40, DAY_MS],
+    // Daily ceilings for the whole demo, so stray traffic can't run up the Gemini bill: plenty for
+    // showing it to businesses in person (a full conversation is about 10 messages)
+    ['demo_start_day', 100, DAY_MS],
   ]);
   let business = typeof data.template === 'string' ? cloneTemplate(data.template) : null;
   if (!business && data.build && typeof data.build === 'object') {
@@ -123,7 +125,8 @@ export const demoStart = onCall(AI_OPTS, async (request) => {
     if (!BUSINESS_TYPES[String(build.type ?? '')]) throw new HttpsError('invalid-argument', 'Bad type.');
     await limit([
       [`demo_build_${uid}`, 8, DAY_MS],
-      [`demo_build_ip_${ip}`, 25, DAY_MS],
+      [`demo_build_ip_${ip}`, 20, DAY_MS],
+      ['demo_build_day', 30, DAY_MS],
     ]);
     try {
       business = await buildBusiness(new GoogleGenAI({ apiKey: geminiApiKey.value() }), {
@@ -169,9 +172,9 @@ export const demoSend = onCall(AI_OPTS, async (request) => {
   const data = (request.data ?? {}) as Record<string, unknown>;
   await limit([
     [`demo_msg_${uid}`, 15, 60_000],
-    [`demo_msg_day_${uid}`, 250, DAY_MS],
-    [`demo_msg_ip_${ipKey(request)}`, 800, DAY_MS],
-    ['demo_msg_day', 6000, DAY_MS],
+    [`demo_msg_day_${uid}`, 120, DAY_MS],
+    [`demo_msg_ip_${ipKey(request)}`, 200, DAY_MS],
+    ['demo_msg_day', 300, DAY_MS],
   ]);
   const input: CustomerInput = {};
   if (typeof data.text === 'string') input.text = data.text.slice(0, 1000);
