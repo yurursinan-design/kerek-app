@@ -1,0 +1,39 @@
+# Temporary: public DNS, certificate and policy facts about naimi.kz (removed right after it runs)
+name: hosting-check
+
+on:
+  push:
+    branches: ['claude/kerek-source-access-x39385']
+    paths: ['.github/workflows/hosting-check.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Public records of naimi.kz
+        run: |
+          sudo apt-get -qq install -y whois >/dev/null 2>&1 || true
+          ipline() { curl -s --max-time 10 "https://ipinfo.io/$1/json" | jq -r '"\(.ip)  \(.org // "?")  \(.city // "?"), \(.country // "?")"'; }
+          echo "== WHOIS"; whois -h whois.nic.kz naimi.kz 2>/dev/null | grep -i -E "organization|name|address|city|country|created|server" | head -20
+          echo "== NS"; dig +short NS naimi.kz
+          echo "== MX"; for mx in $(dig +short MX naimi.kz | awk '{print $2}'); do echo "$mx"; for ip in $(dig +short A "$mx" | grep -E '^[0-9.]+$'); do echo "   $(ipline $ip)"; done; done
+          echo "== TXT"; dig +short TXT naimi.kz
+          echo "== Subdomains from certificate logs"
+          curl -s --max-time 60 "https://crt.sh/?q=%25.naimi.kz&output=json" | jq -r '.[].name_value' 2>/dev/null | tr '[:upper:]' '[:lower:]' | sed 's/^\*\.//' | sort -u > subs.txt || true
+          echo "count: $(wc -l < subs.txt)"
+          while read -r s; do
+            ips=$(dig +short A "$s" | grep -E '^[0-9.]+$' | head -2)
+            [ -z "$ips" ] && continue
+            for ip in $ips; do echo "$s  ->  $(ipline $ip)"; done
+          done < subs.txt | sort -u | head -80
+          echo "== Policy links on the site"
+          curl -s -L --max-time 20 -A "Mozilla/5.0" https://naimi.kz/ -o home.html
+          grep -o -i -E 'href="[^"]*(privacy|policy|politika|konfiden|oferta|offer|agreement|soglash|terms)[^"]*"' home.html | sort -u | head -10
+          for u in $(grep -o -i -E 'href="[^"]*(privacy|policy|politika|konfiden|oferta|agreement|soglash|terms)[^"]*"' home.html | sed -E 's/href="([^"]*)"/\1/' | sort -u | head -4); do
+            case "$u" in http*) url="$u";; /*) url="https://naimi.kz$u";; *) url="https://naimi.kz/$u";; esac
+            echo "--- $url"
+            curl -s -L --max-time 20 -A "Mozilla/5.0" "$url" | sed 's/<[^>]*>/ /g' | tr -s ' \n' | grep -o -i -E '.{0,160}(территори|сервер|трансгранич|хранени|Google|Amazon|Yandex|Яндекс).{0,160}' | head -8
+          done
