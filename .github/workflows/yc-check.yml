@@ -56,14 +56,14 @@ jobs:
           echo "PostgreSQL clusters: $(yc managed-postgresql cluster list --format json | jq length)"
           echo "Buckets: $(yc storage bucket list --format json | jq -r '.[].name' | tr '\n' ' ')"
           echo "== PostgreSQL sizes available"
-          yc managed-postgresql resource-preset list --format json | jq -r '.[] | select(.zone_ids | index("kz1-a")) | "\(.id)  cores=\(.cores)  memory=\(.memory/1073741824)GB"' | sort -t= -k2 -n | head -20
+          yc managed-postgresql resource-preset list --format json | jq -r '.[] | select(.zone_ids | index("kz1-a")) | "\(.id)  cores=\(.cores)  memory=\((.memory|tonumber)/1073741824)GB"' | sort -t= -k2 -n | head -20
           echo "== Prices (KZT)"
           TOKEN=$(yc iam create-token)
           for host in billing.api.yandexcloud.kz billing.api.cloud.yandex.net; do
             out=$(curl -s --max-time 30 -H "Authorization: Bearer $TOKEN" "https://$host/billing/v1/skus?currency=KZT&pageSize=1000")
             if echo "$out" | jq -e '.skus' >/dev/null 2>&1; then
               echo "(from $host)"
-              echo "$out" | jq -r '.skus[] | select(.name | test("PostgreSQL|Intel Ice Lake|Standard network drive|SSD|Object Storage|Public IP"; "i")) | "\(.name) | \(.pricingVersions[-1].pricingExpressions[0].rates[0].unitPrice // "?") ₸ per \(.pricingUnit)"' | sort -u | head -60
+              echo "$out" | jq -r '.skus[] | select(.name | test("^Managed Service for PostgreSQL|^Intel Ice Lake|^Compute Cloud|network drive|Public IP address$|^Standard storage|Object Storage"; "i")) | select(.name | test("CVoS|Kafka|ClickHouse|MySQL|Greenplum|MPP|Valkey|Redis|Mongo|OpenSearch|GPU|Windows|SQL Server|Dedicated"; "i") | not) | "\(.name) | \(.pricingVersions[-1].pricingExpressions[0].rates[0].unitPrice // "?") per \(.pricingUnit)"' | sort -u | head -80
               break
             else
               echo "$host: $(echo "$out" | head -c 200)"
