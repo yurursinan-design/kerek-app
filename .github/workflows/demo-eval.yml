@@ -1,0 +1,46 @@
+# Plays scripted customer conversations against the WhatsApp assistant demo with the real Gemini API
+# and prints the transcripts (scripts/demo-eval.ts), to check answer quality before showing it to
+# businesses. Runs only for a commit on a claude/** branch whose message starts with "[demo-eval]".
+# Nothing is deployed; the Gemini key is read from Secret Manager and masked in the log.
+name: Demo bot testi
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  eval:
+    if: startsWith(github.event.head_commit.message, '[demo-eval]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Bağımlılıkları kur
+        run: bun install --frozen-lockfile && npm --prefix functions ci
+
+      - name: Google Cloud'a giriş
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
+          service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Konuşmaları oynat
+        run: |
+          KEY=$(gcloud secrets versions access latest --secret=GEMINI_API_KEY --project kerek-9d153)
+          echo "::add-mask::$KEY"
+          GEMINI_API_KEY="$KEY" npx tsx scripts/demo-eval.ts "${EVAL_FILTER:-}"
+        env:
+          EVAL_FILTER: ''
