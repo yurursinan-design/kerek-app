@@ -1,4 +1,4 @@
-import { generate, type GeminiLike, type MediaInput } from './engine';
+import { generate, QUALITY_FIRST, type GeminiLike, type MediaInput } from './engine';
 import type { Business, Product, Service, Staff } from './types';
 
 /**
@@ -108,7 +108,7 @@ export async function buildBusiness(ai: GeminiLike, input: BuildInput): Promise<
     responseJsonSchema: SCHEMA,
     temperature: 0.1,
     maxOutputTokens: 6000,
-  });
+  }, QUALITY_FIRST);
   let raw: Record<string, unknown> = {};
   try {
     raw = JSON.parse(res.text ?? '{}');

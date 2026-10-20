@@ -153,6 +153,19 @@ async function main() {
     check("The customer can't cancel someone else's booking", cancel.error === 'not_found');
   }
 
+  // --- A promise to pass it on without the tool still reaches the owner ---
+  {
+    const s = session('salon');
+    s.consent = 'given';
+    const { ai } = fakeAi([{ text: 'Мне очень жаль. Я передала вашу жалобу администратору, он скоро свяжется с вами.' }]);
+    await customerTurn(s, { text: 'Мастер испортила мне волосы' }, ai, NOW);
+    check('Owner alert even when the model forgot the tool', s.alerts.some((a) => a.kind === 'handoff' && !a.done && a.text_ru.includes('испортила')));
+    const { ai: ai2 } = fakeAi([{ text: 'Маникюр стоит 5 000 ₸.' }]);
+    const before = s.alerts.length;
+    await customerTurn(s, { text: 'Сколько стоит маникюр?' }, ai2, NOW);
+    check('No alert for an ordinary answer', s.alerts.length === before);
+  }
+
   // --- Orders ---
   {
     const s = session('cake');

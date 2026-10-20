@@ -28,26 +28,34 @@ export interface CustomerInput {
 const MAX_MESSAGES = 120;
 const HISTORY = 24;
 const TOOL_ROUNDS = 6;
-const MODELS = Array.from(new Set([GEMINI_CONFIG.model, GEMINI_CONFIG.fallbackModel]));
+const CALL_TIMEOUT_MS = 20_000;
+/**
+ * Chat answers come from the light model first: under load the main model took a minute or more
+ * per answer in tests, the light one a few seconds, and tool use and Kazakh were fine. The main
+ * model reads price lists (photos) first, where quality matters more than speed.
+ */
+export const FAST_FIRST = [GEMINI_CONFIG.fallbackModel, GEMINI_CONFIG.model];
+export const QUALITY_FIRST = [GEMINI_CONFIG.model, GEMINI_CONFIG.fallbackModel];
 
 /**
  * One Gemini call with fallbacks: the main model, then the lighter one. Low thinking keeps answers
  * fast; a model that doesn't accept the setting is asked again without it.
  */
-export async function generate(ai: GeminiLike, contents: Content[], config: GenerateContentConfig): Promise<GenerateContentResponse> {
+export async function generate(ai: GeminiLike, contents: Content[], config: GenerateContentConfig, models: string[] = FAST_FIRST): Promise<GenerateContentResponse> {
   let last: unknown = null;
-  for (const model of MODELS) {
+  for (const model of models) {
     for (const thinking of [true, false]) {
       try {
         return await ai.models.generateContent({
           model,
           contents,
-          config: thinking ? { ...config, thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : config,
+          // A stuck call gives up in time for the fallback model and the function's own time limit
+          config: { ...config, httpOptions: { timeout: CALL_TIMEOUT_MS }, ...(thinking ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } } : {}) },
         });
       } catch (err) {
         last = err;
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[demo] ${model}${thinking ? ' (low thinking)' : ''} failed:`, msg.slice(0, 300));
+        console.warn(`[demo] ${model}${thinking ? ' (low thinking)' : ''} failed:`, msg.slice(0, 200));
         if (!thinking || !/thinking/i.test(msg)) break;
       }
     }
@@ -105,6 +113,9 @@ export function historyContents(session: Session): Content[] {
   return out;
 }
 
+/** "I passed it to the administrator", "the administrator will reply" (Russian and Kazakh) */
+const PROMISED_OWNER = /(администратор\S*[^.!?\n]{0,40}(свяж|ответ|напиш|перезвон)|(передал|передала|передам)[^.!?\n]{0,40}администратор|әкімші\S*[^.!?\n]{0,40}(жауап бер|хабарлас|жаз)|әкімшіге[^.!?\n]{0,30}(жібердім|жеткіздім|хабарладым|беремін))/i;
+
 async function modelReply(session: Session, ai: GeminiLike, nowMs: number): Promise<string> {
   const contents = historyContents(session);
   const config: GenerateContentConfig = {
@@ -113,14 +124,21 @@ async function modelReply(session: Session, ai: GeminiLike, nowMs: number): Prom
     temperature: 0.3,
     maxOutputTokens: 1200,
   };
+  let handedOff = false;
   for (let round = 0; round < TOOL_ROUNDS; round++) {
     const res = await generate(ai, contents, config);
     const calls = res.functionCalls ?? [];
     if (!calls.length) {
       const text = cleanReply(res.text ?? '');
-      if (text) return text;
-      throw new Error('empty answer');
+      if (!text) throw new Error('empty answer');
+      // Told the customer the owner will answer but forgot the tool: the owner is told anyway
+      if (!handedOff && PROMISED_OWNER.test(text)) {
+        const last = [...session.messages].reverse().find((m) => m.from === 'customer');
+        runTool(session, 'handoff_to_owner', { reason: (last?.note || last?.text || '').slice(0, 120) }, nowMs);
+      }
+      return text;
     }
+    if (calls.some((c) => c.name === 'handoff_to_owner')) handedOff = true;
     const content = res.candidates?.[0]?.content;
     if (!content) throw new Error('no content with the tool calls');
     // The model's own turn goes back unchanged: it carries the thought signatures Gemini checks

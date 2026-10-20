@@ -175,7 +175,7 @@ export function seededRandom(seedText: string): () => number {
 
 const SEED_NAMES = ['Аружан', 'Дана', 'Гульнар', 'Айсулу', 'Жанар', 'Сауле', 'Асель', 'Ботагоз', 'Әсем', 'Ерлан', 'Нурлан', 'Бауыржан', 'Данияр', 'Арман', 'Ержан', 'Мейрам', 'Алия', 'Томирис'];
 
-/** About 45% of each working day booked for the next ten days. */
+/** About half of each working day booked for the next ten days. */
 export function seedBookings(b: Business, nowMs: number, seed: string): Booking[] {
   const rand = seededRandom(seed);
   const now = localNow(nowMs);
@@ -188,10 +188,18 @@ export function seedBookings(b: Business, nowMs: number, seed: string): Booking[
     for (const st of b.staff) {
       const services = b.services.filter((s) => s.staff.includes(st.id));
       if (!services.length) continue;
+      // Longer services are picked more often (a day isn't twenty children's haircuts)
+      const weights = services.map((s) => s.minutes);
+      const total = weights.reduce((a, c) => a + c, 0);
+      const pick = () => {
+        let r = rand() * total;
+        for (let i = 0; i < services.length; i++) if ((r -= weights[i]) < 0) return services[i];
+        return services[services.length - 1];
+      };
       let t = hours[0];
       while (t < hours[1]) {
-        const s = services[Math.floor(rand() * services.length)];
-        if (rand() < 0.45 && t + s.minutes <= hours[1]) {
+        const s = pick();
+        if (rand() < 0.3 && t + s.minutes <= hours[1]) {
           out.push({
             id: `s${++n}`,
             serviceId: s.id,
