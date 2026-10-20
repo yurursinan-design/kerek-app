@@ -1,0 +1,24 @@
+# Temporary: where competitors' sites are hosted (removed right after it runs)
+name: hosting-check
+
+on:
+  push:
+    branches: ['claude/kerek-source-access-x39385']
+    paths: ['.github/workflows/hosting-check.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Look up hosting of competitor domains
+        run: |
+          for d in naimi.kz www.naimi.kz api.naimi.kz profi.kz uwork.kz ikomek.kz olx.kz www.olx.kz youdo.com uslugi.yandex.kz tapsyrapp.com; do
+            echo "== $d"
+            dig +short CNAME "$d" | sed 's/^/  CNAME /'
+            for ip in $(dig +short A "$d" | grep -E '^[0-9.]+$'); do
+              curl -s --max-time 10 "https://ipinfo.io/$ip/json" | jq -r '"  \(.ip)  \(.org // "?")  \(.city // "?"), \(.country // "?")"'
+            done
+          done
