@@ -47,26 +47,15 @@ jobs:
           yc config set cloud-id "$YC_CLOUD_ID"
           yc config set folder-id "$YC_FOLDER_ID"
 
-      - name: Read-only checks
+      - name: Compute prices (all pages)
         run: |
-          echo "== Access"; yc resource-manager folder get "$YC_FOLDER_ID" --format json | jq -r '"folder: \(.name) (\(.status))"'
-          echo "== Zones"; yc compute zone list --format json | jq -r '.[] | "\(.id) \(.status)"'
-          echo "== Existing resources"
-          echo "VMs: $(yc compute instance list --format json | jq length)"
-          echo "PostgreSQL clusters: $(yc managed-postgresql cluster list --format json | jq length)"
-          echo "Buckets: $(yc storage bucket list --format json | jq -r '.[].name' | tr '\n' ' ')"
-          echo "== PostgreSQL sizes available"
-          yc managed-postgresql resource-preset list --format json | jq -r '.[] | select(.zone_ids | index("kz1-a")) | "\(.id)  cores=\(.cores)  memory=\((.memory|tonumber)/1073741824)GB"' | sort -t= -k2 -n | head -20
-          echo "== Prices (KZT)"
           TOKEN=$(yc iam create-token)
-          for host in billing.api.yandexcloud.kz billing.api.cloud.yandex.net; do
-            out=$(curl -s --max-time 30 -H "Authorization: Bearer $TOKEN" "https://$host/billing/v1/skus?currency=KZT&pageSize=1000")
-            if echo "$out" | jq -e '.skus' >/dev/null 2>&1; then
-              echo "(from $host)"
-              echo "$out" | jq -r '.skus[] | select(.name | test("^Managed Service for PostgreSQL|^Intel Ice Lake|^Compute Cloud|network drive|Public IP address$|^Standard storage|Object Storage"; "i")) | select(.name | test("CVoS|Kafka|ClickHouse|MySQL|Greenplum|MPP|Valkey|Redis|Mongo|OpenSearch|GPU|Windows|SQL Server|Dedicated"; "i") | not) | "\(.name) | \(.pricingVersions[-1].pricingExpressions[0].rates[0].unitPrice // "?") per \(.pricingUnit)"' | sort -u | head -80
-              break
-            else
-              echo "$host: $(echo "$out" | head -c 200)"
-            fi
+          page=""; : > skus.jsonl
+          for i in $(seq 1 20); do
+            out=$(curl -s --max-time 30 -H "Authorization: Bearer $TOKEN" "https://billing.api.yandexcloud.kz/billing/v1/skus?currency=KZT&pageSize=1000${page:+&pageToken=$page}")
+            echo "$out" | jq -c '.skus[]?' >> skus.jsonl
+            page=$(echo "$out" | jq -r '.nextPageToken // empty'); [ -z "$page" ] && break
           done
+          echo "SKUs: $(wc -l < skus.jsonl)"
+          jq -r 'select(.name | test("vCPU|RAM|snapshot|HDD|Public IP"; "i")) | select(.name | test("Managed|MPP|Greenplum|Kafka|ClickHouse|MySQL|PostgreSQL|CVoS|GPU|Dedicated|Windows|Valkey|Redis|Mongo|OpenSearch|Container|Serverless|Kubernetes|Data Proc|Cloud Desktop|Gitlab|Metastore|Spark|Airflow|Trino|YDB|Ydb"; "i") | not) | "\(.name) | \(.pricingVersions[-1].pricingExpressions[0].rates[0].unitPrice // "?") per \(.pricingUnit)"' skus.jsonl | sort -u | head -60
           rm -f "$RUNNER_TEMP/key.json"
