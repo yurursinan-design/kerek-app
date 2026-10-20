@@ -146,7 +146,8 @@ async function modelReply(session: Session, ai: GeminiLike, nowMs: number): Prom
         continue;
       }
       // Told the customer the owner will answer but forgot the tool: the owner is told anyway
-      if (!handedOff && PROMISED_OWNER.test(text)) {
+      // (A booking or order made this turn already reaches the owner's panel)
+      if (!handedOff && !changed && PROMISED_OWNER.test(text)) {
         const last = [...session.messages].reverse().find((m) => m.from === 'customer');
         runTool(session, 'handoff_to_owner', { reason: (last?.note || last?.text || '').slice(0, 120) }, nowMs);
       }

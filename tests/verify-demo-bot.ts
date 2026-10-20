@@ -198,6 +198,10 @@ async function main() {
     const first = runTool(s, 'create_order', { items: [{ product_id: 'napoleon', qty: 1 }], date: '2026-10-22', time: '12:00', mode: 'pickup', customer_name: 'Дана' }, NOW);
     const second = runTool(s, 'create_order', { items: [{ product_id: 'napoleon', qty: 1 }], date: '2026-10-22', time: '12:00', mode: 'pickup', customer_name: 'Дана Ахметова', note: 'С днём рождения' }, NOW);
     check('The same order sent twice is updated, not doubled', second.updated === true && second.order_id === first.order_id && s.orders.filter((o) => o.date === '2026-10-22').length === 1 && s.orders.find((o) => o.id === first.order_id)?.note === 'С днём рождения');
+    ownerAction(s, { action: 'confirm', id: String(first.order_id) }, NOW);
+    const changedOrder = runTool(s, 'create_order', { items: [{ product_id: 'napoleon', qty: 1 }], date: '2026-10-22', time: '12:00', mode: 'pickup', customer_name: 'Дана', note: 'Без надписи' }, NOW);
+    const o = s.orders.find((x) => x.id === first.order_id);
+    check('Changing a confirmed order sends it back to the owner', changedOrder.updated === true && o?.status === 'new' && o.note === 'Без надписи' && s.alerts.some((a) => a.refId === o.id && !a.done));
     const late = runTool(s, 'create_order', { items: [{ product_id: 'napoleon', qty: 1 }], date: '2026-10-21', time: '10:30', mode: 'pickup', customer_name: 'Дана' }, NOW);
     check('Too soon today is refused', late.error === 'too_soon');
   }

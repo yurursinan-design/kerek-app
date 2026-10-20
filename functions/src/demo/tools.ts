@@ -326,8 +326,13 @@ function createOrder(session: Session, args: Record<string, unknown>, nowMs: num
   const delivery = mode === 'delivery' && b.delivery ? (subtotal >= b.delivery.freeFrom ? 0 : b.delivery.price) : 0;
   const sameItems = (o: Order) => JSON.stringify([...o.items].sort((x, y) => x.productId.localeCompare(y.productId))) === JSON.stringify([...items].sort((x, y) => x.productId.localeCompare(y.productId)));
   // The same order sent again (with a name or address added) updates the waiting order instead of doubling it
-  const again = session.orders.find((o) => o.source === 'bot' && o.status === 'new' && o.date === date && o.time === toHHMM(t) && sameItems(o));
+  const again = session.orders.find((o) => o.source === 'bot' && (o.status === 'new' || o.status === 'confirmed') && o.date === date && o.time === toHHMM(t) && sameItems(o));
   if (again) {
+    // A change to a confirmed order goes back to the owner for confirmation
+    if (again.status === 'confirmed') {
+      again.status = 'new';
+      session.alerts.push({ id: nextId(session, 'a'), at: nowMs, kind: 'order', ...prefixed(ALERT_TEXT.changedOrder), done: false, refId: again.id });
+    }
     again.customer = customer;
     again.mode = mode;
     again.address = mode === 'delivery' ? address : '';
