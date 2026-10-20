@@ -13,7 +13,13 @@ async function main() {
     headers: { 'Content-Type': 'application/json', Referer: REFERER },
     body: JSON.stringify({ returnSecureToken: true }),
   });
-  const auth = (await signUp.json()) as { idToken?: string; error?: unknown };
+  const authRaw = await signUp.text();
+  let auth: { idToken?: string; error?: unknown };
+  try {
+    auth = JSON.parse(authRaw);
+  } catch {
+    throw new Error(`sign-in HTTP ${signUp.status}: ${authRaw.replace(/\s+/g, ' ').slice(0, 300)}`);
+  }
   if (!auth.idToken) throw new Error(`sign-in failed: ${JSON.stringify(auth.error)}`);
   const call = async (name: string, data: unknown) => {
     const t0 = Date.now();
@@ -22,7 +28,13 @@ async function main() {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth.idToken}`, Origin: 'https://tapsyr.web.app' },
       body: JSON.stringify({ data }),
     });
-    const body = (await res.json()) as { result?: any; error?: unknown };
+    const raw = await res.text();
+    let body: { result?: any; error?: unknown };
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      throw new Error(`${name} HTTP ${res.status}: ${raw.replace(/\s+/g, ' ').slice(0, 300)}`);
+    }
     if (!body.result) throw new Error(`${name} ${res.status}: ${JSON.stringify(body.error ?? body)}`);
     console.log(`  (${name} ${((Date.now() - t0) / 1000).toFixed(1)} s, CORS ${res.headers.get('access-control-allow-origin') ?? '-'})`);
     return body.result;
