@@ -4,6 +4,7 @@ import {execSync} from 'child_process';
 import path from 'path';
 import {defineConfig} from 'vite';
 import {legalPages} from './scripts/legalPages';
+import {sitePages} from './scripts/landingPage';
 
 // Shown on the profile tab, so a support question can name the exact build
 function buildId(): string {
@@ -17,7 +18,7 @@ function buildId(): string {
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss(), legalPages()],
+    plugins: [react(), tailwindcss(), legalPages(), sitePages()],
     define: {
       __APP_VERSION__: JSON.stringify(`${process.env.KEREK_VERSION_NAME || '1.0'} · ${buildId()}`),
     },
