@@ -115,5 +115,5 @@ def leak(a, b, k):
     color = np.array([255, 170, 90], np.float32)
     amount = math.sin(math.pi * k)
     mix = np.asarray(a, np.float32) * (1 - ease_out(k)) + np.asarray(b, np.float32) * ease_out(k)
-    mix = mix + glow * color * 0.85 * amount + 40 * amount
+    mix = mix + glow * color * 0.55 * amount + 18 * amount
     return np.clip(mix, 0, 255).astype(np.uint8)

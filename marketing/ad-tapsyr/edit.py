@@ -31,7 +31,7 @@ SHOTS = [
     ('v10', 6.5, 41, 2),    # … the push-in to Nurlan, twice as fast
     ('v12', 2.6, 48, 1),    # the tea is handed over (Omni)
     ('v14', 1.6, 67, 1),    # horses at the flower bed (Veo)
-    (None, 0, 72, 1),       # end card (drawn by the overlay)
+    ('v14', 4.4, 72, 1),    # the horses run on under the end card, which opens over them
 ]
 starts = np.cumsum([0] + [f for _, _, f, _ in SHOTS]) / FPS
 S = dict(zip(['k1', 'k2', 'ride', 'street', 'door', 'close', 'tea', 'horses', 'end', 'total'], starts))

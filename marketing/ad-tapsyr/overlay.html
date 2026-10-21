@@ -169,13 +169,13 @@ window.seek = (t) => {
   vis($('cap6'), t, TL.cap6[0], TL.cap6[1], { dy: 30 });
   vis($('cap7'), t, TL.cap7[0], TL.cap7[1], { dy: 30 });
   end(t, TL.end);
-  const k = Math.max(0, Math.min(1, (t - TL.end) / 0.6));
-  const r = 1500 * k * k * k;
+  const ek = Math.max(0, Math.min(1, (t - TL.end) / 0.6));
+  const r = 1500 * ek * ek * ek;
   endEl.style.clipPath = `circle(${r}px at 50% 50%)`;
   endEl.style.visibility = r > 0 ? 'visible' : 'hidden';
-  shan.style.visibility = k > 0 && k < 1 ? 'visible' : 'hidden';
-  shan.style.opacity = String(1 - Math.max(0, (k - 0.75) / 0.25));
-  shan.style.transform = `scale(${Math.max(0.01, r / 100)}) rotate(${k * 70}deg)`;
+  shan.style.visibility = ek > 0 && ek < 1 ? 'visible' : 'hidden';
+  shan.style.opacity = String(1 - Math.max(0, (ek - 0.75) / 0.25));
+  shan.style.transform = `scale(${Math.max(0.01, r / 100)}) rotate(${ek * 70}deg)`;
 };
 window.DURATION = TL.duration;
 if (window.TL) window.seek(0);
