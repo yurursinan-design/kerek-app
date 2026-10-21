@@ -1,5 +1,5 @@
 {
- "total_usd": 1.82,
+ "total_usd": 2.1,
  "log": [
   {
    "name": "ref_aje",
@@ -79,6 +79,18 @@
    "model": "gemini-3-pro-image",
    "usd": 0.14,
    "at": "2026-10-21 11:21"
+  },
+  {
+   "name": "s1_kitchen",
+   "model": "gemini-3-pro-image",
+   "usd": 0.14,
+   "at": "2026-10-21 11:57"
+  },
+  {
+   "name": "s2_decree",
+   "model": "gemini-3-pro-image",
+   "usd": 0.14,
+   "at": "2026-10-21 11:58"
   }
  ]
 }
