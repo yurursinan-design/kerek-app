@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tapsyr — заявка и предложения</title>
+<link rel="stylesheet" href="stage.css">
+<style>
+  .drop { position: absolute; width: 90px; height: 90px; background: linear-gradient(160deg, #7dd3fc, #0284c7); border-radius: 0 50% 50% 50%; transform-origin: center; }
+  .ripple { position: absolute; left: 540px; top: 1500px; width: 10px; height: 10px; border: 6px solid #7dd3fc; border-radius: 50%; }
+  .sel { border-color: var(--sky) !important; box-shadow: 0 10px 40px rgba(2, 132, 199, .25) !important; }
+  .badge { position: absolute; right: 28px; top: -18px; padding: 8px 18px; border-radius: 999px; background: var(--sky); color: #fff; font-weight: 800; font-size: 22px; }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 40px 60px; background: #fff; border-radius: 44px 44px 0 0; box-shadow: 0 -20px 60px rgba(11, 46, 68, .18); }
+  .sheet .t { display: flex; align-items: center; gap: 18px; font-size: 38px; font-weight: 800; }
+  .sheet .t i { width: 58px; height: 58px; border-radius: 50%; background: var(--green); display: grid; place-items: center; }
+  .sheet p { margin-top: 16px; font-size: 31px; color: var(--mute); line-height: 1.35; }
+  .tap { position: absolute; width: 120px; height: 120px; border-radius: 50%; background: rgba(2, 132, 199, .25); }
+  .offers-head { display: flex; align-items: center; gap: 14px; margin-top: 34px; font-size: 30px; font-weight: 800; }
+  .offers-head b { padding: 4px 14px; border-radius: 999px; background: var(--gold); color: var(--ink); font-size: 22px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="drops"></div>
+  <div class="hero" id="intro"></div>
+  <div id="caps"></div>
+  <div class="phone" id="phone">
+    <div class="app-head"><img src="../../public/icon-512.png" alt=""><span class="wm">Tapsyr</span><span class="pill" id="city"></span></div>
+    <div class="scroll" id="scroll">
+      <div class="label" id="reqLabel"></div>
+      <div class="card req"><p id="reqText"></p><span class="caret" id="caret"></span>
+        <div class="chips" id="chips"></div>
+      </div>
+      <div class="offers-head" id="offersHead"><span id="offersTitle"></span><b>3</b></div>
+      <div id="offers"></div>
+    </div>
+    <div class="tap" id="tap"></div>
+    <div class="sheet" id="sheet">
+      <div class="t"><i><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></i><span id="sheetTitle"></span></div>
+      <p id="sheetText"></p>
+    </div>
+  </div>
+</div>
+<script src="stage.js"></script>
+<script>
+const { p, E, lang, $, vis, captions, type, endCard } = STAGE;
+const T = {
+  kz: {
+    intro: 'Ас үйде кран ағып тұр ма?',
+    caps: ['Не істеу керегін жазыңыз', 'Шеберлер өздері ұсыныс жібереді', 'Баға мен пікірді салыстырып, таңдаңыз', 'Нөміріңізді тек таңдаған шебер көреді'],
+    city: 'Қызылорда',
+    reqLabel: 'Сіздің өтінішіңіз',
+    req: 'Ас үйде кран ағып тұр. Ертең таңертең келіп жөндей аласыз ба?',
+    chips: ['Сантехник', 'Ертең таңертең', 'Қызылорда'],
+    offersTitle: 'Ұсыныстар',
+    offers: [['Ерлан', 'Сантехник, 7 жыл', '5 000 ₸', '★ 4,9'], ['Нұрлан', 'Сантехник, 4 жыл', '4 500 ₸', '★ 4,8'], ['Асхат', 'Үй шебері, 10 жыл', '6 000 ₸', '★ 5,0']],
+    chosen: 'Таңдалды',
+    sheetTitle: 'Нұрлан таңдалды',
+    sheetText: 'Нөміріңіз енді тек Нұрланға көрінеді. Ол сізге хабарласады.',
+    tag: 'Қызылордадағы шеберлер — бір өтініште',
+    small: 'Тегін',
+  },
+  ru: {
+    intro: 'На кухне течёт кран?',
+    caps: ['Опишите, что нужно сделать', 'Мастера сами пришлют предложения', 'Сравните цены и отзывы — выберите', 'Ваш номер увидит только выбранный мастер'],
+    city: 'Кызылорда',
+    reqLabel: 'Ваша заявка',
+    req: 'На кухне течёт кран. Сможете прийти завтра утром и починить?',
+    chips: ['Сантехник', 'Завтра утром', 'Кызылорда'],
+    offersTitle: 'Предложения',
+    offers: [['Ерлан', 'Сантехник, 7 лет', '5 000 ₸', '★ 4,9'], ['Нурлан', 'Сантехник, 4 года', '4 500 ₸', '★ 4,8'], ['Асхат', 'Мастер на час, 10 лет', '6 000 ₸', '★ 5,0']],
+    chosen: 'Выбран',
+    sheetTitle: 'Вы выбрали Нурлана',
+    sheetText: 'Теперь ваш номер видит только Нурлан. Он свяжется с вами.',
+    tag: 'Мастера Кызылорды — в одной заявке',
+    small: 'Бесплатно',
+  },
+}[lang];
+
+window.DURATION = 18;
+const stage = $('stage');
+$('intro').textContent = T.intro;
+$('city').textContent = T.city;
+$('reqLabel').textContent = T.reqLabel;
+$('offersTitle').textContent = T.offersTitle;
+$('sheetTitle').textContent = T.sheetTitle;
+$('sheetText').textContent = T.sheetText;
+const chips = T.chips.map((c) => { const s = document.createElement('span'); s.className = 'chip'; s.textContent = c; $('chips').appendChild(s); return s; });
+const rows = T.offers.map(([n, w, pr, r]) => {
+  const d = document.createElement('div');
+  d.className = 'row';
+  d.style.position = 'relative';
+  d.innerHTML = `<div class="ava"></div><div class="who"><b></b><span></span></div><div class="price"><b></b><span></span></div><div class="badge"></div>`;
+  d.querySelector('.ava').textContent = n[0];
+  d.querySelector('.who b').textContent = n;
+  d.querySelector('.who span').textContent = w;
+  d.querySelector('.price b').textContent = pr;
+  d.querySelector('.price span').textContent = r;
+  d.querySelector('.badge').textContent = T.chosen;
+  $('offers').appendChild(d);
+  return d;
+});
+const drops = [0, 1, 2].map((i) => { const d = document.createElement('div'); d.className = 'drop'; $('drops').appendChild(d); return d; });
+const caps = captions($('caps'), [
+  { at: 2.7, out: 6.2, text: T.caps[0] },
+  { at: 6.4, out: 9.9, text: T.caps[1] },
+  { at: 10.1, out: 12.5, text: T.caps[2] },
+  { at: 12.7, out: 14.9, text: T.caps[3] },
+]);
+const end = endCard(stage, { tag: T.tag, small: T.small });
+
+window.seek = (t) => {
+  // Intro: drops falling onto the question
+  // Starts already visible, so the first frame (the video's cover) shows the question
+  vis($('intro'), t, -0.5, 2.4, { dy: 70, scale: 0.1 });
+  drops.forEach((d, i) => {
+    const cycle = ((t + i * 0.45) % 1.35) / 1.35;
+    d.style.left = `${380 + i * 140}px`;
+    d.style.top = `${240 + cycle * 420}px`;
+    d.style.transform = `rotate(45deg) scale(${0.6 + 0.4 * (1 - cycle)})`;
+    d.style.opacity = String((t < 2.4 ? 1 : 1 - p(t, 2.4, 0.3)) * (cycle < 0.85 ? 1 : (1 - cycle) / 0.15));
+  });
+
+  caps(t);
+
+  // Phone comes up, request is typed, chips pop
+  vis($('phone'), t, 2.6, 15.0, { dy: 700, dur: 0.7 });
+  type($('reqText'), $('caret'), T.req, t, 3.3, 2.3);
+  chips.forEach((c, i) => vis(c, t, 5.7 + i * 0.18, Infinity, { dy: 0, scale: 0.4, dur: 0.35, ease: E.back }));
+
+  // Offers arrive
+  vis($('offersHead'), t, 6.6);
+  rows.forEach((r, i) => vis(r, t, 7.1 + i * 0.85, Infinity, { dx: 120, dy: 0, dur: 0.5, ease: E.back }));
+
+  // The customer picks Нұрлан
+  const chosen = rows[1];
+  const picked = t >= 11.1;
+  chosen.classList.toggle('sel', picked);
+  rows.forEach((r, i) => { r.querySelector('.badge').style.opacity = i === 1 ? String(p(t, 11.1, 0.25)) : '0'; });
+  rows.forEach((r, i) => { if (i !== 1) r.style.opacity = String(Math.min(Number(r.style.opacity || 1), 1 - 0.55 * p(t, 11.1, 0.3))); });
+  const tap = $('tap');
+  const tk = p(t, 10.75, 0.5);
+  tap.style.left = `${370 - 60 * tk}px`;
+  tap.style.top = `${chosen.offsetTop + 150 + 60 - 60 * tk}px`;
+  tap.style.transform = `scale(${0.3 + 1.3 * tk})`;
+  tap.style.opacity = String(tk > 0 && tk < 1 ? 1 - tk : 0);
+
+  vis($('sheet'), t, 12.8, Infinity, { dy: 420, dur: 0.55 });
+  end(t, 15.0);
+};
+window.seek(0);
+</script>
+</body>
+</html>

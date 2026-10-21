@@ -1,0 +1,84 @@
+/* Shared look of the Tapsyr social videos (1080×1920, rendered frame by frame by render.mjs) */
+@import url('https://fonts.googleapis.com/css2?family=Onest:wght@500;600;700;800&family=Unbounded:wght@700;800&display=block');
+
+:root {
+  --sky: #0284c7;
+  --sky-light: #e0f2fe;
+  --ink: #0b2e44;
+  --gold: #f2b705;
+  --paper: #f4f8fa;
+  --line: #d6e2ea;
+  --mute: #5b7385;
+  --green: #16a34a;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--ink); }
+body { font-family: Onest, system-ui, sans-serif; color: #fff; -webkit-font-smoothing: antialiased; }
+
+#stage {
+  position: relative;
+  width: 1080px;
+  height: 1920px;
+  overflow: hidden;
+  background: radial-gradient(1100px 900px at 50% 28%, #124b70 0%, var(--ink) 62%);
+}
+
+.abs { position: absolute; }
+.hidden { visibility: hidden; }
+
+/* Big kinetic line in the middle (intro) */
+.hero {
+  position: absolute; left: 80px; right: 80px; top: 720px;
+  font-weight: 800; font-size: 112px; line-height: 1.04; letter-spacing: -0.03em;
+  text-align: center; text-wrap: balance;
+}
+
+/* Caption above the phone; kept below the top 260 px that Reels/TikTok cover */
+.cap {
+  position: absolute; left: 90px; right: 90px; top: 300px;
+  font-weight: 800; font-size: 78px; line-height: 1.08; letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+/* The phone and the app inside it */
+.phone {
+  position: absolute; left: 120px; top: 600px; width: 840px; height: 1260px;
+  background: var(--paper); border-radius: 76px; overflow: hidden; color: var(--ink);
+  box-shadow: 0 50px 140px rgba(0, 0, 0, .5), 0 0 0 14px #0a2131;
+}
+.app-head {
+  position: relative; z-index: 2;
+  display: flex; align-items: center; gap: 16px; height: 150px; padding: 48px 44px 0;
+  background: #fff; border-bottom: 2px solid var(--line);
+}
+.app-head img { width: 70px; height: 70px; border-radius: 16px; }
+.wm { font-family: Unbounded, Onest, sans-serif; font-weight: 800; font-size: 40px; letter-spacing: -0.02em; }
+.pill { margin-left: auto; padding: 10px 20px; border-radius: 999px; background: var(--sky-light); color: var(--sky); font-weight: 700; font-size: 27px; }
+.scroll { position: absolute; left: 0; right: 0; top: 150px; padding: 34px 36px; }
+.label { font-size: 28px; font-weight: 700; color: var(--mute); margin-bottom: 14px; }
+.card { background: #fff; border-radius: 34px; padding: 30px 32px; box-shadow: 0 2px 0 var(--line); }
+.req p { display: inline; font-size: 40px; line-height: 1.32; font-weight: 600; }
+.caret { display: inline-block; width: 5px; height: 46px; margin-left: 4px; background: var(--sky); vertical-align: -6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
+.chip { padding: 10px 20px; border-radius: 999px; background: #fdf3cf; color: #6b4e00; font-weight: 700; font-size: 29px; }
+.row { display: flex; align-items: center; gap: 20px; padding: 24px 28px; background: #fff; border-radius: 30px; margin-top: 16px; box-shadow: 0 2px 0 var(--line); border: 3px solid transparent; }
+.ava { flex: none; width: 84px; height: 84px; border-radius: 50%; background: var(--sky); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 36px; }
+.who { flex: 1; min-width: 0; }
+.who b { display: block; font-size: 36px; font-weight: 700; }
+.who span { display: block; font-size: 27px; color: var(--mute); margin-top: 2px; }
+.price { text-align: right; }
+.price b { display: block; font-size: 38px; font-weight: 800; }
+.price span { display: block; font-size: 27px; color: #a77c00; font-weight: 700; margin-top: 2px; }
+
+/* Final card, the same in every video */
+.end {
+  position: absolute; inset: 0; background: var(--sky);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+  padding: 0 90px 160px;
+}
+.end img { width: 260px; height: 260px; border-radius: 64px; box-shadow: 0 30px 80px rgba(0, 0, 0, .25); }
+.end .name { font-family: Unbounded, Onest, sans-serif; font-weight: 800; font-size: 150px; letter-spacing: -0.03em; margin-top: 44px; line-height: 1; }
+.end .tag { font-weight: 700; font-size: 60px; line-height: 1.12; margin-top: 40px; text-wrap: balance; }
+.end .url { margin-top: 64px; padding: 26px 54px; border-radius: 999px; background: var(--gold); color: var(--ink); font-weight: 800; font-size: 54px; }
+.end .small { margin-top: 30px; font-weight: 600; font-size: 38px; opacity: .9; }
