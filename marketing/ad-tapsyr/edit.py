@@ -10,6 +10,9 @@ sound of the clips is dropped. The result is tapsyr-tapsyr-<lang>.mp4 in the wor
 import json, os, subprocess, sys, wave
 import numpy as np
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fx  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLIPS, SFX, WORK = (os.path.abspath(a) for a in sys.argv[1:4])
 LANGS = (sys.argv[4] if len(sys.argv) > 4 else 'kz,ru').split(',')
@@ -50,6 +53,34 @@ def run(cmd):
 
 
 # ---------- picture ----------
+# Transition after each shot (index = the shot it leaves). Zooms and whips only reshape the frames
+# around the cut; the shanyrak burst and the light leak let the outgoing clip run on under the next
+# one, so no cut point (and no graphic) moves.
+TRANSITIONS = {
+    0: ('zoom', dict(out=5, inn=5, a=(780, 1020), b=(540, 900), s_out=1.45, s_in=1.35)),
+    1: ('burst', dict(n=10)),
+    2: ('whip', dict(n=4, dir=-1)),
+    3: ('zoom', dict(out=0, inn=6, b=(540, 900), s_in=1.3)),
+    4: ('zoom', dict(out=5, inn=4, a=(530, 760), b=(540, 680), s_out=2.0, s_in=1.25)),
+    5: ('whip', dict(n=4, dir=1)),
+    6: ('leak', dict(n=12)),
+}
+FRAME = 1080 * 1920 * 3
+
+
+def frames_of(path, start=None, count=None):
+    cmd = ['ffmpeg', '-v', 'error'] + (['-ss', str(start)] if start is not None else []) + ['-i', path]
+    cmd += ['-vf', f'fps={FPS},scale=1080:1920:flags=lanczos,unsharp=5:5:0.45:5:5:0'] if start is not None else []
+    cmd += (['-frames:v', str(count)] if count else []) + ['-f', 'rawvideo', '-pix_fmt', 'rgb24', '-']
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+    while True:
+        buf = proc.stdout.read(FRAME)
+        if len(buf) < FRAME:
+            break
+        yield np.frombuffer(buf, np.uint8).reshape(1920, 1080, 3)
+    proc.wait()
+
+
 def footage():
     out = os.path.join(WORK, 'bg.mp4')
     if os.path.exists(out):
@@ -58,18 +89,52 @@ def footage():
     parts = []
     for i, (clip, ss, frames) in enumerate(SHOTS):
         part = os.path.join(WORK, f'part{i}.mp4')
-        if clip:
-            run(['ffmpeg', '-v', 'error', '-y', '-ss', str(ss), '-i', os.path.join(CLIPS, f'{clip}.mp4'),
-                 '-vf', f'fps={FPS},scale=1080:1920:flags=lanczos,unsharp=5:5:0.45:5:5:0,setsar=1',
-                 '-frames:v', str(frames), *enc, part])
-        else:
-            run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', f'color=c=0x0284c7:s=1080x1920:r={FPS}',
-                 '-frames:v', str(frames), *enc, part])
+        if not os.path.exists(part):
+            if clip:
+                run(['ffmpeg', '-v', 'error', '-y', '-ss', str(ss), '-i', os.path.join(CLIPS, f'{clip}.mp4'),
+                     '-vf', f'fps={FPS},scale=1080:1920:flags=lanczos,unsharp=5:5:0.45:5:5:0,setsar=1',
+                     '-frames:v', str(frames), *enc, part])
+            else:
+                run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', f'color=c=0x0284c7:s=1080x1920:r={FPS}',
+                     '-frames:v', str(frames), *enc, part])
         parts.append(part)
-    lst = os.path.join(WORK, 'parts.txt')
-    with open(lst, 'w') as f:
-        f.writelines(f"file '{p}'\n" for p in parts)
-    run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-c', 'copy', out])
+    # What the overlapping transitions need: the next shot's first frame, the outgoing clip's run-on
+    first = [next(frames_of(p, count=1)).copy() for p in parts]
+    tails = {}
+    for i, (kind, o) in TRANSITIONS.items():
+        if kind in ('burst', 'leak'):
+            clip, ss, frames = SHOTS[i]
+            tails[i] = [f.copy() for f in frames_of(os.path.join(CLIPS, f'{clip}.mp4'), ss + frames / FPS, o['n'])]
+    writer = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '1080x1920',
+                               '-r', str(FPS), '-i', '-', *enc, out], stdin=subprocess.PIPE)
+    last = None
+    for i, part in enumerate(parts):
+        n = SHOTS[i][2]
+        for j, frame in enumerate(frames_of(part)):
+            img = frame
+            if i in TRANSITIONS:                      # leaving this shot
+                kind, o = TRANSITIONS[i]
+                if kind == 'zoom' and j >= n - o['out']:
+                    k = (j - (n - o['out']) + 1) / o['out']
+                    img = fx.zoom(img, 1 + (o['s_out'] - 1) * fx.ease_in(k), *o['a'], k)
+                elif kind == 'whip' and j >= n - o['n']:
+                    img = fx.whip(img, first[i + 1], (j - (n - o['n']) + 0.5) / (2 * o['n']), o['dir'])
+            if i - 1 in TRANSITIONS:                  # arriving in this shot
+                kind, o = TRANSITIONS[i - 1]
+                if kind == 'zoom' and j < o['inn']:
+                    k = (j + 1) / o['inn']
+                    img = fx.zoom(img, o['s_in'] + (1 - o['s_in']) * fx.ease_out(k), *o['b'], 0.8 * (1 - k))
+                elif kind == 'whip' and j < o['n']:
+                    img = fx.whip(last, img, 0.5 + (j + 0.5) / (2 * o['n']), o['dir'])
+                elif kind == 'burst' and j < o['n']:
+                    img = fx.burst(tails[i - 1][j], img, (j + 1) / (o['n'] + 1))
+                elif kind == 'leak' and j < o['n']:
+                    img = fx.leak(tails[i - 1][j], img, (j + 1) / (o['n'] + 1))
+            writer.stdin.write(np.ascontiguousarray(img).tobytes())
+            if j == n - 1:
+                last = frame.copy()
+    writer.stdin.close()
+    writer.wait()
     return out
 
 
@@ -228,7 +293,15 @@ def sound():
     put(fade(gallop(S['door'] - S['ride']), 0, 0.3), S['ride'], -22)
     put(fade(load('gallop_dirt.mp3', 0.3, S['street'] - S['ride'] + 0.1), 0.05, 0.1), S['ride'], -24)
     put(fade(load('gallop_concrete.mp3', 0.3, S['door'] - S['street'] - 0.2), 0.05, 0.4), S['street'], -24)
-    put(load('whoosh.mp3'), S['door'] - 0.45, -17)
+    put(load('whoosh.mp3'), S['door'] - 1.25, -17)
+    # transition sounds, each peaking on its cut
+    put(load('whoosh2.mp3'), S['k2'] - 0.70, -20)
+    put(load('sparkle.mp3'), S['ride'] - 0.25, -22)
+    put(load('whoosh.mp3'), S['street'] - 1.05, -18)
+    put(load('zoomhit.mp3'), S['close'] - 0.5, -17)
+    put(load('whoosh2.mp3'), S['tea'] - 0.70, -20)
+    put(load('sparkle.mp3'), S['horses'] - 0.2, -26)
+    put(load('deepwhoosh.mp3'), S['end'] - 0.45, -21)
     for i in range(3):
         put(load('pop.mp3'), TL['offers'][0] + 0.15 + i * 0.3, -25)
     put(load('msgpop.mp3'), PICK - 0.05, -25)
