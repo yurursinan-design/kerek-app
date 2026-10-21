@@ -37,7 +37,7 @@ TL = {
     'saga1': [S['ride'] + 0.35, S['street'] - 0.2],
     'saga2': [S['street'] + 0.25, S['door'] - 0.35],
     'offers': [S['door'] + 0.2, PICK, S['close'] - 0.25],
-    'tag': [S['close'] + 0.15, S['tea'] - 0.15],
+    'tag': [S['close'] + 0.15, S['tea'] - 0.35],
     'cap6': [S['tea'] + 0.3, S['horses'] - 0.25],
     'cap7': [S['horses'] + 0.3, S['end'] - 0.2],
     'end': S['end'],
@@ -175,6 +175,24 @@ def gallop(length, bpm=152):
     return strums(strokes, length)
 
 
+def level(sig):
+    """Loudness of the part of a sound that is actually heard (dBFS RMS over its louder 100 ms blocks)"""
+    m = sig.mean(axis=1)
+    w = SR // 10
+    blocks = np.array([np.sqrt(np.mean(m[i:i + w] ** 2)) for i in range(0, max(1, len(m) - w), w)]) + 1e-9
+    heard = blocks[blocks > blocks.max() * 0.1]
+    return 20 * np.log10(np.sqrt(np.mean(heard ** 2)))
+
+
+def room(length):
+    """Quiet low rumble so the pauses never fall into digital silence"""
+    n = int(length * SR)
+    x = np.cumsum(rng.normal(0, 1, n))
+    x -= np.convolve(x, np.ones(SR // 20) / (SR // 20), 'same')   # drop the slow drift
+    x /= np.abs(x).max() + 1e-9
+    return np.stack([x, np.roll(x, 37)], axis=1)
+
+
 def sound():
     out = os.path.join(WORK, 'mix.wav')
     if os.path.exists(out):
@@ -182,55 +200,64 @@ def sound():
     total = S['total']
     mix = np.zeros((int(total * SR) + SR, 2))
 
-    def put(sig, at, gain):
+    def put(sig, at, target):
+        """Places a sound so that its heard part sits at `target` dBFS"""
         s = int(at * SR)
         e = min(len(mix), s + len(sig))
-        mix[s:e] += sig[: e - s] * db(gain)
+        mix[s:e] += sig[: e - s] * db(target - level(sig))
 
-    # 1–2: kitchen fountain, quieter once she reaches for the phone
-    water = fade(load('water.mp3', 5, S['ride'] + 0.2), 0.05, 0.25)
-    water[int(S['k2'] * SR):] *= db(-6)
-    put(water, 0, -14)
-    put(fade(load('gush.mp3', 0, S['ride']), 0.02, 0.3), 0, -12)
-    put(load('sip.mp3'), 2.1, -8)
+    # 1–2: the fountain is loud from the first frame; quieter once she reaches for the phone
+    water = fade(load('water.mp3', 5, S['ride'] + 0.2), 0.03, 0.25)
+    gush = fade(load('gush.mp3', 0, 5.3), 0.02, 0.4)
+    for sig in (water, gush):
+        sig[int(S['k2'] * SR):] *= db(-8)
+    put(water, 0, -21)
+    put(gush, 0, -21)
+    put(load('sip.mp3'), 2.1, -21)
     # 2: tension, then «Тапсыр!»: impact, thunder and one hard dombra strum
-    put(fade(load('riser.mp3', 1.3, TL['slam'] - S['k2'] + 0.05), 0.4, 0.05), S['k2'], -10)
-    put(load('impact.mp3'), TL['slam'] - 0.894, -3)
-    put(load('thunder.mp3'), TL['slam'] - 0.569, -8)
-    put(strums([(0, (DS3, GS3, DS3 * 2), 1.0, 0.9, 1.2)], 1.3), TL['slam'], -6)
+    put(fade(load('riser.mp3', 1.3, TL['slam'] - S['k2'] + 0.05), 0.4, 0.05), S['k2'], -19)
+    put(load('impact.mp3'), TL['slam'] - 0.894, -11)
+    put(load('thunder.mp3'), TL['slam'] - 0.569, -18)
+    put(strums([(0, (DS3, GS3, DS3 * 2), 1.0, 0.9, 1.2)], 1.3), TL['slam'], -16)
     # 3–5: the ride: drums, galloping dombra, hooves; the music steps back for the offers
     music = fade(load('m680.mp3', 73.54, S['tea'] + 0.8 - S['ride']), 0.02, 1.0)
     duck = np.ones(len(music))
     a, b = int((S['door'] - S['ride']) * SR), int((S['close'] - S['ride']) * SR)
     duck[a:b] = db(-6)
-    put(music * duck[:, None], S['ride'], -6)
-    put(fade(gallop(S['door'] - S['ride']), 0, 0.3), S['ride'], -9)
-    put(fade(load('gallop_dirt.mp3', 0.3, S['street'] - S['ride'] + 0.1), 0.05, 0.1), S['ride'], -12)
-    put(fade(load('gallop_concrete.mp3', 0.3, S['door'] - S['street'] - 0.2), 0.05, 0.4), S['street'], -12)
-    put(load('whoosh.mp3'), S['door'] - 0.45, -8)
+    put(music * duck[:, None], S['ride'], -17)
+    put(fade(gallop(S['door'] - S['ride']), 0, 0.3), S['ride'], -22)
+    put(fade(load('gallop_dirt.mp3', 0.3, S['street'] - S['ride'] + 0.1), 0.05, 0.1), S['ride'], -24)
+    put(fade(load('gallop_concrete.mp3', 0.3, S['door'] - S['street'] - 0.2), 0.05, 0.4), S['street'], -24)
+    put(load('whoosh.mp3'), S['door'] - 0.45, -17)
     for i in range(3):
-        put(load('pop.mp3'), TL['offers'][0] + 0.15 + i * 0.3, -12)
-    put(load('msgpop.mp3'), PICK - 0.05, -12)
-    put(motif(), PICK, -5)
-    # 6: warm, slow strums while the tea is handed over
-    put(strums([(0.2, (DS3, GS3), 0.8, 0.5, 1.2), (0.95, (DS3, AS3), 0.7, 0.5, 1.2),
-                (1.7, (DS3, GS3), 0.8, 0.5, 1.2), (2.45, (GS3, DS3 * 2), 0.6, 0.5, 1.4)], 3.6), S['tea'], -11)
-    # 7: quiet, a horse snorts; then the Tapsyr sound on the end card
-    put(load('snort.mp3'), S['horses'] + 0.9, -6)
-    put(motif(), S['end'] + 0.35, -4)
+        put(load('pop.mp3'), TL['offers'][0] + 0.15 + i * 0.3, -25)
+    put(load('msgpop.mp3'), PICK - 0.05, -25)
+    put(motif(), PICK, -17)
+    # 6: warm, gentle strumming while the tea is handed over
+    beat, strokes = 0.6, []
+    for n in range(6):
+        chord = (DS3, GS3) if n % 2 == 0 else (DS3, AS3)
+        strokes += [(0.1 + n * beat, chord, 0.8, 0.45, 0.9), (0.1 + n * beat + beat / 2, chord[::-1], 0.35, 0.4, 0.6)]
+    put(fade(strums(strokes, S['horses'] - S['tea'] + 0.3), 0.05, 0.5), S['tea'], -24)
+    # 7: the music stops, a horse snorts; then the Tapsyr sound on the end card
+    put(fade(room(total - S['horses']), 0.3, 0.6), S['horses'], -46)
+    put(load('snort.mp3'), S['horses'] + 0.9, -17)
+    put(motif(), S['end'] + 0.35, -15)
 
     mix = mix[: int(total * SR)]
     mix = fade(mix, 0, 0.3)
+    mix *= 0.9 / (np.abs(mix).max() + 1e-9)
     raw = os.path.join(WORK, 'mix_raw.wav')
     with wave.open(raw, 'wb') as w:
         w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR)
-        w.writeframes((np.clip(mix, -1, 1) * 32767).astype('<i2').tobytes())
-    # Two-pass loudness normalisation to -14 LUFS, the level Instagram and TikTok play at
-    probe = subprocess.run(['ffmpeg', '-hide_banner', '-i', raw, '-af', 'loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json',
+        w.writeframes((mix * 32767).astype('<i2').tobytes())
+    # A limiter tames the impact, then two-pass loudness normalisation to -14 LUFS (Instagram, TikTok)
+    lim = 'alimiter=limit=0.6:attack=4:release=80:level=false'
+    probe = subprocess.run(['ffmpeg', '-hide_banner', '-i', raw, '-af', f'{lim},loudnorm=I=-14:TP=-1.5:LRA=11:print_format=json',
                             '-f', 'null', '-'], capture_output=True, text=True).stderr
     m = json.loads(probe[probe.rindex('{'):])
     run(['ffmpeg', '-v', 'error', '-y', '-i', raw, '-af',
-         f"loudnorm=I=-14:TP=-1.5:LRA=11:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
+         f"{lim},loudnorm=I=-14:TP=-1.5:LRA=11:measured_I={m['input_i']}:measured_TP={m['input_tp']}:"
          f"measured_LRA={m['input_lra']}:measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true",
          '-ar', str(SR), out])
     return out
