@@ -15,17 +15,14 @@
     max-width: 900px; padding: 22px 38px 26px; border-radius: 34px; background: rgba(11, 46, 68, .84);
     font-weight: 800; font-size: 64px; line-height: 1.1; letter-spacing: -0.02em; text-align: center; text-wrap: balance;
   }
-  /* The bard's lines over the ride */
-  .saga {
-    position: absolute; left: 70px; right: 70px; top: 310px; text-align: center;
-    font-weight: 800; font-style: italic; font-size: 76px; line-height: 1.08; letter-spacing: -0.02em;
-    text-shadow: 0 4px 0 rgba(11, 46, 68, .9), 0 10px 40px rgba(0, 0, 0, .6);
-  }
+  /* The bard's lines over the ride: italic, on the same dark pill as the other captions */
+  .saga span { font-style: italic; }
   #slam {
     position: absolute; left: 0; right: 0; top: 1130px; text-align: center;
     font-family: Unbounded, Onest, sans-serif; font-weight: 800; font-size: 178px; letter-spacing: -0.03em;
     color: var(--gold); -webkit-text-stroke: 12px var(--ink); paint-order: stroke fill;
     text-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+    padding: 70px 0; background: radial-gradient(closest-side, rgba(11, 46, 68, .65), rgba(11, 46, 68, 0));
   }
   #flash { position: absolute; inset: 0; background: #fff; opacity: 0; }
 
@@ -47,8 +44,8 @@
 <div id="stage">
   <div class="pillcap" id="cap1"><span></span></div>
   <div id="slam">ТАПСЫР!</div>
-  <div class="saga" id="saga1"></div>
-  <div class="saga" id="saga2"></div>
+  <div class="pillcap saga" id="saga1"><span></span></div>
+  <div class="pillcap saga" id="saga2"><span></span></div>
   <div id="offers"><div class="head" id="offersHead"></div><div id="rows"></div><div class="tap" id="tap"></div></div>
   <div id="tag"></div>
   <div class="pillcap" id="cap6"><span></span></div>
@@ -91,8 +88,8 @@ const T = {
 const nb = (s) => s.replace(' — ', ' — ');
 
 $('cap1').firstChild.textContent = nb(T.cap1);
-$('saga1').textContent = T.saga1;
-$('saga2').textContent = T.saga2;
+$('saga1').firstChild.textContent = T.saga1;
+$('saga2').firstChild.textContent = T.saga2;
 $('offersHead').textContent = T.offers;
 $('cap6').firstChild.textContent = T.cap6;
 $('cap7').firstChild.textContent = nb(T.cap7);

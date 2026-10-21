@@ -3,7 +3,7 @@
   python3 edit.py <clips dir> <sfx dir> <work dir> [kz,ru]
 
 The clips dir holds the Flow videos as v01.mp4 … v14.mp4 (see SHOTS for which is which), the
-sfx dir the Mixkit sounds named in MIX (free licence, no attribution needed). The original
+sfx dir the Mixkit sounds used in sound() (free licence, no attribution needed). The original
 sound of the clips is dropped. The result is tapsyr-tapsyr-<lang>.mp4 in the work dir:
 1080×1920, 24 fps (the clips' own rate, so motion stays smooth), loudness -14 LUFS.
 """
@@ -19,29 +19,31 @@ LANGS = (sys.argv[4] if len(sys.argv) > 4 else 'kz,ru').split(',')
 FPS, SR = 24, 48000
 os.makedirs(WORK, exist_ok=True)
 
-# (clip, source start in s, frames) — Veo for movement, Omni where it kept faces and props better
+# (clip, source start in s, frames, speed). Veo for movement, Omni where it kept faces and props.
+# Cut after Gemini's review: the ride is shorter, the salute (an extra hand appears) and the end of
+# the tea shot (a second bowl appears) are gone, and the landing is one push-in instead of a jump cut.
 SHOTS = [
-    ('v01', 1.2, 77),   # 1 kitchen, fountain, the grandmother sips (Veo)
-    ('v04', 3.8, 77),   # 2 phone up, «Тапсыр!» at 6.1 s in the clip (Veo)
-    ('v05', 3.0, 91),   # 3 riders on the Syr Darya bank (Veo)
-    ('v07', 6.4, 84),   # 4 riders in the street; a horse passes the lens at the end (Omni)
-    ('v09', 2.8, 84),   # 5a the three on the landing, salute at 4.5 s (Veo)
-    ('v10', 8.6, 34),   # 5b Nurlan close up (Omni)
-    ('v12', 2.8, 77),   # 6 the tea is handed over (Omni)
-    ('v14', 1.6, 67),   # 7 horses at the flower bed (Veo)
-    (None, 0, 72),      # end card (drawn by the overlay)
+    ('v01', 1.2, 72, 1),    # kitchen, fountain, the grandmother sips (Veo)
+    ('v04', 3.8, 77, 1),    # phone up, «Тапсыр!» at 6.1 s in the clip (Veo)
+    ('v05', 3.4, 53, 1),    # riders on the Syr Darya bank (Veo)
+    ('v07', 7.95, 46, 1),   # riders in the street; a horse passes the lens at the end (Omni)
+    ('v10', 3.0, 84, 1),    # the three on the landing while the offers come in (Omni)
+    ('v10', 6.5, 41, 2),    # … the push-in to Nurlan, twice as fast
+    ('v12', 2.6, 48, 1),    # the tea is handed over (Omni)
+    ('v14', 1.6, 67, 1),    # horses at the flower bed (Veo)
+    (None, 0, 72, 1),       # end card (drawn by the overlay)
 ]
-starts = np.cumsum([0] + [f for _, _, f in SHOTS]) / FPS
+starts = np.cumsum([0] + [f for _, _, f, _ in SHOTS]) / FPS
 S = dict(zip(['k1', 'k2', 'ride', 'street', 'door', 'close', 'tea', 'horses', 'end', 'total'], starts))
-PICK = S['door'] + (4.3 - 2.8)   # the grandmother picks Nurlan just before the salute
+PICK = S['door'] + 2.0   # the grandmother picks Nurlan
 TL = {
     'cap1': [0.25, S['k2'] - 0.25],
-    'slam': S['k2'] + (6.1 - 3.8), 'slamOut': S['ride'] - 0.05,
-    'saga1': [S['ride'] + 0.35, S['street'] - 0.2],
-    'saga2': [S['street'] + 0.25, S['door'] - 0.35],
-    'offers': [S['door'] + 0.2, PICK, S['close'] - 0.25],
-    'tag': [S['close'] + 0.15, S['tea'] - 0.35],
-    'cap6': [S['tea'] + 0.3, S['horses'] - 0.25],
+    'slam': S['k2'] + (6.1 - 3.8), 'slamOut': S['ride'] + 0.5,
+    'saga1': [S['ride'] + 0.25, S['street'] - 0.15],
+    'saga2': [S['street'] + 0.2, S['door'] - 0.2],
+    'offers': [S['door'] + 0.3, PICK, S['close'] - 0.1],
+    'tag': [S['close'] + 0.25, S['tea'] - 0.2],
+    'cap6': [S['tea'] + 0.2, S['horses'] - 0.2],
     'cap7': [S['horses'] + 0.3, S['end'] - 0.2],
     'end': S['end'],
     'duration': S['total'],
@@ -60,10 +62,9 @@ TRANSITIONS = {
     0: ('zoom', dict(out=5, inn=5, a=(780, 1020), b=(540, 900), s_out=1.45, s_in=1.35)),
     1: ('burst', dict(n=10)),
     2: ('whip', dict(n=4, dir=-1)),
-    3: ('zoom', dict(out=0, inn=6, b=(540, 900), s_in=1.3)),
-    4: ('zoom', dict(out=5, inn=4, a=(530, 760), b=(540, 680), s_out=2.0, s_in=1.25)),
-    5: ('whip', dict(n=4, dir=1)),
-    6: ('leak', dict(n=12)),
+    3: ('whip', dict(n=4, dir=1)),      # with the horse that crosses the lens
+    5: ('whip', dict(n=4, dir=-1)),
+    6: ('leak', dict(n=8)),
 }
 FRAME = 1080 * 1920 * 3
 
@@ -87,12 +88,12 @@ def footage():
         return out
     enc = ['-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', '14', '-pix_fmt', 'yuv420p']
     parts = []
-    for i, (clip, ss, frames) in enumerate(SHOTS):
+    for i, (clip, ss, frames, speed) in enumerate(SHOTS):
         part = os.path.join(WORK, f'part{i}.mp4')
         if not os.path.exists(part):
             if clip:
                 run(['ffmpeg', '-v', 'error', '-y', '-ss', str(ss), '-i', os.path.join(CLIPS, f'{clip}.mp4'),
-                     '-vf', f'fps={FPS},scale=1080:1920:flags=lanczos,unsharp=5:5:0.45:5:5:0,setsar=1',
+                     '-vf', f'setpts=PTS/{speed},fps={FPS},scale=1080:1920:flags=lanczos,unsharp=5:5:0.45:5:5:0,setsar=1',
                      '-frames:v', str(frames), *enc, part])
             else:
                 run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', f'color=c=0x0284c7:s=1080x1920:r={FPS}',
@@ -103,8 +104,8 @@ def footage():
     tails = {}
     for i, (kind, o) in TRANSITIONS.items():
         if kind in ('burst', 'leak'):
-            clip, ss, frames = SHOTS[i]
-            tails[i] = [f.copy() for f in frames_of(os.path.join(CLIPS, f'{clip}.mp4'), ss + frames / FPS, o['n'])]
+            clip, ss, frames, speed = SHOTS[i]
+            tails[i] = [f.copy() for f in frames_of(os.path.join(CLIPS, f'{clip}.mp4'), ss + frames * speed / FPS, o['n'])]
     writer = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '1080x1920',
                                '-r', str(FPS), '-i', '-', *enc, out], stdin=subprocess.PIPE)
     last = None
@@ -146,10 +147,12 @@ def overlay(lang):
 
 
 # ---------- sound ----------
-def load(name, start=0.0, dur=None):
+def load(name, start=0.0, dur=None, af=None):
     cmd = ['ffmpeg', '-v', 'error', '-ss', str(start), '-i', os.path.join(SFX, name)]
     if dur:
         cmd += ['-t', str(dur)]
+    if af:
+        cmd += ['-af', af]
     raw = subprocess.run(cmd + ['-ac', '2', '-ar', str(SR), '-f', 'f32le', '-'], capture_output=True, check=True).stdout
     return np.frombuffer(raw, dtype='<f4').reshape(-1, 2).copy()
 
@@ -168,78 +171,6 @@ def fade(sig, fin=0.0, fout=0.0):
     return sig * env[:, None]
 
 
-rng = np.random.default_rng(7)
-
-
-def pluck(freq, dur, vel=1.0, bright=0.6, pick=0.18, t60=1.1):
-    """Karplus-Strong string, like the dombra sound of the earlier ad"""
-    n, N = int(SR * dur), int(round(SR / freq))
-    buf = rng.uniform(-1, 1, N)
-    buf = buf - np.roll(buf, max(1, int(N * pick)))
-    for _ in range(int((1 - bright) * 4)):
-        buf = 0.5 * (buf + np.roll(buf, 1))
-    out, b, i = np.zeros(n), buf.copy(), 0
-    decay = 10 ** (-40 / 20 / (freq * t60))
-    for s in range(n):
-        out[s] = b[i]
-        b[i] = decay * 0.5 * (b[i] + b[(i + 1) % N])
-        i = (i + 1) % N
-    return vel * out / (np.abs(out).max() + 1e-9)
-
-
-def body(x):
-    """Wooden body resonances and a little presence for phone speakers (three peaking filters)"""
-    for f0, q, g in ((230, 1.2, 6), (520, 1.5, 4), (2600, 0.9, 3)):
-        A, w = 10 ** (g / 40), 2 * np.pi * f0 / SR
-        al = np.sin(w) / (2 * q)
-        b0, b1, b2, a0, a1, a2 = 1 + al * A, -2 * np.cos(w), 1 - al * A, 1 + al / A, -2 * np.cos(w), 1 - al / A
-        b0, b1, b2, a1, a2 = b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0
-        y = np.zeros_like(x); x1 = x2 = y1 = y2 = 0.0
-        for k, xn in enumerate(x):
-            yn = b0 * xn + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
-            x2, x1, y2, y1 = x1, xn, y1, yn
-            y[k] = yn
-        x = y
-    return x
-
-
-# Dombra strings tuned to the key of the drum music (D# minor): D#3 and G#3, A#3 fretted
-DS3, GS3, AS3 = 155.56, 207.65, 233.08
-
-
-def strums(strokes, length):
-    """strokes: (time, notes, velocity, brightness, ring)"""
-    mix = np.zeros(int(length * SR))
-    for t, notes, vel, br, ring in strokes:
-        for j, f in enumerate(notes):
-            sig = pluck(f, ring, vel, br)
-            k = min(len(sig), int(0.04 * SR)); sig[-k:] *= np.linspace(1, 0, k)
-            s = int((t + j * 0.012) * SR)
-            e = min(len(mix), s + len(sig)); mix[s:e] += sig[: e - s]
-        k = int(0.004 * SR); s = int(t * SR)
-        mix[s:s + k] += rng.uniform(-1, 1, k) * np.linspace(1, 0, k) * 0.2 * vel
-    y = body(mix)
-    y = y / (np.abs(y).max() + 1e-9)
-    return np.stack([y, y], axis=1)
-
-
-def motif():
-    """The Tapsyr sound: down, up, down (fretted), down that rings"""
-    return strums([(0.00, (DS3, GS3), 1.0, 0.75, 0.4), (0.15, (GS3, DS3), 0.5, 0.55, 0.4),
-                   (0.30, (DS3, AS3), 0.8, 0.7, 0.4), (0.48, (DS3, GS3), 1.0, 0.8, 1.25)], 1.8)
-
-
-def gallop(length, bpm=152):
-    """Galloping triplet strum over the ride, a bar open and a bar fretted"""
-    beat, strokes, t, n = 60 / bpm, [], 0.0, 0
-    while t < length - 0.3:
-        chord = (DS3, GS3) if (n // 4) % 2 == 0 else (DS3, AS3)
-        for frac, vel in ((0, 1.0), (1 / 3, 0.45), (2 / 3, 0.7)):
-            strokes.append((t + frac * beat, chord, vel * (1.0 if n % 4 == 0 else 0.85), 0.7, 0.3))
-        t += beat; n += 1
-    return strums(strokes, length)
-
-
 def level(sig):
     """Loudness of the part of a sound that is actually heard (dBFS RMS over its louder 100 ms blocks)"""
     m = sig.mean(axis=1)
@@ -247,15 +178,6 @@ def level(sig):
     blocks = np.array([np.sqrt(np.mean(m[i:i + w] ** 2)) for i in range(0, max(1, len(m) - w), w)]) + 1e-9
     heard = blocks[blocks > blocks.max() * 0.1]
     return 20 * np.log10(np.sqrt(np.mean(heard ** 2)))
-
-
-def room(length):
-    """Quiet low rumble so the pauses never fall into digital silence"""
-    n = int(length * SR)
-    x = np.cumsum(rng.normal(0, 1, n))
-    x -= np.convolve(x, np.ones(SR // 20) / (SR // 20), 'same')   # drop the slow drift
-    x /= np.abs(x).max() + 1e-9
-    return np.stack([x, np.roll(x, 37)], axis=1)
 
 
 def sound():
@@ -271,51 +193,49 @@ def sound():
         e = min(len(mix), s + len(sig))
         mix[s:e] += sig[: e - s] * db(target - level(sig))
 
-    # 1–2: the fountain is loud from the first frame; quieter once she reaches for the phone
-    water = fade(load('water.mp3', 5, S['ride'] + 0.2), 0.03, 0.25)
-    gush = fade(load('gush.mp3', 0, 5.3), 0.02, 0.4)
+    # Kitchen: the fountain, softened (its hiss was harsh), quieter once she reaches for the phone
+    soft = 'lowpass=f=4500,highpass=f=120'
+    water = fade(load('water.mp3', 5, S['ride'] + 0.2, soft), 0.03, 0.25)
+    gush = fade(load('gush.mp3', 0, 5.3, soft), 0.02, 0.4)
     for sig in (water, gush):
         sig[int(S['k2'] * SR):] *= db(-8)
-    put(water, 0, -21)
-    put(gush, 0, -21)
-    put(load('sip.mp3'), 2.1, -21)
-    # 2: tension, then «Тапсыр!»: impact, thunder and one hard dombra strum
+    put(water, 0, -25)
+    put(gush, 0, -26)
+    put(load('sip.mp3'), 2.0, -21)
+    # «Тапсыр!»: a riser, then impact and thunder
     put(fade(load('riser.mp3', 1.3, TL['slam'] - S['k2'] + 0.05), 0.4, 0.05), S['k2'], -19)
     put(load('impact.mp3'), TL['slam'] - 0.894, -11)
     put(load('thunder.mp3'), TL['slam'] - 0.569, -18)
-    put(strums([(0, (DS3, GS3, DS3 * 2), 1.0, 0.9, 1.2)], 1.3), TL['slam'], -16)
-    # 3–5: the ride: drums, galloping dombra, hooves; the music steps back for the offers
-    music = fade(load('m680.mp3', 73.54, S['tea'] + 0.8 - S['ride']), 0.02, 1.0)
-    duck = np.ones(len(music))
-    a, b = int((S['door'] - S['ride']) * SR), int((S['close'] - S['ride']) * SR)
-    duck[a:b] = db(-6)
-    put(music * duck[:, None], S['ride'], -17)
-    put(fade(gallop(S['door'] - S['ride']), 0, 0.3), S['ride'], -22)
-    put(fade(load('gallop_dirt.mp3', 0.3, S['street'] - S['ride'] + 0.1), 0.05, 0.1), S['ride'], -24)
-    put(fade(load('gallop_concrete.mp3', 0.3, S['door'] - S['street'] - 0.2), 0.05, 0.4), S['street'], -24)
-    put(load('whoosh.mp3'), S['door'] - 1.25, -17)
-    # transition sounds, each peaking on its cut
+    # One piece of music from the ride to the end card, stepping back under the offers and the tea
+    music = load('m680.mp3', 73.54, total - S['ride'])
+    env = np.ones(len(music))
+    for start, end, gain in (('door', 'close', -5), ('close', 'tea', -3), ('tea', 'horses', -8), ('horses', 'end', -10)):
+        a, b = int((S[start] - S['ride']) * SR), int((S[end] - S['ride']) * SR)
+        env[a:b] = db(gain)
+    k = int(0.25 * SR)                      # smooth the steps
+    env = np.convolve(env, np.ones(k) / k, 'same')
+    put(fade(music * env[:, None], 0.02, 1.0), S['ride'], -17)
+    # Hooves, louder than before
+    put(fade(load('gallop_dirt.mp3', 0.3, S['street'] - S['ride'] + 0.1), 0.05, 0.1), S['ride'], -19)
+    put(fade(load('gallop_concrete.mp3', 0.3, S['door'] - S['street']), 0.05, 0.3), S['street'], -19)
+    # Transition sounds, each peaking on its cut
     put(load('whoosh2.mp3'), S['k2'] - 0.70, -20)
     put(load('sparkle.mp3'), S['ride'] - 0.25, -22)
     put(load('whoosh.mp3'), S['street'] - 1.05, -18)
-    put(load('zoomhit.mp3'), S['close'] - 0.5, -17)
+    put(load('whoosh.mp3'), S['door'] - 1.05, -17)
     put(load('whoosh2.mp3'), S['tea'] - 0.70, -20)
     put(load('sparkle.mp3'), S['horses'] - 0.2, -26)
-    put(load('deepwhoosh.mp3'), S['end'] - 0.45, -21)
+    # The offers: a pop for each card, a clear tone when Nurlan is picked
     for i in range(3):
-        put(load('pop.mp3'), TL['offers'][0] + 0.15 + i * 0.3, -25)
-    put(load('msgpop.mp3'), PICK - 0.05, -25)
-    put(motif(), PICK, -17)
-    # 6: warm, gentle strumming while the tea is handed over
-    beat, strokes = 0.6, []
-    for n in range(6):
-        chord = (DS3, GS3) if n % 2 == 0 else (DS3, AS3)
-        strokes += [(0.1 + n * beat, chord, 0.8, 0.45, 0.9), (0.1 + n * beat + beat / 2, chord[::-1], 0.35, 0.4, 0.6)]
-    put(fade(strums(strokes, S['horses'] - S['tea'] + 0.3), 0.05, 0.5), S['tea'], -24)
-    # 7: the music stops, a horse snorts; then the Tapsyr sound on the end card
-    put(fade(room(total - S['horses']), 0.3, 0.6), S['horses'], -46)
-    put(load('snort.mp3'), S['horses'] + 0.9, -17)
-    put(motif(), S['end'] + 0.35, -15)
+        put(load('pop.mp3'), TL['offers'][0] + 0.15 + i * 0.3, -20)
+    put(load('positive.mp3'), PICK - 0.3, -18)
+    put(load('confirm.mp3'), TL['tag'][0] - 0.25, -24)
+    # Each new place is heard half a second before it is seen (J-cut): tea being poured, the courtyard
+    put(fade(load('pour.mp3', 0, 2.4), 0.1, 0.6), S['tea'] - 0.5, -25)
+    put(fade(load('courtyard.mp3', 2, total - S['horses'] + 0.5), 0.4, 0.8), S['horses'] - 0.5, -31)
+    put(load('snort.mp3'), S['horses'] + 1.0, -17)
+    # End card: one hit on the logo
+    put(fade(load('logo.mp3', 3.8), 0, 1.5), S['end'] + 0.35 - 0.8, -14)
 
     mix = mix[: int(total * SR)]
     mix = fade(mix, 0, 0.3)
