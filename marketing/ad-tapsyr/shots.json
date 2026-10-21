@@ -19,25 +19,21 @@
       "kind": "scene",
       "refs": [
         [
-          "frames/ref_aje.jpg",
-          "the grandmother"
+          "frames/s1_kitchen.jpg",
+          "the current version of this scene"
         ]
       ],
-      "prompt": "A small, cosy Soviet-era apartment kitchen in Kyzylorda, Kazakhstan: beige ceramic wall tiles, a white enamel sink with an old chrome faucet, light wooden cabinets, a window with lace curtains and warm evening light, a gas stove with a kettle. The faucet has burst: a strong jet of water sprays sideways from its base, splashing over the counter, droplets glittering in the light, a puddle on the linoleum floor. In the foreground on the right, the grandmother sits at a small table with a floral oilcloth, holding a white bowl (piyala) of milk tea with both hands. She is completely calm and looks at the spraying faucet with one eyebrow raised. Medium-wide shot, camera at seated eye level."
+      "prompt": "Edit image 1 and keep everything else exactly as it is: the same kitchen, the same grandmother sitting at the table in the same pose holding her tea bowl, the same light and the same camera angle. Change only the water: the chrome faucet at the sink has snapped off at its base, and a strong fountain of water shoots straight up out of the broken faucet, high into the air, splashing onto the tiles, the counter and the floor. It must be obvious that all the water comes out of the faucet. The broken-off spout lies in the sink. Remove the jet of water that now comes from the right edge of the counter."
     },
     "s2_decree": {
       "kind": "scene",
       "refs": [
         [
-          "frames/ref_aje.jpg",
-          "the grandmother"
-        ],
-        [
-          "frames/s1_kitchen.jpg",
-          "the kitchen"
+          "frames/s2_decree.jpg",
+          "the current version of this scene"
         ]
       ],
-      "prompt": "Use the kitchen in the kitchen reference image as the exact same room: light wooden upper cabinets, white lower cabinets, beige wall tiles, a window with lace curtains on the left, a white gas stove with a kettle and a small table with a floral oilcloth. Water still sprays sideways from the burst faucet at the sink in the soft-focus background. The grandmother now stands in the middle of this kitchen, seen from a slightly low angle. She holds a smartphone in her right hand at chest height and looks down at its screen with a determined, no-nonsense expression, as if she is about to give an order. Warm rim light from the window behind her. Medium shot from the knees up."
+      "prompt": "Edit image 1 and keep everything else exactly as it is: the same kitchen, the same grandmother standing and looking at her phone in the same pose, the same light and the same camera angle. Change only the water: the chrome faucet at the sink has snapped off at its base, and a strong fountain of water shoots straight up out of the broken faucet, high into the air, splashing onto the tiles, the counter and the floor. It must be obvious that all the water comes out of the faucet. The broken-off spout lies in the sink. The faucet and the fountain stay clearly visible to the left of the grandmother. Remove the spray that now comes from behind her."
     },
     "s3_riders": {
       "kind": "scene",
