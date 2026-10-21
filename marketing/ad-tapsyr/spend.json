@@ -1,5 +1,5 @@
 {
- "total_usd": 0.56,
+ "total_usd": 1.54,
  "log": [
   {
    "name": "ref_aje",
@@ -25,6 +25,48 @@
    "model": "gemini-3-pro-image",
    "usd": 0.14,
    "at": "2026-10-21 11:12"
+  },
+  {
+   "name": "s1_kitchen",
+   "model": "gemini-3-pro-image",
+   "usd": 0.14,
+   "at": "2026-10-21 11:14"
+  },
+  {
+   "name": "s2_decree",
+   "model": "gemini-3-pro-image",
+   "usd": 0.14,
+   "at": "2026-10-21 11:14"
+  },
+  {
+   "name": "s3_riders",
+   "model": "gemini-3-pro-image",
+   "usd": 0.14,
+   "at": "2026-10-21 11:15"
+  },
+  {
+   "name": "s4_streets",
+   "model": "gemini-3-pro-image",
+   "usd": 0.14,
+   "at": "2026-10-21 11:15"
+  },
+  {
+   "name": "s5_door",
+   "model": "gemini-3-pro-image",
+   "usd": 0.14,
+   "at": "2026-10-21 11:16"
+  },
+  {
+   "name": "s6_tea",
+   "model": "gemini-3-pro-image",
+   "usd": 0.14,
+   "at": "2026-10-21 11:16"
+  },
+  {
+   "name": "s7_horses",
+   "model": "gemini-3-pro-image",
+   "usd": 0.14,
+   "at": "2026-10-21 11:17"
   }
  ]
 }
