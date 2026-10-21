@@ -1,0 +1,60 @@
+# Makes the first frames of the «Тапсыр!» ad (marketing/ad-tapsyr/shots.json) with Google's image
+# model and commits them under marketing/ad-tapsyr/frames. Runs only for a commit on a claude/**
+# branch whose message starts with "[ad-frames] ". "[ad-frames] only: a b" makes or remakes just
+# those. Each image is paid from the app's Gemini balance; frames.py stops at the budget in shots.json.
+name: Reklam kareleri
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: ad-frames
+  cancel-in-progress: false
+
+env:
+  FIREBASE_PROJECT_ID: kerek-9d153
+
+jobs:
+  frames:
+    if: startsWith(github.event.head_commit.message, '[ad-frames] ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Google Cloud'a giriş
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
+          service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: Kareleri üret
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          sudo apt-get install -y -qq imagemagick >/dev/null
+          ONLY=$(printf '%s\n' "$MSG" | head -1 | sed -n 's/.*only: *//p')
+          export ONLY
+          # The key never reaches the log: it only lives in this step's environment
+          GEMINI_API_KEY=$(gcloud secrets versions access latest --secret GEMINI_API_KEY --project "$FIREBASE_PROJECT_ID")
+          export GEMINI_API_KEY
+          python3 marketing/ad-tapsyr/frames.py
+
+      - name: Kaydet
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add marketing/ad-tapsyr/frames marketing/ad-tapsyr/spend.json 2>/dev/null || true
+          if git diff --cached --quiet; then echo "Yeni kare yok"; exit 0; fi
+          git commit -q -m "Add generated ad frames"
+          git pull -q --rebase origin "${GITHUB_REF_NAME}"
+          git push -q origin "HEAD:${GITHUB_REF_NAME}"
