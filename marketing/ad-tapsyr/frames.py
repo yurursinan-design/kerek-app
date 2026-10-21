@@ -55,8 +55,8 @@ def generate(model, name, item):
     refs = item.get('refs', [])
     if refs:
         who = ' '.join(f'Image {i + 1} shows {label}.' for i, (_, label) in enumerate(refs))
-        intro = (f'Use the attached reference images for the people in this shot and keep each person\'s exact '
-                 f'face, hairstyle, body type and clothing. {who} ')
+        intro = (f'Use the attached reference images: keep each person\'s exact face, hairstyle, body type and '
+                 f'clothing, and each place exactly as shown. {who} ')
         parts += [jpeg_part(path) for path, _ in refs]
     style = spec['ref_style'] if item['kind'] == 'ref' else spec['scene_style']
     parts.append({'text': f"{intro}{item['prompt']} {style}"})
