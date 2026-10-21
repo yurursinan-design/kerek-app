@@ -1,0 +1,12 @@
+{
+ "total_usd": 0.14,
+ "log": [
+  {
+   "name": "ref_aje",
+   "model": "gemini-3-pro-image-preview",
+   "usd": 0.14,
+   "at": "2026-10-21 10:46",
+   "note": "paid but lost: the frames folder was missing on the runner"
+  }
+ ]
+}

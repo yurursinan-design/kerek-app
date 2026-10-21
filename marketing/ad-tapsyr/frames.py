@@ -20,8 +20,8 @@ KEY = os.environ['GEMINI_API_KEY']
 API = 'https://generativelanguage.googleapis.com/v1beta'
 
 # Preferred models, best first. Prices are Google's list prices per 2K image, rounded up.
-PREFS = ['gemini-3-pro-image-preview', 'gemini-3-pro-image', 'gemini-3.1-flash-image-preview',
-         'gemini-3.1-flash-image', 'gemini-2.5-flash-image']
+PREFS = ['gemini-3-pro-image', 'gemini-3-pro-image-preview', 'gemini-3.1-flash-image',
+         'gemini-3.1-flash-image-preview', 'gemini-2.5-flash-image']
 PRICES = {'gemini-3-pro-image': 0.14, 'gemini-3.1-flash-image': 0.11, 'gemini-2.5-flash-image': 0.04}
 
 
@@ -65,15 +65,20 @@ def generate(model, name, item):
         image_config['imageSize'] = '2K'
     body = {'contents': [{'role': 'user', 'parts': parts}],
             'generationConfig': {'responseModalities': ['TEXT', 'IMAGE'], 'imageConfig': image_config}}
-    for attempt in range(3):
+    # "High demand" answers are common and not billed, so they are retried for a few minutes
+    for attempt in range(6):
         try:
             res = call('POST', f'models/{model}:generateContent', body)
             break
         except urllib.error.HTTPError as e:
-            print(f'  {name}: HTTP {e.code} {e.read()[:300].decode(errors="ignore")}')
-            if e.code not in (429, 500, 503) or attempt == 2:
+            print(f'  {name}: HTTP {e.code} {e.read()[:200].decode(errors="ignore")}')
+            if e.code not in (429, 500, 503) or attempt == 5:
                 return None
-            time.sleep(15 * (attempt + 1))
+        except (urllib.error.URLError, TimeoutError) as e:
+            print(f'  {name}: {e}')
+            if attempt == 5:
+                return None
+        time.sleep(20 * (attempt + 1))
     cand = (res.get('candidates') or [{}])[0]
     images = [p for p in cand.get('content', {}).get('parts', []) if 'inlineData' in p and not p.get('thought')]
     if not images:
@@ -85,6 +90,7 @@ def generate(model, name, item):
 
 model = pick_model()
 cost = price(model)
+(HERE / 'frames').mkdir(exist_ok=True)
 print(f'model {model}, about ${cost} per image, spent so far ${ledger["total_usd"]:.2f} of ${spec["budget_usd"]}')
 made, failed = [], []
 for name, item in spec['items'].items():
