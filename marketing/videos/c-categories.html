@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tapsyr — категории</title>
+<link rel="stylesheet" href="stage.css">
+<style>
+  #intro { top: 760px; }
+  .big { position: absolute; left: 110px; top: 560px; width: 860px; height: 860px; border-radius: 60px; overflow: hidden; box-shadow: 0 40px 120px rgba(0, 0, 0, .45); }
+  .big img { width: 100%; height: 100%; object-fit: cover; }
+  .big span { position: absolute; left: 0; right: 0; bottom: 0; padding: 120px 48px 44px; background: linear-gradient(180deg, transparent, rgba(11, 46, 68, .9)); font-weight: 800; font-size: 72px; line-height: 1.05; }
+  .dots { position: absolute; left: 0; right: 0; top: 1470px; display: flex; justify-content: center; gap: 14px; }
+  .dots i { width: 16px; height: 16px; border-radius: 50%; background: rgba(255, 255, 255, .3); }
+  .dots i.on { background: var(--gold); }
+  .grid { position: absolute; left: 90px; top: 620px; width: 900px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .grid div { position: relative; aspect-ratio: 1; border-radius: 30px; overflow: hidden; }
+  .grid img { width: 100%; height: 100%; object-fit: cover; }
+  .grid span { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 14px 12px; background: linear-gradient(180deg, transparent, rgba(11, 46, 68, .9)); font-weight: 700; font-size: 26px; line-height: 1.1; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="hero" id="intro"></div>
+  <div id="caps"></div>
+  <div id="cards"></div>
+  <div class="dots" id="dots"></div>
+  <div class="grid" id="grid"></div>
+</div>
+<script src="stage.js"></script>
+<script>
+const { p, E, lang, $, vis, captions, endCard } = STAGE;
+const CATS = [
+  ['g_plumbing', 'Сантехник', 'Сантехник'], ['g_electrician', 'Электрик', 'Электрик'], ['g_appliances', 'Техника жөндеу', 'Ремонт техники'],
+  ['g_cleaning_moving', 'Тазалау', 'Уборка'], ['g_beauty', 'Сұлулық', 'Красота'], ['g_household', 'Үй шебері', 'Мастер на час'],
+  ['g_tutoring', 'Репетиторлар', 'Репетиторы'], ['g_auto', 'Автоқызметтер', 'Автоуслуги'], ['g_construction', 'Құрылыс', 'Строительство'],
+  ['g_moving', 'Жүк тасымалы', 'Грузоперевозки'], ['g_care', 'Бала және қарт күтімі', 'Няни и сиделки'], ['g_events', 'Той және мерекелер', 'Праздники'],
+];
+const T = {
+  kz: { intro: 'Қандай шебер керек?', caps: ['Қандай шебер керек?', 'Бір өтініш — бірнеше ұсыныс'], tag: 'Қызылордадағы шеберлер бір жерде', small: 'Тегін' },
+  ru: { intro: 'Какой мастер нужен?', caps: ['Какой мастер нужен?', 'Одна заявка — несколько предложений'], tag: 'Мастера Кызылорды в одном месте', small: 'Бесплатно' },
+}[lang];
+const name = (c) => (lang === 'ru' ? c[2] : c[1]);
+
+window.DURATION = 13;
+const stage = $('stage');
+$('intro').textContent = T.intro;
+const STEP = 0.55;
+const START = 1.6;
+const cards = CATS.map((c) => {
+  const d = document.createElement('div');
+  d.className = 'big';
+  d.innerHTML = `<img src="../../public/img/photo/${c[0]}.webp" alt=""><span></span>`;
+  d.querySelector('span').textContent = name(c);
+  $('cards').appendChild(d);
+  return d;
+});
+const dots = CATS.map(() => { const i = document.createElement('i'); $('dots').appendChild(i); return i; });
+const cells = CATS.map((c) => {
+  const d = document.createElement('div');
+  d.innerHTML = `<img src="../../public/img/photo/${c[0]}.webp" alt=""><span></span>`;
+  d.querySelector('span').textContent = name(c);
+  $('grid').appendChild(d);
+  return d;
+});
+const caps = captions($('caps'), [
+  { at: 1.5, out: START + CATS.length * STEP, text: T.caps[0] },
+  { at: START + CATS.length * STEP + 0.2, out: 9.9, text: T.caps[1] },
+]);
+const end = endCard(stage, { tag: T.tag, small: T.small });
+const gridAt = START + CATS.length * STEP;
+
+window.seek = (t) => {
+  vis($('intro'), t, -0.5, 1.4, { dy: 60, scale: 0.08 });
+  caps(t);
+  // One category after another, each pushing in slightly
+  const idx = Math.floor((t - START) / STEP);
+  cards.forEach((c, i) => {
+    const on = i === idx && t >= START && t < gridAt;
+    c.style.visibility = on ? 'visible' : 'hidden';
+    if (on) {
+      const k = p(t, START + i * STEP, STEP);
+      c.style.transform = `scale(${1.06 - 0.06 * E.out(k)})`;
+    }
+  });
+  dots.forEach((d, i) => d.classList.toggle('on', i === idx));
+  $('dots').style.visibility = t >= START && t < gridAt ? 'visible' : 'hidden';
+  // Then all of them at once
+  cells.forEach((c, i) => vis(c, t, gridAt + i * 0.05, Infinity, { dy: 0, scale: 0.3, dur: 0.4, ease: E.back }));
+  end(t, 10.0);
+};
+window.seek(0);
+</script>
+</body>
+</html>

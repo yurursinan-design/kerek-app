@@ -18,6 +18,10 @@
           "destination": "/app/index.html"
         },
         {
+          "source": "/demo",
+          "destination": "/demo/index.html"
+        },
+        {
           "source": "**",
           "destination": "/index.html"
         }
@@ -93,6 +97,10 @@
         {
           "source": "/app/**",
           "destination": "/app/index.html"
+        },
+        {
+          "source": "/demo",
+          "destination": "/demo/index.html"
         },
         {
           "source": "**",

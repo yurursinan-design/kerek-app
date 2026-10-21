@@ -1,0 +1,184 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tapsyr — «Тапсыр!» overlay</title>
+<link rel="stylesheet" href="../videos/stage.css">
+<style>
+  /* Only the graphics: the footage is composited underneath by edit.py */
+  html, body, #stage { background: transparent !important; }
+
+  .pillcap {
+    position: absolute; left: 0; right: 0; top: 300px; display: flex; justify-content: center;
+  }
+  .pillcap span {
+    max-width: 900px; padding: 22px 38px 26px; border-radius: 34px; background: rgba(11, 46, 68, .84);
+    font-weight: 800; font-size: 64px; line-height: 1.1; letter-spacing: -0.02em; text-align: center; text-wrap: balance;
+  }
+  /* The bard's lines over the ride: italic, on the same dark pill as the other captions */
+  .saga span { font-style: italic; }
+  #slam {
+    position: absolute; left: 0; right: 0; top: 1130px; text-align: center;
+    font-family: Unbounded, Onest, sans-serif; font-weight: 800; font-size: 178px; letter-spacing: -0.03em;
+    color: var(--gold); -webkit-text-stroke: 12px var(--ink); paint-order: stroke fill;
+    text-shadow: 0 18px 50px rgba(0, 0, 0, .55);
+    padding: 70px 0; background: radial-gradient(closest-side, rgba(11, 46, 68, .65), rgba(11, 46, 68, 0));
+  }
+  #flash { position: absolute; inset: 0; background: #fff; opacity: 0; }
+
+  #offers { position: absolute; left: 64px; right: 64px; top: 1010px; color: var(--ink); }
+  #offers .head { display: inline-block; padding: 10px 24px; border-radius: 999px; background: var(--gold); font-weight: 800; font-size: 34px; margin-bottom: 4px; }
+  #offers .row { position: relative; margin-top: 16px; box-shadow: 0 16px 40px rgba(0, 0, 0, .35); }
+  #offers .row.sel { border-color: var(--sky); }
+  .badge { position: absolute; right: 26px; top: -20px; padding: 8px 20px; border-radius: 999px; background: var(--sky); color: #fff; font-weight: 800; font-size: 26px; }
+  .tap { position: absolute; width: 140px; height: 140px; margin: -70px 0 0 -70px; border-radius: 50%; background: rgba(2, 132, 199, .35); border: 5px solid rgba(255, 255, 255, .9); }
+
+  #tag { position: absolute; left: 64px; right: 64px; top: 1250px; color: var(--ink); }
+  #tag .row { box-shadow: 0 16px 40px rgba(0, 0, 0, .35); }
+  .ok { padding: 10px 22px; border-radius: 999px; background: var(--green); color: #fff; font-weight: 800; font-size: 31px; white-space: nowrap; }
+
+  .end .name { font-family: Unbounded, Onest, sans-serif; font-weight: 800; font-size: 150px; letter-spacing: -0.03em; margin-top: 30px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="pillcap" id="cap1"><span></span></div>
+  <div id="slam">ТАПСЫР!</div>
+  <div class="pillcap saga" id="saga1"><span></span></div>
+  <div class="pillcap saga" id="saga2"><span></span></div>
+  <div id="offers"><div class="head" id="offersHead"></div><div id="rows"></div><div class="tap" id="tap"></div></div>
+  <div id="tag"></div>
+  <div class="pillcap" id="cap6"><span></span></div>
+  <div class="pillcap" id="cap7"><span></span></div>
+  <div id="flash"></div>
+</div>
+<script src="../videos/stage.js"></script>
+<script>
+const { p, E, lang, $, vis, endCard } = STAGE;
+// Cut points come from edit.py (window.TL), so the graphics always match the footage
+const TL = window.TL || {};
+const T = {
+  kz: {
+    cap1: 'Кран сынды. Әже — сабырлы.',
+    saga1: 'Сырдария жағасынан...',
+    saga2: '...Қызылорда көшелерімен',
+    offers: '3 ұсыныс',
+    rows: [['Ерлан', 'Үй шебері', '5 000 ₸', '★ 4,9'], ['Нұрлан', 'Сантехник', '4 500 ₸', '★ 4,8'], ['Асхат', 'Сантехник', '6 000 ₸', '★ 5,0']],
+    chosen: 'Таңдалды',
+    tagRole: 'Сантехник · ★ 4,8',
+    cap6: 'Кран жөнделді ✓',
+    cap7: 'Гүлзар үшін кешіріңіз 🌼',
+    endTag: 'Тапсыр — шеберлер өздері келеді',
+    endSmall: 'Қызылорда · Тегін',
+  },
+  ru: {
+    cap1: 'Кран сорвало. Бабушка — спокойна.',
+    saga1: 'С берегов Сырдарьи...',
+    saga2: '...по улицам Кызылорды',
+    offers: '3 предложения',
+    rows: [['Ерлан', 'Мастер на час', '5 000 ₸', '★ 4,9'], ['Нурлан', 'Сантехник', '4 500 ₸', '★ 4,8'], ['Асхат', 'Сантехник', '6 000 ₸', '★ 5,0']],
+    chosen: 'Выбран',
+    tagRole: 'Сантехник · ★ 4,8',
+    cap6: 'Кран починен ✓',
+    cap7: 'За клумбу — извините 🌼',
+    endTag: 'Тапсыр — мастера придут сами',
+    endSmall: 'Кызылорда · Бесплатно',
+  },
+}[lang];
+const nb = (s) => s.replace(' — ', ' — ');
+
+$('cap1').firstChild.textContent = nb(T.cap1);
+$('saga1').firstChild.textContent = T.saga1;
+$('saga2').firstChild.textContent = T.saga2;
+$('offersHead').textContent = T.offers;
+$('cap6').firstChild.textContent = T.cap6;
+$('cap7').firstChild.textContent = nb(T.cap7);
+
+function row([name, role, price, stars]) {
+  const d = document.createElement('div');
+  d.className = 'row';
+  d.innerHTML = '<div class="ava"></div><div class="who"><b></b><span></span></div><div class="price"><b></b><span></span></div>';
+  d.querySelector('.ava').textContent = name[0];
+  d.querySelector('.who b').textContent = name;
+  d.querySelector('.who span').textContent = role;
+  d.querySelector('.price b').textContent = price;
+  d.querySelector('.price span').textContent = stars;
+  return d;
+}
+const rows = T.rows.map((r) => { const d = row(r); $('rows').appendChild(d); return d; });
+const badge = document.createElement('div');
+badge.className = 'badge';
+badge.textContent = T.chosen;
+rows[1].appendChild(badge);
+const tagRow = row([T.rows[1][0], T.tagRole, T.rows[1][2], '']);
+tagRow.querySelector('.price').innerHTML = `<span class="ok">${T.chosen} ✓</span>`;
+$('tag').appendChild(tagRow);
+const end = endCard($('stage'), { tag: nb(T.endTag), small: T.endSmall });
+const endEl = document.querySelector('.end');
+// The end card opens through a shanyrak, the crown of a yurt
+const NS = 'http://www.w3.org/2000/svg';
+const shan = document.createElementNS(NS, 'svg');
+shan.setAttribute('viewBox', '-150 -150 300 300');
+shan.setAttribute('width', '300');
+shan.setAttribute('height', '300');
+shan.style.cssText = 'position:absolute;left:390px;top:810px;overflow:visible;visibility:hidden';
+let bars = '';
+for (const r of [45, -45]) bars += `<g transform="rotate(${r})"><line x1="-100" y1="-42" x2="100" y2="-42"/><line x1="-100" y1="0" x2="100" y2="0"/><line x1="-100" y1="42" x2="100" y2="42"/></g>`;
+let poles = '';
+for (let i = 0; i < 24; i++) poles += `<line x1="104" y1="0" x2="132" y2="0" transform="rotate(${i * 15})"/>`;
+shan.innerHTML = `<defs><clipPath id="shc"><circle r="100"/></clipPath></defs>
+  <g stroke="#f2b705" stroke-linecap="round" fill="none">
+    <g stroke-width="7" clip-path="url(#shc)">${bars}</g>
+    <circle r="100" stroke-width="10"/>
+    <g stroke-width="5">${poles}</g>
+  </g>`;
+$('stage').appendChild(shan);
+
+window.seek = (t) => {
+  vis($('cap1'), t, TL.cap1[0], TL.cap1[1], { dy: 30 });
+
+  // «ТАПСЫР!» lands with a flash and a little shake
+  const s = TL.slam;
+  const k = p(t, s, 0.22);
+  const shake = t > s && t < s + 0.45 ? Math.sin((t - s) * 90) * 14 * (1 - p(t, s, 0.45)) : 0;
+  $('slam').style.opacity = String(t < s ? 0 : 1 - p(t, TL.slamOut, 0.12));
+  $('slam').style.transform = `translateX(${shake}px) scale(${1.9 - 0.9 * E.back(k)}) rotate(-4deg)`;
+  $('flash').style.opacity = String(t >= s ? 0.75 * (1 - p(t, s, 0.2)) : 0);
+
+  vis($('saga1'), t, TL.saga1[0], TL.saga1[1], { dy: 24, dur: 0.6 });
+  vis($('saga2'), t, TL.saga2[0], TL.saga2[1], { dy: 24, dur: 0.6 });
+
+  // Three offers arrive; the grandmother picks Nurlan
+  const [oIn, pick, oOut] = TL.offers;
+  vis($('offersHead'), t, oIn, oOut, { dy: 40, dur: 0.3 });
+  rows.forEach((r, i) => {
+    vis(r, t, oIn + 0.15 + i * 0.3, oOut, { dy: 80, dur: 0.35, ease: E.back });
+    if (i !== 1 && t >= pick) r.style.opacity = String(Number(r.style.opacity) * (1 - 0.55 * p(t, pick, 0.25)));
+  });
+  rows[1].classList.toggle('sel', t >= pick);
+  badge.style.opacity = String(p(t, pick, 0.2));
+  badge.style.transform = `scale(${0.6 + 0.4 * E.back(p(t, pick, 0.3))})`;
+  const tap = $('tap');
+  const tk = p(t, pick - 0.25, 0.5);
+  tap.style.left = '700px';
+  tap.style.top = `${rows[1].offsetTop + 64}px`;
+  tap.style.opacity = String(tk > 0 && tk < 1 ? 1 - tk : 0);
+  tap.style.transform = `scale(${0.4 + 1.1 * tk})`;
+
+  vis($('tag'), t, TL.tag[0], TL.tag[1], { dy: 60, dur: 0.35, ease: E.back });
+  vis($('cap6'), t, TL.cap6[0], TL.cap6[1], { dy: 30 });
+  vis($('cap7'), t, TL.cap7[0], TL.cap7[1], { dy: 30 });
+  end(t, TL.end);
+  const ek = Math.max(0, Math.min(1, (t - TL.end) / 0.6));
+  const r = 1500 * ek * ek * ek;
+  endEl.style.clipPath = `circle(${r}px at 50% 50%)`;
+  endEl.style.visibility = r > 0 ? 'visible' : 'hidden';
+  shan.style.visibility = ek > 0 && ek < 1 ? 'visible' : 'hidden';
+  shan.style.opacity = String(1 - Math.max(0, (ek - 0.75) / 0.25));
+  shan.style.transform = `scale(${Math.max(0.01, r / 100)}) rotate(${ek * 70}deg)`;
+};
+window.DURATION = TL.duration;
+if (window.TL) window.seek(0);
+</script>
+</body>
+</html>

@@ -19,6 +19,11 @@ function buildId(): string {
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss(), legalPages(), sitePages()],
+    // The website build also carries the WhatsApp assistant demo at /demo/ (src/demo); the APK doesn't
+    build:
+      process.env.TAPSYR_SITE === '1'
+        ? { rollupOptions: { input: { main: path.resolve(__dirname, 'index.html'), demo: path.resolve(__dirname, 'demo/index.html') } } }
+        : undefined,
     define: {
       __APP_VERSION__: JSON.stringify(`${process.env.KEREK_VERSION_NAME || '1.0'} · ${buildId()}`),
     },
