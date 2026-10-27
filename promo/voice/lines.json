@@ -59,16 +59,9 @@
  "gemini": {
   "model": "gemini-3.8-flash-tts",
   "voices": [
-   "Sulafat",
-   "Aoede",
-   "Achird",
-   "Charon"
+   "Achird"
   ],
   "style": "warm, friendly and confident narrator of a short app advert, native Kazakh pronunciation, natural lively pace",
-  "only": [
-   "01",
-   "02",
-   "10"
-  ]
+  "only": []
  }
 }
