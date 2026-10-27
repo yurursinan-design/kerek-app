@@ -1,7 +1,7 @@
 # Kazakh narration for the Tapsyr promo video (Microsoft Edge TTS, the voice family video.yml uses).
 # Runs only for a commit on a claude/** branch whose message starts with "[voice] ": it voices
-# promo/voice/lines.json with each voice listed there and commits the MP3s and word timings
-# (promo/voice/out/<voice>/) back to the same branch. It runs on GitHub because the voice service
+# promo/voice/lines.json with each voice listed there and pushes the MP3s and word timings
+# (promo/voice/out/<voice>/) to branch promo-out/<commit>. It runs on GitHub because the voice service
 # needs a WebSocket connection, which the cloud session's network does not allow.
 name: Promo voice
 
@@ -36,12 +36,13 @@ jobs:
           python promo/voice/make_voice.py
 
       - name: Kaydet
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
-          git add promo/voice/out
-          if git diff --cached --quiet; then echo "Yeni ses yok"; exit 0; fi
+          for p in promo/voice/out; do if [ -e "$p" ]; then git add "$p"; fi; done
+          if git diff --cached --quiet; then echo "Nothing new"; exit 0; fi
           git commit -q -m "Add promo narration audio"
-          # the branch may have moved while this ran (other promo jobs, new commits)
-          git pull -q --rebase origin "${GITHUB_REF_NAME}"
-          git push -q origin "HEAD:${GITHUB_REF_NAME}"
+          # Outputs go to their own branch, promo-out/<triggering commit>, never back to the
+          # claude/** branch: the session copies them over in its own commits.
+          git push -q -f origin "HEAD:refs/heads/promo-out/${GITHUB_SHA::7}"

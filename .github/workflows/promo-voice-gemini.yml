@@ -1,8 +1,8 @@
 # Kazakh narration for the Tapsyr promo video with Gemini TTS (promo/voice/gemini_voice.py).
 # Runs only for a commit on a claude/** branch whose message starts with "[voice-gemini] ": it reads
 # the Gemini key from Secret Manager (the same way images.yml does), voices the lines named in
-# promo/voice/lines.json ("gemini" block) and commits the WAVs (promo/voice/out-gemini/) back to
-# the same branch. Nothing else in the project is changed.
+# promo/voice/lines.json ("gemini" block), or an ad's dialogue file, and pushes the WAVs to branch
+# promo-out/<commit>, never to the claude/** branch. Nothing else in the project is changed.
 name: Promo voice (Gemini)
 
 on:
@@ -55,9 +55,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
-          git add promo/voice/out-gemini promo/*/voice 2>/dev/null || true
-          if git diff --cached --quiet; then echo "Yeni ses yok"; exit 0; fi
+          for p in promo/voice/out-gemini promo/*/voice; do if [ -e "$p" ]; then git add "$p"; fi; done
+          if git diff --cached --quiet; then echo "Nothing new"; exit 0; fi
           git commit -q -m "Add Gemini narration audio"
-          # the branch may have moved while this ran (other promo jobs, new commits)
-          git pull -q --rebase origin "${GITHUB_REF_NAME}"
-          git push -q origin "HEAD:${GITHUB_REF_NAME}"
+          # Outputs go to their own branch, promo-out/<triggering commit>, never back to the
+          # claude/** branch: the session copies them over in its own commits.
+          git push -q -f origin "HEAD:refs/heads/promo-out/${GITHUB_SHA::7}"
