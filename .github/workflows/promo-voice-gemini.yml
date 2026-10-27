@@ -58,4 +58,6 @@ jobs:
           git add promo/voice/out-gemini promo/*/voice 2>/dev/null || true
           if git diff --cached --quiet; then echo "Yeni ses yok"; exit 0; fi
           git commit -q -m "Add Gemini narration audio"
+          # the branch may have moved while this ran (other promo jobs, new commits)
+          git pull -q --rebase origin "${GITHUB_REF_NAME}"
           git push -q origin "HEAD:${GITHUB_REF_NAME}"
