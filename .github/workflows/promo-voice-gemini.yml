@@ -39,19 +39,23 @@ jobs:
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Seslendir
+        env:
+          MSG: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
           # The key never reaches the log: it only lives in this step's environment
           GEMINI_API_KEY=$(gcloud secrets versions access latest --secret GEMINI_API_KEY --project "$FIREBASE_PROJECT_ID")
           export GEMINI_API_KEY
-          python3 promo/voice/gemini_voice.py
+          # "[voice-gemini] dialogue <file>" voices an ad's character lines instead of the narration
+          ARG=$(printf '%s\n' "$MSG" | head -1 | sed -n 's/^\[voice-gemini\] dialogue \([^ ]*\).*/\1/p')
+          if [ -n "$ARG" ]; then python3 promo/voice/gemini_dialogue.py "$ARG"; else python3 promo/voice/gemini_voice.py; fi
 
       - name: Kaydet
         if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
-          git add promo/voice/out-gemini 2>/dev/null || true
+          git add promo/voice/out-gemini promo/*/voice 2>/dev/null || true
           if git diff --cached --quiet; then echo "Yeni ses yok"; exit 0; fi
           git commit -q -m "Add Gemini narration audio"
           git push -q origin "HEAD:${GITHUB_REF_NAME}"

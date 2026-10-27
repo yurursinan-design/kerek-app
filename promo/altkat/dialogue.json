@@ -1,0 +1,17 @@
+{
+ "model": "gemini-3.8-flash-tts",
+ "lines": [
+  {"id": "d1_nurlan", "voice": "Umbriel", "style": "frightened whisper, barely audible, a scared husband peeking through the door peephole",
+   "kk": "Төменгі көрші шығар…", "ru": "Сосед снизу, наверное…"},
+  {"id": "d2_aigul", "voice": "Kore", "style": "sarcastic, mocking her husband's lazy promise, tired wife rolling her eyes",
+   "kk": "«Ертең жөндеймін» дедің ғой…", "ru": "«Завтра починю», говорил…"},
+  {"id": "d3_kanat_door", "voice": "Algenib", "style": "angry man shouting through a closed steel door, loud and impatient",
+   "kk": "Ашыңыз!", "ru": "Откройте!"},
+  {"id": "d4_aigul", "voice": "Kore", "style": "urgent nervous whisper while typing on the phone",
+   "kk": "Тезірек, тезірек…", "ru": "Ну скорее же…"},
+  {"id": "d5_kanat", "voice": "Algenib", "style": "deadpan, tired, dry irony, slow, with a small pause before the last words",
+   "kk": "Тапсырысыңыз маған екі рет келді: телефоныма… және төбеме.", "ru": "Ваш заказ пришёл ко мне дважды: на телефон… и на голову."},
+  {"id": "d6_kanat", "voice": "Algenib", "style": "calm, resigned, matter-of-fact, quiet",
+   "kk": "Келесі тапсырыс — жоғарыда.", "ru": "Следующий заказ — этажом выше."}
+ ]
+}
