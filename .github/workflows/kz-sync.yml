@@ -1,0 +1,58 @@
+# Full sync of the Kazakhstan copy of personal data (Law 94-V art. 12 p. 2): copies every document
+# and file the live triggers missed and removes copies whose original is gone (functions/src/kzMirror.ts,
+# syncAll). Prints counts only, never data.
+#
+# Runs every night, by hand (Actions → "Kazakistan kopyası" → Run workflow), and for a commit on a
+# claude/** branch whose message starts with "[kz-sync]". A run fails when a collection's copy count
+# differs from Firestore or something could not be copied; GitHub then e-mails the repository owner.
+name: Kazakistan kopyası
+
+on:
+  schedule:
+    - cron: '17 21 * * *' # 02:17 in Kazakhstan
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: kz-sync
+  cancel-in-progress: false
+
+env:
+  FIREBASE_PROJECT_ID: kerek-9d153
+
+jobs:
+  sync:
+    if: github.event_name != 'push' || startsWith(github.event.head_commit.message, '[kz-sync]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Google Cloud'a giriş
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: projects/24155315039/locations/global/workloadIdentityPools/github/providers/kerek-app
+          service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - name: Bağımlılıklar
+        working-directory: functions
+        run: npm ci
+
+      - name: Eşitle ve karşılaştır
+        working-directory: functions
+        run: |
+          KZ_STORAGE_KEY_ID=$(gcloud secrets versions access latest --secret KZ_STORAGE_KEY_ID --project "$FIREBASE_PROJECT_ID")
+          KZ_STORAGE_SECRET=$(gcloud secrets versions access latest --secret KZ_STORAGE_SECRET --project "$FIREBASE_PROJECT_ID")
+          echo "::add-mask::$KZ_STORAGE_KEY_ID"; echo "::add-mask::$KZ_STORAGE_SECRET"
+          export KZ_STORAGE_KEY_ID KZ_STORAGE_SECRET GCLOUD_PROJECT="$FIREBASE_PROJECT_ID"
+          npx --yes tsx@4.21.0 scripts/kz-sync.ts
