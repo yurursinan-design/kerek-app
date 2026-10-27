@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Edits the "03:07" ad: one locked-off overhead Kling take (promo/0307/clips/take.mp4), a blackout
-line and the campaign end card.
+"""Edits the "03:07" ad from one locked-off overhead Kling take (promo/0307/clips/take.mp4) with its
+middle re-shot (clips/pillow.mp4), a blackout line and the campaign end card.
+
+In the take her body morphed instead of rolling over into the pillow (1.3-4.5 s). That stretch was
+re-shot from the take's own frames 31 and 108, so the new clip starts and ends on the take's
+pictures and is cut in with a short crossfade on each side.
 
 There is no dialogue. Kling's own audio is dropped and every sound is made here: the bathroom tap
-dripping behind the door, room tone, bedding foley that follows the movement in the take, a sigh
-into the pillow, the phone, a short dombra-like phrase when she can finally sleep, one last drip in
-the dark, and the app's dombra sound as the logo on the end card.
+dripping behind the door (muffled while she holds the pillow over her ears), room tone, bedding
+foley that follows the movement on screen, a frustrated sigh, the phone, a short dombra-like
+phrase when she can finally sleep, one last drip in the dark, and the app's dombra sound as the
+logo on the end card.
 
 Usage:
-  python3 promo/0307/edit.py --analyse <dir>          contact sheet + motion curve of the take
+  python3 promo/0307/edit.py --analyse <dir> [--clip take|pillow]   contact sheet + motion curve
   python3 promo/0307/edit.py --out <file.mp4> [--stills t1,t2,...]
 """
 
@@ -35,72 +40,85 @@ _spec.loader.exec_module(AK)  # the campaign end card lives there
 
 W, H, FPS = 1080, 1920, 24
 SR = AU.SR
-TAKE = HERE / "clips/take.mp4"
-FRAMES = HERE / "frames"
+CLIPS = HERE / "clips"
+SRC_W, SRC_H = 716, 1280
 
-# ------------------------------------------------------------------ timeline
-# Pieces of the take that are used, in order: (clip in, clip out, speed).
-PIECES = [(0.0, 15.0, 1.0)]
-# Moments in the take, in clip seconds (set after watching it with --analyse).
+# ------------------------------------------------------------------ the cut
+# (source clip, first frame, end frame (exclusive), speed), in 24 fps frames of each clip.
+EDIT = [
+    ("take", 0, 31, 1.0),         # 0.00-1.29 s: she stares into the lens, her eyes slowly close
+    ("pillow", 0, 96, 1.0),       # re-shot: the pillow pressed over her ears against the drip; she gives up
+    ("take", 109, 158, 1.0),      # 4.54-6.58 s: hands in her hair, she reaches for the phone
+    ("take", 158, 247, 1.25),     # 6.58-10.29 s: typing, a touch quicker
+    ("take", 247, 351, 1.0),      # 10.29-14.63 s: sent, phone down, she turns onto her side and sleeps
+]
+XF = 3  # frames of crossfade where the re-shot clip meets the take
+
+# Moments on screen: (clip, frame).
 EV = {
-    "pillow": 4.0,      # face reaches the pillow
-    "pick": 7.0,        # phone lifted off the nightstand
-    "type0": 8.0,       # typing starts
-    "type1": 10.0,      # typing ends
-    "send": 10.1,       # message sent
-    "down": 11.0,       # phone set back on the nightstand
-    "smile": 13.0,      # eyes closed, the smile
+    "cover": ("pillow", 30),      # pillow folded over her ears (set from --analyse --clip pillow)
+    "release": ("pillow", 66),    # she lets go of it
+    "pick": ("take", 127),        # phone lifted off the nightstand
+    "type0": ("take", 151),       # typing starts
+    "send": ("take", 251),        # request sent
+    "lock": ("take", 257),        # screen off, the blue light goes
+    "down": ("take", 283),        # phone set back on the nightstand
+    "smile": ("take", 288),       # eyes closed, the smile; she turns onto her side
 }
+DRIP_STEP = 1.35       # seconds between drops once the rhythm is set
 BLACK = 2.9            # blackout with the line
 END = 3.4              # end card
-LAST_DRIP = 0.4        # the drip heard in the dark, seconds after the cut to black
+LAST_DRIP = 0.4        # the drop heard in the dark, seconds after the cut to black
 
 
-def take_times():
-    """Clip time for every output frame of the take."""
-    out = []
-    for a, b, sp in PIECES:
-        n = int(round((b - a) / sp * FPS))
-        out += [a + k * sp / FPS for k in range(n)]
-    return out
+def build():
+    """Per output frame of the picture: [(clip, frame, weight), ...]."""
+    seq, prev = [], None
+    for src, a, b, sp in EDIT:
+        n = int(round((b - a) / sp))
+        idx = [a + int(round(k * sp)) for k in range(n)]
+        piece = [[(src, f, 1.0)] for f in idx]
+        if prev and prev[0] != src:
+            psrc, pnext = prev
+            for j in range(XF):
+                w = (j + 1) / (XF + 1)
+                if psrc == "take":   # the take runs on under the new clip's first frames
+                    piece[j] = [("take", pnext + j, 1 - w), (src, idx[j], w)]
+                else:                # the take is already running under the old clip's last frames
+                    k = len(seq) - XF + j
+                    seq[k] = [(psrc, seq[k][0][1], 1 - w), ("take", a - XF + j, w)]
+        seq += piece
+        prev = (src, idx[-1] + 1)
+    return seq
 
 
-CT = take_times()
-TAKE_DUR = len(CT) / FPS
+SEQ = build()
+TAKE_DUR = len(SEQ) / FPS
 TOTAL = TAKE_DUR + BLACK + END
 
 
-def ot(ct):
-    """Output time of clip time `ct` (first output frame at or after it)."""
-    for k, c in enumerate(CT):
-        if c >= ct - 1e-6:
+def ot(src, frame):
+    """Output time where clip `src` reaches `frame` on screen."""
+    for k, comps in enumerate(SEQ):
+        s, f, _ = max(comps, key=lambda c: c[2])
+        if s == src and f >= frame:
             return k / FPS
-    return TAKE_DUR
+    raise ValueError(f"{src} frame {frame} is not in the cut")
+
+
+def evt(name):
+    return ot(*EV[name])
 
 
 # ------------------------------------------------------------------ pictures
-class Take:
-    """Streams the take scaled to 1080 wide and cropped to 1920 high; frames asked in order."""
-
-    def __init__(self):
-        cmd = ["ffmpeg", "-v", "error", "-i", str(TAKE), "-vf", f"fps={FPS},scale={W}:-2:flags=lanczos,crop={W}:{H}",
-               "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
-        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-        self.idx, self.cur = -1, None
-
-    def at(self, ct):
-        want = int(round(ct * FPS))
-        while self.idx < want:
-            buf = self.proc.stdout.read(W * H * 3)
-            if len(buf) < W * H * 3:
-                break  # past the end: hold the last frame
-            self.cur = np.frombuffer(buf, np.uint8).reshape(H, W, 3)
-            self.idx += 1
-        return self.cur
-
-    def close(self):
-        self.proc.stdout.close()
-        self.proc.wait()
+def decode(name, size=(SRC_W, SRC_H), gray=False):
+    fmt = "gray" if gray else "rgb24"
+    ch = 1 if gray else 3
+    cmd = ["ffmpeg", "-v", "error", "-i", str(CLIPS / f"{name}.mp4"), "-vf", f"fps={FPS},scale={size[0]}:{size[1]}",
+           "-f", "rawvideo", "-pix_fmt", fmt, "-"]
+    raw = subprocess.run(cmd, check=True, capture_output=True).stdout
+    arr = np.frombuffer(raw, np.uint8)
+    return arr.reshape(-1, size[1], size[0]) if gray else arr.reshape(-1, size[1], size[0], ch)
 
 
 def vignette():
@@ -125,11 +143,17 @@ class Blackout:
 
 
 def frames():
-    take, vig = Take(), vignette()
-    for k, ct in enumerate(CT):
-        f = take.at(ct).astype(np.float32) * vig
+    clips = {name: decode(name) for name in {s for s, *_ in EDIT}}
+    vig = vignette()
+    h2 = int(round(SRC_H * W / SRC_W))
+    top = (h2 - H) // 2
+    for k, comps in enumerate(SEQ):
+        acc = np.zeros((SRC_H, SRC_W, 3), np.float32)
+        for s, f, w in comps:
+            acc += clips[s][min(f, len(clips[s]) - 1)].astype(np.float32) * w
+        img = Image.fromarray(np.clip(acc, 0, 255).astype(np.uint8)).resize((W, h2), Image.LANCZOS)
+        f = np.asarray(img, np.float32)[top:top + H] * vig
         yield k / FPS, Image.fromarray(np.clip(f, 0, 255).astype(np.uint8))
-    take.close()
     black, end = Blackout(), AK.EndCard()
     for k in range(int(round(BLACK * FPS))):
         yield TAKE_DUR + k / FPS, black.frame(k / FPS)
@@ -138,43 +162,32 @@ def frames():
 
 
 # ------------------------------------------------------------------ analysis
-def motion(size=(90, 160)):
-    """Mean frame difference of the take per clip frame (24 fps), low resolution, grey."""
-    cmd = ["ffmpeg", "-v", "error", "-i", str(TAKE), "-vf", f"fps={FPS},scale={size[0]}:{size[1]},format=gray",
-           "-f", "rawvideo", "-"]
-    raw = subprocess.run(cmd, check=True, capture_output=True).stdout
-    fr = np.frombuffer(raw, np.uint8).reshape(-1, size[1], size[0]).astype(np.float32)
+def motion(name):
+    """Mean frame difference per frame of a clip (low resolution, grey)."""
+    fr = decode(name, (90, 160), gray=True).astype(np.float32)
     d = np.abs(np.diff(fr, axis=0)).mean(axis=(1, 2))
     return np.concatenate([[d[0]], d])
 
 
-def analyse(out):
+def analyse(out, name):
     out = pathlib.Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    m = motion()
-    for k in range(0, len(m), 6):
-        print(f"{k / FPS:5.2f}s  {'#' * int(m[k] * 8)}  {m[k]:.2f}")
-    # contact sheet: one frame every 0.5 s with its time
-    cmd = ["ffmpeg", "-v", "error", "-i", str(TAKE), "-vf", "fps=2,scale=180:-2", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
-    raw = subprocess.run(cmd, check=True, capture_output=True).stdout
-    w = 180
-    h = len(raw) // 3 // w
-    probe = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
-                            "stream=width,height", "-of", "csv=p=0", str(TAKE)], capture_output=True, text=True).stdout
-    sw, sh = (int(v) for v in probe.strip().split(","))
-    th = int(round(sh * w / sw / 2) * 2)
-    n = len(raw) // (w * th * 3)
-    imgs = [Image.frombytes("RGB", (w, th), raw[i * w * th * 3:(i + 1) * w * th * 3]) for i in range(n)]
+    m = motion(name)
+    for k in range(0, len(m), 3):
+        print(f"f{k:3d} {k / FPS:5.2f}s  {'#' * int(m[k] * 8)}  {m[k]:.2f}")
+    fr = decode(name, (180, 322))
+    step = 6
+    imgs = [(k, Image.fromarray(fr[k])) for k in range(0, len(fr), step)]
     cols = 8
-    rows = (n + cols - 1) // cols
-    sheet = Image.new("RGB", (cols * w, rows * (th + 22)), (20, 20, 20))
+    rows = (len(imgs) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * 180, rows * (322 + 22)), (20, 20, 20))
     d = ImageDraw.Draw(sheet)
-    for i, im in enumerate(imgs):
-        x, y = (i % cols) * w, (i // cols) * (th + 22)
+    for i, (k, im) in enumerate(imgs):
+        x, y = (i % cols) * 180, (i // cols) * (322 + 22)
         sheet.paste(im, (x, y + 22))
-        d.text((x + 6, y + 4), f"{i * 0.5:.1f}s", fill=(255, 255, 0))
-    sheet.save(out / "sheet.jpg", quality=88)
-    print("sheet", sheet.size, "->", out / "sheet.jpg", "frames", n, "src", sw, sh, h)
+        d.text((x + 6, y + 4), f"f{k} {k / FPS:.2f}s", fill=(255, 255, 0))
+    sheet.save(out / f"sheet_{name}.jpg", quality=88)
+    print("sheet ->", out / f"sheet_{name}.jpg", "frames", len(fr))
 
 
 # ------------------------------------------------------------------ sound
@@ -215,8 +228,7 @@ def plink(seed, cutoff=5500):
 def room(dur, seed=11):
     rng = np.random.default_rng(seed)
     x = np.cumsum(rng.normal(0, 1, int(dur * SR)))
-    x = lp(hp(x, 25), 380)
-    return norm(x)
+    return norm(lp(hp(x, 25), 380))
 
 
 def rustle(env, seed=21):
@@ -231,17 +243,17 @@ def rustle(env, seed=21):
     return norm(x * flutter) * 0.8 * env + norm(crk) * 0.35 * env
 
 
-def sigh(seed=5, dur=1.5):
-    """A long tired exhale into the pillow: breath with a little voice, muffled."""
+def sigh(seed=5, dur=1.3, cutoff=1800):
+    """A long, fed-up exhale: breath with a little voice in it."""
     rng = np.random.default_rng(seed)
     n = int(dur * SR)
     t = np.arange(n) / SR
     env = np.minimum(1, t / 0.18) * np.exp(-np.maximum(0, t - 0.25) * 2.2) * np.minimum(1, (dur - t) / 0.2)
-    breath = bp(rng.normal(0, 1, n), 250, 2200)
+    breath = bp(rng.normal(0, 1, n), 250, 2600)
     ph = 2 * np.pi * np.cumsum(205 - 45 * t / dur) / SR
     voiced = bp(sum(np.sin(k * ph) / k for k in range(1, 12)), 150, 900)
     venv = np.clip((t - 0.12) / 0.2, 0, 1) * np.exp(-np.maximum(0, t - 0.35) * 3.0)
-    return norm(lp(norm(breath) * env * 0.7 + norm(voiced) * venv * env * 0.35, 900))
+    return norm(lp(norm(breath) * env * 0.75 + norm(voiced) * venv * env * 0.25, cutoff))
 
 
 def clack(seed=0):
@@ -264,20 +276,17 @@ def phrase():
     """Four soft plucks falling to rest (A minor pentatonic), with a low A under the last."""
     out = np.zeros(int(3.6 * SR))
     for t0, f, g in ((0.0, 659.25, 0.8), (0.38, 587.33, 0.75), (0.76, 523.25, 0.7), (1.3, 440.0, 0.9), (1.3, 220.0, 0.5)):
-        p = AU.pluck(f, 2.2, bright=0.42, seed=int(f))
-        AU.place(out, p, t0, g)
+        AU.place(out, AU.pluck(f, 2.2, bright=0.42, seed=int(f)), t0, g)
     return norm(lp(out, 3200))
 
 
 def motion_env(n):
-    """Per-sample loudness for the bedding foley, following the movement in the take."""
-    m = motion()
-    m_out = np.array([m[min(len(m) - 1, int(round(c * FPS)))] for c in CT])
-    lo, hi = np.percentile(m_out, 35) * 1.15, np.percentile(m_out, 97)
-    e = np.clip((m_out - lo) / (hi - lo + 1e-9), 0, 1) ** 0.8
-    t_frames = np.arange(len(e)) / FPS
-    env = np.interp(np.arange(n) / SR, t_frames, e, right=0.0)
-    # smooth: fast attack, slower release
+    """Per-sample loudness for the bedding foley, following the movement on screen."""
+    mo = {name: motion(name) for name in {s for s, *_ in EDIT}}
+    m = np.array([sum(w * mo[s][min(f, len(mo[s]) - 1)] for s, f, w in comps) for comps in SEQ])
+    lo, hi = np.percentile(m, 35) * 1.15, np.percentile(m, 97)
+    e = np.clip((m - lo) / (hi - lo + 1e-9), 0, 1) ** 0.8
+    env = np.interp(np.arange(n) / SR, np.arange(len(e)) / FPS, e, right=0.0)
     out = np.empty_like(env)
     g = 0.0
     a, r = np.exp(-1 / (0.03 * SR)), np.exp(-1 / (0.18 * SR))
@@ -288,50 +297,66 @@ def motion_env(n):
     return out
 
 
+def drips():
+    """(time, gain, cutoff) of every drop: one wakes her, then a steady rhythm; muffled while the pillow
+    is over her ears; none while she sets the phone down; then they fade from her mind."""
+    t_cover, t_release = evt("cover"), evt("release")
+    t_down, t_smile = evt("down"), evt("smile")
+    out = [(0.20, 0.55, 5500)]
+    t = ot("pillow", 4)  # the drop that makes her frown
+    while t < TAKE_DUR - 0.5:
+        if abs(t - t_down) < 0.35 or abs(t - evt("send")) < 0.2:
+            t += 0.4
+            continue
+        if t_cover + 0.1 <= t <= t_release:
+            out.append((t, 0.35, 650))           # through the pillow
+        else:
+            p = R.prog(t, t_down, t_smile + 0.8)
+            out.append((t, 0.55 * (1 - 0.55 * p), 5500 - 2800 * p))
+        t += DRIP_STEP
+    return out
+
+
 def mix():
     n = int(TOTAL * SR) + SR
     sfx, amb, mus = np.zeros(n), np.zeros(n), np.zeros(n)
     put = AU.place
     t_cut = TAKE_DUR
-    t_down, t_smile = ot(EV["down"]), ot(EV["smile"])
 
-    # room tone under the whole take, gone with the cut to black (she is asleep)
-    rt = room(t_cut)
+    # room tone under the picture, ducked while the pillow is over her ears, gone with the cut to black
+    rt = room(t_cut) * 0.05
+    tt = np.arange(len(rt)) / SR
+    rt *= 1 - 0.6 * np.clip(np.minimum((tt - evt("cover")) / 0.2, (evt("release") - tt) / 0.2), 0, 1)
     rt[-int(0.02 * SR):] *= np.linspace(1, 0, int(0.02 * SR))
-    put(amb, rt, 0.0, 0.05)
+    put(amb, rt, 0.0)
 
-    # the tap behind the door: steady, every 1.6 s; once the phone is down it fades from her mind
-    t, k = 0.25, 0
-    while t < t_cut - 0.15:
-        fade = 1 - 0.6 * R.prog(t, t_down, t_smile + 0.5)
-        put(sfx, plink(100 + k, cutoff=5500 - 2800 * (1 - fade) / 0.6), t, 0.55 * fade)
-        k += 1
-        t += 1.6 + (0.04 if k % 3 == 0 else -0.02)
+    # the tap behind the door
+    for k, (t, g, cut) in enumerate(drips()):
+        put(sfx, plink(100 + k, cutoff=cut), t, g)
     put(sfx, plink(7), t_cut + LAST_DRIP, 0.6)  # ...and in the dark, it is still dripping
 
-    # bedding foley from the movement, a sigh into the pillow
-    env = motion_env(int(t_cut * SR))
-    put(sfx, rustle(env), 0.0, 0.32)
-    put(sfx, sigh(), ot(EV["pillow"]) + 0.3, 0.32)
+    # bedding foley from the movement; a fed-up sigh as she lets go of the pillow
+    put(sfx, rustle(motion_env(int(t_cut * SR))), 0.0, 0.32)
+    put(sfx, sigh(), evt("release") + 0.1, 0.3)
 
     # the phone
-    put(sfx, clack(1), ot(EV["pick"]), 0.22)
-    t, k = ot(EV["type0"]), 0
+    put(sfx, clack(1), evt("pick"), 0.22)
+    t, k = evt("type0"), 0
     rng = np.random.default_rng(9)
-    while t < ot(EV["type1"]):
+    while t < evt("send") - 0.1:
         put(sfx, tap(k), t, 0.16 * rng.uniform(0.6, 1.0))
-        t += rng.uniform(0.11, 0.19)
+        t += rng.uniform(0.09, 0.16)
         k += 1
-    put(sfx, AU.whoosh(0.22), ot(EV["send"]), 0.16)
-    put(sfx, AU.pop(1100, 750, 0.09), ot(EV["send"]) + 0.2, 0.12)
-    put(sfx, clack(2), t_down, 0.18)
+    put(sfx, AU.whoosh(0.22), evt("send"), 0.16)
+    put(sfx, AU.pop(1100, 750, 0.09), evt("send") + 0.2, 0.12)
+    put(sfx, tap(50), evt("lock"), 0.12)
+    put(sfx, clack(2), evt("down"), 0.18)
 
     # relief: four soft plucks as she settles; the dombra as the sound logo on the end card
-    put(mus, phrase(), t_down + 0.35, 0.3)
+    put(mus, phrase(), evt("down") + 0.35, 0.3)
     put(sfx, AK.load(REPO / "public/sounds/dombra.wav"), t_cut + BLACK + 0.15, 0.9)
 
-    out = sfx + amb + mus
-    return norm(out[: int(TOTAL * SR)], 0.95)
+    return norm((sfx + amb + mus)[: int(TOTAL * SR)], 0.95)
 
 
 def write_wav(path, x):
@@ -348,13 +373,14 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--stills", default="")
     ap.add_argument("--analyse")
+    ap.add_argument("--clip", default="take")
     args = ap.parse_args()
     if args.analyse:
-        analyse(args.analyse)
+        analyse(args.analyse, args.clip)
         return
     out = pathlib.Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    print(f"take {TAKE_DUR:.2f}s, total {TOTAL:.2f}s", flush=True)
+    print(f"picture {TAKE_DUR:.2f}s, total {TOTAL:.2f}s; " + ", ".join(f"{k} {evt(k):.2f}" for k in EV), flush=True)
 
     if args.stills:
         want = sorted(float(x) for x in args.stills.split(","))
