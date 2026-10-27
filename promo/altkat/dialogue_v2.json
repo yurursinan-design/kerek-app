@@ -1,0 +1,54 @@
+{
+ "model": "gemini-3.8-flash-tts",
+ "lines": [
+  {
+   "id": "d2_aigul_Sulafat",
+   "voice": "Sulafat",
+   "style": "natural conversational Kazakh, sarcastic and amused, a real tired wife teasing her husband, relaxed and human, not theatrical",
+   "kk": "«Ертең жөндеймін» дедің ғой…",
+   "ru": "«Завтра починю», говорил…"
+  },
+  {
+   "id": "d4_aigul_Sulafat",
+   "voice": "Sulafat",
+   "style": "natural nervous whisper, real person typing in a hurry, breathy and human",
+   "kk": "Тезірек, тезірек…",
+   "ru": "Ну скорее же…"
+  },
+  {
+   "id": "d2_aigul_Leda",
+   "voice": "Leda",
+   "style": "natural conversational Kazakh, sarcastic and amused, a real tired wife teasing her husband, relaxed and human, not theatrical",
+   "kk": "«Ертең жөндеймін» дедің ғой…",
+   "ru": "«Завтра починю», говорил…"
+  },
+  {
+   "id": "d4_aigul_Leda",
+   "voice": "Leda",
+   "style": "natural nervous whisper, real person typing in a hurry, breathy and human",
+   "kk": "Тезірек, тезірек…",
+   "ru": "Ну скорее же…"
+  },
+  {
+   "id": "d2_aigul_Vindemiatrix",
+   "voice": "Vindemiatrix",
+   "style": "natural conversational Kazakh, sarcastic and amused, a real tired wife teasing her husband, relaxed and human, not theatrical",
+   "kk": "«Ертең жөндеймін» дедің ғой…",
+   "ru": "«Завтра починю», говорил…"
+  },
+  {
+   "id": "d4_aigul_Vindemiatrix",
+   "voice": "Vindemiatrix",
+   "style": "natural nervous whisper, real person typing in a hurry, breathy and human",
+   "kk": "Тезірек, тезірек…",
+   "ru": "Ну скорее же…"
+  },
+  {
+   "id": "d5_kanat_short",
+   "voice": "Algenib",
+   "style": "deadpan, tired, dry irony, natural pace, only a short beat before the last two words",
+   "kk": "Тапсырысыңыз маған екі рет келді: телефоныма… және төбеме.",
+   "ru": "Ваш заказ пришёл ко мне дважды: на телефон… и на голову."
+  }
+ ]
+}
