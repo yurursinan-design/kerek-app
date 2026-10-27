@@ -9,7 +9,7 @@ pictures and is cut in with a short crossfade on each side.
 There is no dialogue. Kling's own audio is dropped and every sound is made here: the bathroom tap
 dripping behind the door (muffled while she holds the pillow over her ears), room tone, bedding
 foley that follows the movement on screen, a frustrated sigh, the phone, a short dombra-like
-phrase when she can finally sleep, one last drip in the dark, and the app's dombra sound as the
+phrase when she can finally sleep, one last drip in the dark (and her sleeping breath), and the app's dombra sound as the
 logo on the end card.
 
 Usage:
@@ -47,17 +47,21 @@ SRC_W, SRC_H = 716, 1280
 # (source clip, first frame, end frame (exclusive), speed), in 24 fps frames of each clip.
 EDIT = [
     ("take", 0, 31, 1.0),         # 0.00-1.29 s: she stares into the lens, her eyes slowly close
-    ("pillow", 0, 96, 1.0),       # re-shot: the pillow pressed over her ears against the drip; she gives up
+    ("pillow", 0, 97, 1.0),       # re-shot: the pillow pressed over her ears against the drip; she gives up
     ("take", 109, 158, 1.0),      # 4.54-6.58 s: hands in her hair, she reaches for the phone
     ("take", 158, 247, 1.25),     # 6.58-10.29 s: typing, a touch quicker
-    ("take", 247, 351, 1.0),      # 10.29-14.63 s: sent, phone down, she turns onto her side and sleeps
+    ("take", 247, 344, 1.0),      # 10.29-14.33 s: sent, phone down, she turns onto her side and sleeps
 ]
-XF = 3  # frames of crossfade where the re-shot clip meets the take
+# Frames of crossfade where the re-shot clip meets the take. Going in she is still, so a short blend
+# hides any difference; coming out she moves and a blend would double her face, so it is a straight
+# cut: the clip's last frame was generated from take frame 108 and the take resumes at 109.
+XF_IN, XF_OUT = 3, 0
 
 # Moments on screen: (clip, frame).
 EV = {
-    "cover": ("pillow", 30),      # pillow folded over her ears (set from --analyse --clip pillow)
-    "release": ("pillow", 66),    # she lets go of it
+    "frown": ("pillow", 6),       # a drop: her closed eyes screw up
+    "cover": ("pillow", 29),      # pillow folded over her ears
+    "release": ("pillow", 53),    # she lets go of it
     "pick": ("take", 127),        # phone lifted off the nightstand
     "type0": ("take", 151),       # typing starts
     "send": ("take", 251),        # request sent
@@ -80,13 +84,14 @@ def build():
         piece = [[(src, f, 1.0)] for f in idx]
         if prev and prev[0] != src:
             psrc, pnext = prev
-            for j in range(XF):
-                w = (j + 1) / (XF + 1)
+            xf = XF_IN if psrc == "take" else XF_OUT
+            for j in range(xf):
+                w = (j + 1) / (xf + 1)
                 if psrc == "take":   # the take runs on under the new clip's first frames
                     piece[j] = [("take", pnext + j, 1 - w), (src, idx[j], w)]
                 else:                # the take is already running under the old clip's last frames
-                    k = len(seq) - XF + j
-                    seq[k] = [(psrc, seq[k][0][1], 1 - w), ("take", a - XF + j, w)]
+                    k = len(seq) - xf + j
+                    seq[k] = [(psrc, seq[k][0][1], 1 - w), ("take", a - xf + j, w)]
         seq += piece
         prev = (src, idx[-1] + 1)
     return seq
@@ -142,15 +147,38 @@ class Blackout:
         return cv
 
 
+def bg_mask():
+    """Door, nightstand, floor and wall: everything around the bed that never moves."""
+    m = np.zeros((SRC_H, SRC_W), bool)
+    m[:330, :] = True
+    m[330:, :120] = True
+    m[330:, 620:] = True
+    return m
+
+
+def pillow_gain(clips):
+    """Per-frame RGB gain that matches the re-shot clip's exposure to the take at both joins
+    (the new clip came out 4-8 % darker)."""
+    bg = bg_mask()
+    mean = lambda f: np.array([f[..., c][bg].mean() for c in range(3)], np.float32)  # noqa: E731
+    p = clips["pillow"]
+    g0 = mean(clips["take"][31]) / mean(p[0])
+    g1 = mean(clips["take"][108]) / mean(p[-1])
+    return [g0 + (g1 - g0) * k / (len(p) - 1) for k in range(len(p))]
+
+
 def frames():
     clips = {name: decode(name) for name in {s for s, *_ in EDIT}}
+    gain = pillow_gain(clips)
     vig = vignette()
     h2 = int(round(SRC_H * W / SRC_W))
     top = (h2 - H) // 2
     for k, comps in enumerate(SEQ):
         acc = np.zeros((SRC_H, SRC_W, 3), np.float32)
         for s, f, w in comps:
-            acc += clips[s][min(f, len(clips[s]) - 1)].astype(np.float32) * w
+            f = min(f, len(clips[s]) - 1)
+            px = clips[s][f].astype(np.float32)
+            acc += (px * gain[f] if s == "pillow" else px) * w
         img = Image.fromarray(np.clip(acc, 0, 255).astype(np.uint8)).resize((W, h2), Image.LANCZOS)
         f = np.asarray(img, np.float32)[top:top + H] * vig
         yield k / FPS, Image.fromarray(np.clip(f, 0, 255).astype(np.uint8))
@@ -222,7 +250,7 @@ def plink(seed, cutoff=5500):
     wet = norm(fftconvolve(dry, ir))
     out = wet * 0.45
     out[: len(dry)] += dry * 0.9
-    return norm(lp(out, cutoff))
+    return lp(norm(out), cutoff)  # a lower cutoff is also quieter: through a pillow, or half asleep
 
 
 def room(dur, seed=11):
@@ -254,6 +282,16 @@ def sigh(seed=5, dur=1.3, cutoff=1800):
     voiced = bp(sum(np.sin(k * ph) / k for k in range(1, 12)), 150, 900)
     venv = np.clip((t - 0.12) / 0.2, 0, 1) * np.exp(-np.maximum(0, t - 0.35) * 3.0)
     return norm(lp(norm(breath) * env * 0.75 + norm(voiced) * venv * env * 0.25, cutoff))
+
+
+def breath(seed=8, dur=2.2):
+    """One slow sleeping breath, in and out through the nose."""
+    rng = np.random.default_rng(seed)
+    n = int(dur * SR)
+    t = np.arange(n) / SR
+    inhale = np.sin(np.pi * np.clip(t / 0.9, 0, 1)) ** 2 * 0.55
+    exhale = np.sin(np.pi * np.clip((t - 1.0) / 1.2, 0, 1)) ** 2
+    return norm(lp(bp(rng.normal(0, 1, n), 200, 1800), 900) * (inhale + exhale))
 
 
 def clack(seed=0):
@@ -303,16 +341,16 @@ def drips():
     t_cover, t_release = evt("cover"), evt("release")
     t_down, t_smile = evt("down"), evt("smile")
     out = [(0.20, 0.55, 5500)]
-    t = ot("pillow", 4)  # the drop that makes her frown
+    t = evt("frown")  # the drop that makes her frown
     while t < TAKE_DUR - 0.5:
         if abs(t - t_down) < 0.35 or abs(t - evt("send")) < 0.2:
             t += 0.4
             continue
         if t_cover + 0.1 <= t <= t_release:
-            out.append((t, 0.35, 650))           # through the pillow
+            out.append((t, 0.5, 650))            # through the pillow
         else:
             p = R.prog(t, t_down, t_smile + 0.8)
-            out.append((t, 0.55 * (1 - 0.55 * p), 5500 - 2800 * p))
+            out.append((t, 0.5 * (1 - 0.5 * p), 5500 - 2800 * p))
         t += DRIP_STEP
     return out
 
@@ -323,21 +361,24 @@ def mix():
     put = AU.place
     t_cut = TAKE_DUR
 
-    # room tone under the picture, ducked while the pillow is over her ears, gone with the cut to black
-    rt = room(t_cut) * 0.05
+    # room tone: ducked while the pillow is over her ears, quieter in the dark, out under the end card
+    t_end = t_cut + BLACK
+    rt = room(t_end + 0.3) * 0.05
     tt = np.arange(len(rt)) / SR
     rt *= 1 - 0.6 * np.clip(np.minimum((tt - evt("cover")) / 0.2, (evt("release") - tt) / 0.2), 0, 1)
-    rt[-int(0.02 * SR):] *= np.linspace(1, 0, int(0.02 * SR))
+    rt *= 1 - 0.5 * np.clip((tt - t_cut) / 0.05, 0, 1)
+    rt *= 1 - np.clip((tt - t_end) / 0.3, 0, 1)
     put(amb, rt, 0.0)
 
     # the tap behind the door
     for k, (t, g, cut) in enumerate(drips()):
         put(sfx, plink(100 + k, cutoff=cut), t, g)
-    put(sfx, plink(7), t_cut + LAST_DRIP, 0.6)  # ...and in the dark, it is still dripping
+    put(sfx, plink(7), t_cut + LAST_DRIP, 0.55)  # ...and in the dark, it is still dripping
+    put(sfx, breath(), t_cut + LAST_DRIP + 0.5, 0.06)  # and she sleeps through it
 
     # bedding foley from the movement; a fed-up sigh as she lets go of the pillow
     put(sfx, rustle(motion_env(int(t_cut * SR))), 0.0, 0.32)
-    put(sfx, sigh(), evt("release") + 0.1, 0.3)
+    put(sfx, sigh(), evt("release") + 0.1, 0.2)
 
     # the phone
     put(sfx, clack(1), evt("pick"), 0.22)
@@ -354,7 +395,7 @@ def mix():
 
     # relief: four soft plucks as she settles; the dombra as the sound logo on the end card
     put(mus, phrase(), evt("down") + 0.35, 0.3)
-    put(sfx, AK.load(REPO / "public/sounds/dombra.wav"), t_cut + BLACK + 0.15, 0.9)
+    put(sfx, AK.load(REPO / "public/sounds/dombra.wav"), t_cut + BLACK + 0.15, 0.7)
 
     return norm((sfx + amb + mus)[: int(TOTAL * SR)], 0.95)
 
