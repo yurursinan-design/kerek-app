@@ -1,0 +1,56 @@
+# Downloads finished Kling clips for a promo video. Runs only for a commit on a claude/** branch
+# whose message starts with "[fetch] <list file>": the list file is JSON {"name": "url", ...}; each
+# URL is saved as <list dir>/clips/<name>.mp4 and committed back to the same branch. It runs on
+# GitHub because the cloud session can't reach Kling's file servers.
+name: Promo clips
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promo-fetch
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    if: startsWith(github.event.head_commit.message, '[fetch] ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: İndir
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          LIST=$(printf '%s\n' "$MSG" | head -1 | sed -n 's/^\[fetch\] \([^ ]*\).*/\1/p')
+          DIR="$(dirname "$LIST")/clips"
+          mkdir -p "$DIR"
+          python3 - "$LIST" "$DIR" <<'PY'
+          import json, sys, urllib.request, pathlib
+          items = json.load(open(sys.argv[1]))
+          out = pathlib.Path(sys.argv[2])
+          for name, url in items.items():
+              dest = out / f"{name}.mp4"
+              if dest.exists():
+                  continue
+              with urllib.request.urlopen(url, timeout=120) as r:
+                  dest.write_bytes(r.read())
+              print(name, dest.stat().st_size)
+          PY
+
+      - name: Kaydet
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add promo/*/clips
+          if git diff --cached --quiet; then echo "Yeni klip yok"; exit 0; fi
+          git commit -q -m "Add promo clips from Kling"
+          git push -q origin "HEAD:${GITHUB_REF_NAME}"
