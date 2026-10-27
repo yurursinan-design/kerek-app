@@ -155,6 +155,104 @@ export async function mirrorFile(bucket: string, name: string, target: MirrorTar
   });
 }
 
+// ---------------------------------------------------------------- full sync
+
+/** A copy target that can also list what it holds (for the full sync) */
+export interface SyncTarget extends MirrorTarget {
+  list(prefix: string): Promise<string[]>;
+}
+
+export interface SyncReport {
+  /** Per mirrored path pattern: documents in Firestore and copies in Kazakhstan after the sync */
+  collections: { pattern: string; firestore: number; kazakhstan: number }[];
+  files: { storage: number; kazakhstan: number };
+  copied: number;
+  removed: number;
+  /** Paths that could not be synced (the error is logged, the sync goes on) */
+  failed: string[];
+}
+
+const patternRegex = (pattern: string) => new RegExp(`^${pattern.replace(/\{[^}]+\}/g, '[^/]+')}$`);
+
+/** The mirrored pattern a document path belongs to, or null */
+export function patternOf(path: string): string | null {
+  return MIRRORED_PATHS.find((p) => patternRegex(p).test(path)) || null;
+}
+
+/** Paths of the documents that exist now for one pattern (top-level collection or subcollection) */
+async function existingPaths(pattern: string): Promise<string[]> {
+  const parts = pattern.split('/');
+  const db = getFirestore();
+  const snap =
+    parts.length === 2
+      ? await db.collection(parts[0]).select().get()
+      : await db.collectionGroup(parts[parts.length - 2]).select().get();
+  const rx = patternRegex(pattern);
+  return snap.docs.map((d) => d.ref.path).filter((p) => rx.test(p));
+}
+
+/** Runs the jobs with at most `limit` at a time */
+async function pool<T>(items: T[], limit: number, job: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await job(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
+/**
+ * Brings the whole Kazakhstan copy in line: every existing document and file is copied, and every
+ * copy whose original is gone is removed. The triggers above only see changes, so this also covers
+ * data from before they were deployed and events they missed (for example while billing was off).
+ */
+export async function syncAll(target: SyncTarget, bucket: string, concurrency = 8): Promise<SyncReport> {
+  const report: SyncReport = { collections: [], files: { storage: 0, kazakhstan: 0 }, copied: 0, removed: 0, failed: [] };
+  const run = async (name: string, sync: () => Promise<'put' | 'removed'>) => {
+    try {
+      if ((await sync()) === 'put') report.copied++;
+      else report.removed++;
+    } catch (err) {
+      console.error(`kzMirror sync: ${name}:`, err);
+      report.failed.push(name);
+    }
+  };
+
+  // Documents: copy what exists, then remove copies of documents that are gone
+  const existing = new Set<string>();
+  for (const pattern of MIRRORED_PATHS) for (const p of await existingPaths(pattern)) existing.add(p);
+  const keyToPath = (key: string) => key.replace(/^firestore\//, '').replace(/\.json$/, '');
+  const stale = (await target.list('firestore/')).map(keyToPath).filter((p) => patternOf(p) && !existing.has(p));
+  await pool([...existing, ...stale], concurrency, (p) => run(p, () => mirrorDocument(p, target)));
+
+  // Files: the same for Cloud Storage. A listing that fails (e.g. no permission) is reported
+  // and skipped so the document copy above still counts.
+  let names: Set<string> | null = null;
+  try {
+    const [files] = await getStorage().bucket(bucket).getFiles();
+    names = new Set(files.map((f) => f.name).filter((n) => !n.endsWith('/')));
+  } catch (err) {
+    console.error('kzMirror sync: listing files:', err instanceof Error ? err.message : err);
+    report.failed.push('storage (listing)');
+  }
+  if (names) {
+    const present = names;
+    const staleFiles = (await target.list('storage/')).map((k) => k.replace(/^storage\//, '')).filter((n) => !present.has(n));
+    await pool([...present, ...staleFiles], concurrency, (n) => run(`storage/${n}`, () => mirrorFile(bucket, n, target)));
+  }
+
+  // What each side holds afterwards
+  const copies = (await target.list('firestore/')).map(keyToPath);
+  for (const pattern of MIRRORED_PATHS) {
+    report.collections.push({
+      pattern,
+      firestore: [...existing].filter((p) => patternOf(p) === pattern).length,
+      kazakhstan: copies.filter((p) => patternOf(p) === pattern).length,
+    });
+  }
+  report.files = { storage: names ? names.size : -1, kazakhstan: (await target.list('storage/')).length };
+  return report;
+}
+
 // ---------------------------------------------------------------- triggers
 
 const OPTS = {

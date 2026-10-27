@@ -2,7 +2,8 @@
  * Copy of personal data in Kazakhstan (functions/src/kzMirror.ts), against the Firestore and
  * Storage emulators with the Kazakhstan bucket replaced by an in-memory one: a saved document
  * and a file are copied, a changed document overwrites its copy with the current state (also
- * when an old event comes late), and deleting removes the copy.
+ * when an old event comes late), and deleting removes the copy. The full sync copies documents the
+ * triggers never saw and removes copies whose original is gone.
  */
 process.env.GCLOUD_PROJECT = process.env.GCLOUD_PROJECT || process.env.VITE_FIREBASE_PROJECT_ID || 'demo-kerek';
 process.env.FIRESTORE_EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
@@ -108,6 +109,29 @@ async function main() {
   slow2.release();
   await slowRun2;
   assert(!kz.has(`firestore/${delPath}.json`), 'A slow write after a deletion does not bring the deleted copy back');
+
+  // 4c. Full sync: documents from before the triggers existed are copied, copies of deleted
+  //     documents are removed, other keys are left alone, and the report counts both sides
+  const listing = { ...target, list: async (prefix: string) => [...kz.keys()].filter((k) => k.startsWith(prefix)) };
+  const oldPath = `offers/off_sync_${tail}`;
+  const msgPath = `conversations/conv_sync_${tail}/messages/msg1`;
+  await db.doc(oldPath).set({ providerPhone: '+77015550000' });
+  await db.doc(msgPath).set({ text: 'Сәлем' });
+  kz.set(`firestore/offers/off_gone_${tail}.json`, { body: '{}', type: 'application/json' });
+  kz.set(`firestore/rateLimits/x_${tail}.json`, { body: '{}', type: 'application/json' });
+  const syncBucket = `${process.env.GCLOUD_PROJECT}.appspot.com`;
+  try {
+    const report = await m.syncAll(listing, syncBucket);
+    assert(kz.has(`firestore/${oldPath}.json`) && kz.has(`firestore/${msgPath}.json`), 'Full sync copies documents the triggers never saw (also subcollections)');
+    assert(!kz.has(`firestore/offers/off_gone_${tail}.json`), 'Full sync removes the copy of a document that is gone');
+    assert(kz.has(`firestore/rateLimits/x_${tail}.json`), 'Full sync leaves keys of collections it does not mirror alone');
+    const offers = report.collections.find((c: { pattern: string }) => c.pattern === 'offers/{id}');
+    assert(!!offers && offers.firestore === offers.kazakhstan && report.failed.length === 0, 'The sync report counts both sides', offers);
+  } catch (err: any) {
+    assert(false, 'Full sync runs against the emulators', String(err?.message || err));
+  }
+  await db.doc(oldPath).delete();
+  await db.doc(msgPath).delete();
 
   // 5. Every collection with personal data is copied
   for (const c of ['users', 'providers', 'requests', 'requestContacts', 'offers', 'reviews', 'conversations', 'appointments', 'notifications', 'reports', 'pushTokens', 'customerReviews', 'bans', 'reviewSubmissions', 'accountSignals', 'consents', 'adminLog']) {
