@@ -1,0 +1,116 @@
+{
+  "budget_usd": 3.0,
+  "ref_style": "Photorealistic character reference photo, natural skin texture, true-to-life colours, sharp focus on the face. Natural anatomy, correct hands. No text, no letters, no logos, no watermark.",
+  "scene_style": "Photorealistic cinematic film still, shot on ARRI Alexa with a 35mm lens, natural skin texture, subtle film grain, rich but natural colours. Vertical 9:16 frame: keep the main action in the middle of the frame and nothing important in the top 15%, where captions will go. Natural anatomy, correct hands, every person appears only once. No text, no letters, no logos, no watermark.",
+  "items": {
+    "ref_aje": {
+      "kind": "ref",
+      "prompt": "A Kazakh grandmother (aje) about 70 years old, short and sturdy, round kind face with deep laugh lines but a sharp, commanding gaze. White cotton headscarf tied at the back of the neck in the traditional Kazakh way, maroon velvet sleeveless kamzol vest with fine gold embroidery over a long dark floral dress, small gold earrings. She stands in a simple home hallway with a plain warm-beige wall, visible from head to knees, facing the camera with a calm, slightly amused expression. Soft window light."
+    },
+    "ref_erlan": {
+      "kind": "ref",
+      "prompt": "A Kazakh handyman about 30 years old, lean, short black fade haircut, clean-shaven, confident friendly smile. Grey work jacket with bright orange shoulder panels, grey work trousers, black tool belt with screwdrivers. He holds a yellow-and-black cordless drill pointing upward. Plain light-grey wall behind him, visible from head to knees, facing the camera. Soft even light."
+    },
+    "ref_askhat": {
+      "kind": "ref",
+      "prompt": "A Kazakh plumber about 55 years old, stocky, broad face, thick grey moustache, grey flat cap. Dark green work overalls with many pockets over a checked flannel shirt. He holds a red rubber plunger upright like a mace, with a proud, serious expression. Plain light-grey wall behind him, visible from head to knees, facing the camera. Soft even light."
+    },
+    "s1_kitchen": {
+      "kind": "scene",
+      "refs": [
+        [
+          "frames/s1_kitchen.jpg",
+          "the current version of this scene"
+        ]
+      ],
+      "prompt": "Edit image 1 and keep everything else exactly as it is: the same kitchen, the same grandmother sitting at the table in the same pose holding her tea bowl, the same light and the same camera angle. Change only the water: the chrome faucet at the sink has snapped off at its base, and a strong fountain of water shoots straight up out of the broken faucet, high into the air, splashing onto the tiles, the counter and the floor. It must be obvious that all the water comes out of the faucet. The broken-off spout lies in the sink. Remove the jet of water that now comes from the right edge of the counter."
+    },
+    "s2_decree": {
+      "kind": "scene",
+      "refs": [
+        [
+          "frames/s2_decree.jpg",
+          "the current version of this scene"
+        ]
+      ],
+      "prompt": "Edit image 1 and keep everything else exactly as it is: the same kitchen, the same grandmother standing and looking at her phone in the same pose, the same light and the same camera angle. Change only the water: the chrome faucet at the sink has snapped off at its base, and a strong fountain of water shoots straight up out of the broken faucet, high into the air, splashing onto the tiles, the counter and the floor. It must be obvious that all the water comes out of the faucet. The broken-off spout lies in the sink. The faucet and the fountain stay clearly visible to the left of the grandmother. Remove the spray that now comes from behind her."
+    },
+    "s3_riders": {
+      "kind": "scene",
+      "refs": [
+        [
+          "refs/nurlan.jpg",
+          "Nurlan"
+        ],
+        [
+          "frames/ref_erlan.jpg",
+          "Erlan"
+        ],
+        [
+          "frames/ref_askhat.jpg",
+          "Askhat"
+        ]
+      ],
+      "prompt": "Epic wide shot at sunset on the flat bank of the Syr Darya river near Kyzylorda: golden steppe, low saxaul shrubs, the wide river glittering on the left, a huge orange sky. Three riders on Kazakh steppe horses with traditional Kazakh saddles and decorated bridles gallop straight toward the camera side by side, kicking up golden dust. In the centre, Nurlan in his navy work jacket with reflective stripes raises a large red pipe wrench overhead like a sword. On the left, Erlan in his grey and orange work jacket raises his cordless drill. On the right, Askhat in his dark green overalls and grey flat cap raises his red rubber plunger like a mace. Heroic, serious faces. Low camera angle, telephoto lens, backlit by the sun, glowing dust."
+    },
+    "s4_streets": {
+      "kind": "scene",
+      "refs": [
+        [
+          "refs/nurlan.jpg",
+          "Nurlan"
+        ],
+        [
+          "frames/ref_erlan.jpg",
+          "Erlan"
+        ],
+        [
+          "frames/ref_askhat.jpg",
+          "Askhat"
+        ]
+      ],
+      "prompt": "Nurlan, Erlan and Askhat gallop on their three Kazakh steppe horses down a wide asphalt street between Soviet five-storey apartment blocks in Kyzylorda: beige and white panel buildings with glazed balconies, satellite dishes, tall poplar trees, warm late-evening light and long shadows. On the balconies, neighbours lean out in amazement: an auntie holding laundry, a boy pointing, an old man holding a cup of tea. A parked white Lada at the kerb. The riders are in the middle distance, coming toward the camera, holding their tools. Wide shot, camera at street level."
+    },
+    "s5_door": {
+      "kind": "scene",
+      "refs": [
+        [
+          "refs/nurlan.jpg",
+          "Nurlan"
+        ],
+        [
+          "frames/ref_erlan.jpg",
+          "Erlan"
+        ],
+        [
+          "frames/ref_askhat.jpg",
+          "Askhat"
+        ]
+      ],
+      "prompt": "View from inside a post-Soviet apartment hallway through the open front door (a padded brown leatherette door) onto the stairwell landing. Nurlan, Erlan and Askhat stand shoulder to shoulder on the landing facing the camera, heroic and a little dusty from the ride. Nurlan in the centre rests the red pipe wrench on his shoulder, Erlan on the left holds his cordless drill, Askhat on the right holds his red plunger upright. Stairwell with green-painted walls and a tiled floor, warm overhead light. Medium-wide symmetrical shot, camera at chest height."
+    },
+    "s6_tea": {
+      "kind": "scene",
+      "refs": [
+        [
+          "refs/nurlan.jpg",
+          "Nurlan"
+        ],
+        [
+          "frames/ref_aje.jpg",
+          "the grandmother"
+        ],
+        [
+          "frames/s1_kitchen.jpg",
+          "the kitchen"
+        ]
+      ],
+      "prompt": "Use the kitchen in the kitchen reference image as the exact same room: light wooden upper cabinets, white lower cabinets, beige wall tiles, a window with lace curtains on the left, a white gas stove with a kettle and a small table with a floral oilcloth. The kitchen is calm now: the faucet is fixed, the counter still wet, a few drops falling, a puddle on the floor. Nurlan stands by the sink holding the red pipe wrench down by his side and turns toward the grandmother, who holds out a white bowl (piyala) of milk tea to him with both hands and a warm, proud smile. Evening window light, cosy atmosphere. Medium shot, both of them visible from the waist up."
+    },
+    "s7_horses": {
+      "kind": "scene",
+      "refs": [],
+      "prompt": "A funny closing shot: the courtyard of a Soviet five-storey apartment block in Kyzylorda at dusk. Three saddled Kazakh steppe horses with traditional decorated bridles are tied to a children's playground fence next to a parked white Lada. One horse calmly eats flowers from a flower bed, another looks straight at the camera. Streetlights just switching on, purple evening sky. Wide shot."
+    }
+  }
+}

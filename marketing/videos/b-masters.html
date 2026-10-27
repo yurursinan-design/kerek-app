@@ -1,0 +1,155 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tapsyr — для мастеров</title>
+<link rel="stylesheet" href="stage.css">
+<style>
+  .photo { position: absolute; inset: 0; background: url(../../public/img/photo/role_master.webp) center 30% / cover; }
+  .shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(11, 46, 68, .15) 20%, rgba(11, 46, 68, .92) 75%); }
+  #intro { top: 1180px; }
+  .job { display: flex; align-items: center; gap: 22px; padding: 26px 28px; background: #fff; border-radius: 30px; margin-top: 18px; box-shadow: 0 2px 0 var(--line); }
+  .job i { flex: none; width: 84px; height: 84px; border-radius: 24px; display: grid; place-items: center; font-style: normal; font-weight: 800; font-size: 34px; color: #fff; }
+  .job .who b { font-size: 34px; }
+  .new { padding: 6px 14px; border-radius: 999px; background: var(--gold); color: var(--ink); font-weight: 800; font-size: 22px; }
+  .detail { position: absolute; left: 0; right: 0; top: 150px; bottom: 0; padding: 34px 36px; background: var(--paper); }
+  .detail h3 { font-size: 40px; font-weight: 800; line-height: 1.15; }
+  .detail .meta { margin-top: 12px; font-size: 28px; color: var(--mute); }
+  .detail .desc { margin-top: 26px; font-size: 32px; line-height: 1.35; }
+  .field { margin-top: 36px; padding: 26px 30px; border-radius: 28px; background: #fff; border: 3px solid var(--sky); font-size: 52px; font-weight: 800; }
+  .field small { display: block; font-size: 26px; color: var(--mute); font-weight: 700; margin-bottom: 6px; }
+  .btn { margin-top: 30px; padding: 30px; border-radius: 28px; background: var(--sky); color: #fff; text-align: center; font-weight: 800; font-size: 36px; }
+  .done { position: absolute; left: 0; right: 0; top: 150px; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 60px 120px; background: #fff; }
+  .done .ok { width: 180px; height: 180px; border-radius: 50%; background: var(--green); display: grid; place-items: center; }
+  .done h3 { margin-top: 40px; font-size: 48px; font-weight: 800; line-height: 1.12; }
+  .done p { margin-top: 18px; font-size: 32px; color: var(--mute); line-height: 1.35; }
+  .done .call { margin-top: 44px; padding: 26px 60px; border-radius: 999px; background: var(--green); color: #fff; font-weight: 800; font-size: 36px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="photo" id="photo"></div>
+  <div class="shade" id="shade"></div>
+  <div class="hero" id="intro"></div>
+  <div id="caps"></div>
+  <div class="phone" id="phone">
+    <div class="app-head"><img src="../../public/icon-512.png" alt=""><span class="wm">Tapsyr</span><span class="pill" id="city"></span></div>
+    <div class="scroll"><div class="label" id="listLabel"></div><div id="jobs"></div></div>
+    <div class="detail" id="detail">
+      <h3 id="dTitle"></h3>
+      <div class="meta" id="dMeta"></div>
+      <div class="desc" id="dDesc"></div>
+      <div class="field"><small id="fLabel"></small><span id="fPrice"></span><span class="caret" id="caret"></span></div>
+      <div class="btn" id="btn"></div>
+    </div>
+    <div class="done" id="done">
+      <div class="ok"><svg width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+      <h3 id="doneTitle"></h3>
+      <p id="doneText"></p>
+      <div class="call" id="call"></div>
+    </div>
+  </div>
+</div>
+<script src="stage.js"></script>
+<script>
+const { p, E, lang, $, vis, captions, type, endCard } = STAGE;
+const T = {
+  kz: {
+    intro: 'Сіз шеберсіз бе?',
+    caps: ['Жаныңыздағы тапсырыстар өзі келеді', 'Бағаңызды өзіңіз ұсынасыз', 'Клиент таңдаса — бірден хабарласасыз'],
+    city: 'Қызылорда',
+    listLabel: 'Жаңа тапсырыстар',
+    jobs: [['Э', '#0284c7', 'Розетканы ауыстыру', '1,2 км · 5 мин бұрын'], ['К', '#0891b2', 'Кондиционер орнату', '3 км · 12 мин бұрын'], ['С', '#7c3aed', 'Су жылытқышты жөндеу', '800 м · 20 мин бұрын']],
+    isNew: 'Жаңа',
+    dTitle: 'Розетканы ауыстыру',
+    dMeta: 'Қызылорда · 1,2 км · бүгін кешке',
+    dDesc: 'Ас үйдегі розетка жұмыс істемейді, ауыстыру керек.',
+    fLabel: 'Сіздің бағаңыз',
+    price: '6 000 ₸',
+    btn: 'Ұсыныс жіберу',
+    sent: 'Жіберілді ✓',
+    doneTitle: 'Клиент сізді таңдады',
+    doneText: 'Клиенттің нөмірі ашылды. Қоңырау шалып, уақытты келісіңіз.',
+    call: 'Қоңырау шалу',
+    tag: 'Тіркелу тегін. Комиссия жоқ.',
+    small: 'Шеберлерге арналған',
+  },
+  ru: {
+    intro: 'Вы мастер?',
+    caps: ['Заказы рядом с вами приходят сами', 'Свою цену предлагаете вы', 'Клиент выбрал — сразу звоните'],
+    city: 'Кызылорда',
+    listLabel: 'Новые заказы',
+    jobs: [['Э', '#0284c7', 'Заменить розетку', '1,2 км · 5 мин назад'], ['К', '#0891b2', 'Установить кондиционер', '3 км · 12 мин назад'], ['В', '#7c3aed', 'Починить водонагреватель', '800 м · 20 мин назад']],
+    isNew: 'Новый',
+    dTitle: 'Заменить розетку',
+    dMeta: 'Кызылорда · 1,2 км · сегодня вечером',
+    dDesc: 'На кухне не работает розетка, нужно заменить.',
+    fLabel: 'Ваша цена',
+    price: '6 000 ₸',
+    btn: 'Отправить предложение',
+    sent: 'Отправлено ✓',
+    doneTitle: 'Клиент выбрал вас',
+    doneText: 'Номер клиента открыт. Позвоните и договоритесь о времени.',
+    call: 'Позвонить',
+    tag: 'Регистрация бесплатная. Без комиссии.',
+    small: 'Для мастеров',
+  },
+}[lang];
+
+window.DURATION = 15;
+const stage = $('stage');
+const set = (id, v) => { $(id).textContent = v; };
+set('intro', T.intro); set('city', T.city); set('listLabel', T.listLabel); set('dTitle', T.dTitle); set('dMeta', T.dMeta);
+set('dDesc', T.dDesc); set('fLabel', T.fLabel); set('doneTitle', T.doneTitle); set('doneText', T.doneText); set('call', T.call);
+const jobs = T.jobs.map(([letter, color, title, meta]) => {
+  const d = document.createElement('div');
+  d.className = 'job';
+  d.innerHTML = `<i></i><div class="who"><b></b><span></span></div><span class="new"></span>`;
+  d.querySelector('i').textContent = letter;
+  d.querySelector('i').style.background = color;
+  d.querySelector('b').textContent = title;
+  d.querySelector('.who span').textContent = meta;
+  d.querySelector('.new').textContent = T.isNew;
+  $('jobs').appendChild(d);
+  return d;
+});
+const caps = captions($('caps'), [
+  { at: 2.5, out: 5.9, text: T.caps[0] },
+  { at: 6.1, out: 9.0, text: T.caps[1] },
+  { at: 9.2, out: 11.8, text: T.caps[2] },
+]);
+const end = endCard(stage, { tag: T.tag, small: T.small });
+
+window.seek = (t) => {
+  // Intro over the master's photo, which then dims away
+  const photoOut = p(t, 2.0, 0.6);
+  $('photo').style.opacity = String(1 - photoOut);
+  $('photo').style.transform = `scale(${1.08 - 0.08 * p(t, 0, 2.6)})`;
+  $('shade').style.opacity = String(1 - photoOut);
+  vis($('intro'), t, -0.5, 2.0, { dy: 60, scale: 0.08 });
+  caps(t);
+
+  // New jobs arrive
+  vis($('phone'), t, 2.4, 12.0, { dy: 700, dur: 0.7 });
+  jobs.forEach((j, i) => vis(j, t, 3.1 + i * 0.75, Infinity, { dx: 140, dy: 0, dur: 0.5, ease: E.back }));
+
+  // The first one opens: price typed, offer sent
+  vis($('detail'), t, 6.0, Infinity, { dx: 300, dy: 0, dur: 0.45 });
+  type($('fPrice'), $('caret'), T.price, t, 6.8, 0.8);
+  const press = p(t, 8.1, 0.25);
+  $('btn').style.transform = `scale(${1 - 0.06 * Math.sin(Math.PI * press)})`;
+  $('btn').textContent = t >= 8.3 ? T.sent : T.btn;
+  $('btn').style.background = t >= 8.3 ? 'var(--green)' : 'var(--sky)';
+
+  // Chosen
+  vis($('done'), t, 9.2, Infinity, { dy: 0, scale: 0.08, dur: 0.45 });
+  const ok = $('done').querySelector('.ok');
+  ok.style.transform = `scale(${0.3 + 0.7 * E.back(p(t, 9.4, 0.5))})`;
+  vis($('call'), t, 10.2, Infinity, { dy: 30, ease: E.back });
+
+  end(t, 12.0);
+};
+window.seek(0);
+</script>
+</body>
+</html>

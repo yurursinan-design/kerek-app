@@ -5,6 +5,9 @@
 #            afterwards), and how did parseServiceRequest answer in the last 14 days
 #   keys     which APIs, websites and Android apps each Google API key is limited to (never the key
 #            itself), and whether the Gemini (Generative Language) API is switched on in the project
+#   kzmirror is the Kazakhstan copy of personal data live: the mirror functions and their secrets,
+#            their runs and errors in the last 14 days, and how many documents and files Firestore,
+#            Cloud Storage and the Kazakhstan bucket each hold (counts and dates only, no data)
 # Nothing is deployed or changed.
 name: Kontrol
 
@@ -32,7 +35,7 @@ jobs:
           MSG: ${{ github.event.head_commit.message }}
         run: |
           mode=$(printf '%s\n' "$MSG" | head -n1 | awk '{print $2}' | tr -cd 'a-z')
-          case "$mode" in gemini|keys) ;; *) echo "Bilinmeyen kontrol: $mode (gemini, keys)"; exit 1 ;; esac
+          case "$mode" in gemini|keys|kzmirror) ;; *) echo "Bilinmeyen kontrol: $mode (gemini, keys, kzmirror)"; exit 1 ;; esac
           echo "Kontrol: $mode"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
 
@@ -124,3 +127,59 @@ jobs:
           try "Android anahtarı, başlıksız" "$ANDROID_KEY"
           try "Android anahtarı, uygulama gibi davranarak" "$ANDROID_KEY" -H 'X-Android-Package: kerek.kz.app'
           rm -f out.json
+
+      - name: Kazakistan kopyası fonksiyonları ve sırları
+        if: steps.mode.outputs.mode == 'kzmirror'
+        continue-on-error: true
+        run: |
+          gcloud functions list --project "$FIREBASE_PROJECT_ID" --regions asia-south1 \
+            --filter='name~kzMirror' --format='table(name.basename(),state,updateTime)'
+          for s in KZ_STORAGE_KEY_ID KZ_STORAGE_SECRET; do
+            echo "$s:"; gcloud secrets versions list "$s" --project "$FIREBASE_PROJECT_ID" --format='table(name,state,createTime)'
+          done
+
+      - name: Kazakistan kopyası son 14 gün
+        if: steps.mode.outputs.mode == 'kzmirror'
+        continue-on-error: true
+        run: |
+          base='resource.type="cloud_run_revision" AND resource.labels.service_name=~"^kzmirror"'
+          echo "Çalışma sayısı (servis, sayı):"
+          gcloud logging read "$base AND httpRequest.status>0" --project "$FIREBASE_PROJECT_ID" --freshness=14d \
+            --limit=5000 --format='value(resource.labels.service_name,httpRequest.status)' | sort | uniq -c
+          echo "Hatalar (son 15, kısaltılmış):"
+          gcloud logging read "$base AND severity>=ERROR" --project "$FIREBASE_PROJECT_ID" --freshness=14d \
+            --limit=15 --format='value(timestamp,resource.labels.service_name,textPayload,jsonPayload.message)' | cut -c1-220
+
+      - name: Firestore, Cloud Storage ve Kazakistan kovası sayıları
+        if: steps.mode.outputs.mode == 'kzmirror'
+        continue-on-error: true
+        env:
+          KZ_BUCKET: kerek-kz-data
+          KZ_ENDPOINT: https://storage.yandexcloud.kz
+          APP_BUCKET: kerek-9d153.firebasestorage.app
+        run: |
+          AWS_ACCESS_KEY_ID=$(gcloud secrets versions access latest --secret KZ_STORAGE_KEY_ID --project "$FIREBASE_PROJECT_ID")
+          AWS_SECRET_ACCESS_KEY=$(gcloud secrets versions access latest --secret KZ_STORAGE_SECRET --project "$FIREBASE_PROJECT_ID")
+          echo "::add-mask::$AWS_ACCESS_KEY_ID"; echo "::add-mask::$AWS_SECRET_ACCESS_KEY"
+          export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION=kz1
+          aws s3 ls "s3://$KZ_BUCKET/" --recursive --endpoint-url "$KZ_ENDPOINT" > kz.txt
+          TOKEN=$(gcloud auth print-access-token); echo "::add-mask::$TOKEN"
+          count() {  # number of documents in a collection (group) according to Firestore
+            curl -sS -X POST "https://firestore.googleapis.com/v1/projects/$FIREBASE_PROJECT_ID/databases/(default)/documents:runAggregationQuery" \
+              -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+              -d "{\"structuredAggregationQuery\":{\"structuredQuery\":{\"from\":[{\"collectionId\":\"$1\",\"allDescendants\":$2}]},\"aggregations\":[{\"alias\":\"n\",\"count\":{}}]}}" \
+              | jq -r '.[0].result.aggregateFields.n.integerValue // ("hata: " + (.[0].error.message // .error.message // "?"))'
+          }
+          printf '%-20s %10s %10s  %s\n' Koleksiyon Firestore Kazakistan 'En yeni kopya'
+          for c in users providers requests requestContacts offers reviews conversations appointments notifications \
+                   reports pushTokens customerReviews bans reviewSubmissions accountSignals consents adminLog; do
+            kz=$(awk -v p="firestore/$c/" 'index($4,p)==1 && split(substr($4,length(p)+1),a,"/")==1' kz.txt | wc -l)
+            last=$(awk -v p="firestore/$c/" 'index($4,p)==1 && split(substr($4,length(p)+1),a,"/")==1 {print $1" "$2}' kz.txt | sort | tail -1)
+            printf '%-20s %10s %10s  %s\n' "$c" "$(count "$c" false)" "$kz" "$last"
+          done
+          msgs=$(grep -cE ' firestore/conversations/[^/]+/messages/' kz.txt || true)
+          printf '%-20s %10s %10s\n' 'messages (sohbet)' "$(count messages true)" "$msgs"
+          files=$(gcloud storage ls "gs://$APP_BUCKET/**" 2>/dev/null | grep -vc '/$' || true)
+          printf '%-20s %10s %10s  %s\n' 'Dosyalar' "$files" "$(grep -c ' storage/' kz.txt || true)" \
+            "$(grep ' storage/' kz.txt | awk '{print $1" "$2}' | sort | tail -1)"
+          rm -f kz.txt

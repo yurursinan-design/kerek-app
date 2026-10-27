@@ -28,6 +28,8 @@ export { moderateReviewSubmission, decideReview, reviewerPhone } from './reviewM
 export { cleanupAccountData } from './signals';
 // Request file links stop working when the request's audience changes; see fileLinks.ts
 export { renewRequestFileLinks } from './fileLinks';
+// The WhatsApp assistant demo page (/demo/); see demo/index.ts
+export { demoStart, demoSend, demoOwner } from './demo';
 // Uploaded files must be what their type says; photos lose hidden metadata; see uploadCheck.ts
 export { checkUploadedFile } from './uploadCheck';
 // The operator's history and the evidence of a reported conversation; see adminLog.ts

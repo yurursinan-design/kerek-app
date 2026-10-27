@@ -1,0 +1,119 @@
+@import "tailwindcss" source(".");
+
+@theme {
+  --font-sans: "Onest", ui-sans-serif, system-ui, sans-serif;
+  --font-mark: "Unbounded", "Onest", sans-serif;
+
+  /* Jauap */
+  --color-ink: #1c1b3a;
+  --color-brand: #3b34c9;
+  --color-brand-soft: #e8e7fb;
+  --color-saffron: #ffb321;
+  --color-saffron-soft: #fff3d6;
+  --color-paper: #f3f3f7;
+  --color-line: #dcdcea;
+  --color-mute: #66658a;
+
+  /* The customer's WhatsApp screen */
+  --color-wa: #008069;
+  --color-wa-green: #00a884;
+  --color-wa-bg: #efeae2;
+  --color-wa-out: #d9fdd3;
+  --color-wa-text: #111b21;
+  --color-wa-meta: #667781;
+  --color-wa-tick: #53bdeb;
+  --color-wa-btn: #027eb5;
+  --color-wa-note: #ffeecd;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Chat wallpaper: faint dots instead of WhatsApp's own drawing */
+.wa-wall {
+  background-color: var(--color-wa-bg);
+  background-image: radial-gradient(rgb(0 0 0 / 0.045) 1px, transparent 1.2px);
+  background-size: 14px 14px;
+}
+
+/* Bubble tails */
+.tail-in::before,
+.tail-out::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 10px;
+  height: 13px;
+}
+.tail-in::before {
+  left: -7px;
+  background: #fff;
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+}
+.tail-out::before {
+  right: -7px;
+  background: var(--color-wa-out);
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+.typing-dot {
+  animation: typing 1.2s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes typing {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+
+/* The one orchestrated moment: the hero answer arrives after a short "typing" */
+.hero-typing {
+  animation: hero-typing 1.4s ease forwards;
+}
+.hero-answer {
+  opacity: 0;
+  animation: hero-answer 0.35s ease 1.4s forwards;
+}
+@keyframes hero-typing {
+  0%, 85% { opacity: 1; }
+  100% { opacity: 0; height: 0; margin: 0; padding: 0; }
+}
+@keyframes hero-answer {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.flash {
+  animation: flash 1.6s ease;
+}
+@keyframes flash {
+  0%, 30% { box-shadow: 0 0 0 3px var(--color-saffron); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.rec-pulse {
+  animation: rec 1s infinite;
+}
+@keyframes rec {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-typing { animation: none; display: none; }
+  .hero-answer { animation: none; opacity: 1; }
+  .typing-dot, .rec-pulse, .flash { animation: none; }
+}
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+button, a, input, textarea { touch-action: manipulation; }
+:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }
