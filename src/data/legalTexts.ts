@@ -24,7 +24,7 @@ export const LEGAL_OPERATOR = {
   // The registered address from the notification, in each language
   addressKz: 'Қызылорда қ., Сәлихитдин Айтбаев к-сі, 29-үй',
   addressRu: 'г. Кызылорда, ул. Салихитдин Айтбаев, д. 29',
-  email: 'support.tapsyrapp@gmail.com',
+  email: 'support@tapsyrapp.com',
   whatsapp: '+7 747 969 38 52',
 };
 
