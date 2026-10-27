@@ -55,7 +55,8 @@ async function main() {
   }
   const filesOk = report.files.storage === report.files.kazakhstan;
   if (!filesOk) mismatch++;
-  console.log(`${pad('Dosyalar', 36)}${pad(report.files.storage, 11)}${report.files.kazakhstan}${filesOk ? '' : '  ← tutmuyor'}`);
+  const storage = report.files.storage < 0 ? 'okunamadı' : report.files.storage;
+  console.log(`${pad('Dosyalar', 36)}${pad(storage, 11)}${report.files.kazakhstan}${filesOk ? '' : '  ← tutmuyor'}`);
   console.log(`\nYazılan kopya: ${report.copied}, silinen kopya: ${report.removed}, hata: ${report.failed.length}`);
   if (report.failed.length) console.log(`İlk hatalar: ${report.failed.slice(0, 5).join(', ')}`);
   process.exit(report.failed.length || mismatch ? 1 : 0);

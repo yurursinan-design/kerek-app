@@ -224,11 +224,21 @@ export async function syncAll(target: SyncTarget, bucket: string, concurrency = 
   const stale = (await target.list('firestore/')).map(keyToPath).filter((p) => patternOf(p) && !existing.has(p));
   await pool([...existing, ...stale], concurrency, (p) => run(p, () => mirrorDocument(p, target)));
 
-  // Files: the same for Cloud Storage
-  const [files] = await getStorage().bucket(bucket).getFiles();
-  const names = new Set(files.map((f) => f.name).filter((n) => !n.endsWith('/')));
-  const staleFiles = (await target.list('storage/')).map((k) => k.replace(/^storage\//, '')).filter((n) => !names.has(n));
-  await pool([...names, ...staleFiles], concurrency, (n) => run(`storage/${n}`, () => mirrorFile(bucket, n, target)));
+  // Files: the same for Cloud Storage. A listing that fails (e.g. no permission) is reported
+  // and skipped so the document copy above still counts.
+  let names: Set<string> | null = null;
+  try {
+    const [files] = await getStorage().bucket(bucket).getFiles();
+    names = new Set(files.map((f) => f.name).filter((n) => !n.endsWith('/')));
+  } catch (err) {
+    console.error('kzMirror sync: listing files:', err instanceof Error ? err.message : err);
+    report.failed.push('storage (listing)');
+  }
+  if (names) {
+    const present = names;
+    const staleFiles = (await target.list('storage/')).map((k) => k.replace(/^storage\//, '')).filter((n) => !present.has(n));
+    await pool([...present, ...staleFiles], concurrency, (n) => run(`storage/${n}`, () => mirrorFile(bucket, n, target)));
+  }
 
   // What each side holds afterwards
   const copies = (await target.list('firestore/')).map(keyToPath);
@@ -239,7 +249,7 @@ export async function syncAll(target: SyncTarget, bucket: string, concurrency = 
       kazakhstan: copies.filter((p) => patternOf(p) === pattern).length,
     });
   }
-  report.files = { storage: names.size, kazakhstan: (await target.list('storage/')).length };
+  report.files = { storage: names ? names.size : -1, kazakhstan: (await target.list('storage/')).length };
   return report;
 }
 
