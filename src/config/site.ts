@@ -10,6 +10,9 @@ export const PUBLIC_SITE_URL = 'https://tapsyr.web.app';
  */
 export const PLAY_STORE_URL = '';
 
+/** The app's App Store page, likewise empty until the iPhone app is published */
+export const APP_STORE_URL = '';
+
 /**
  * The project's first addresses, from before the app was called Tapsyr. They still serve the
  * same app (old shared links, the privacy policy link in Google Play), but opening the app there

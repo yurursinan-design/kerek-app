@@ -1,29 +1,28 @@
 /**
- * The website's own pages: a landing page in Kazakhstan's two languages (/ in Kazakh, /ru/ in
- * Russian) that explains Tapsyr and links to the app. The web version of the app moves to /app/.
+ * The website: an information page in Kazakhstan's two languages (/ in Kazakh, /ru/ in Russian)
+ * that explains Tapsyr and says the app is coming to Google Play and the App Store. Until then the
+ * website has no app in it: website builds drop the web app, and /app/ redirects to the home page
+ * (firebase.json).
  *
  * Only builds for the website do this (TAPSYR_SITE=1, set by the deploy and preview workflows).
  * The phone app is built from the same dist folder and must keep the app at index.html.
  *
  * Plain HTML and CSS, no framework. The site's content security policy allows scripts only from
- * the site itself, so the little behaviour there is (old share links, the remembered language)
- * lives in /landing.js.
+ * the site itself, so the little behaviour there is (the remembered language) lives in /landing.js.
  */
 import fs from 'fs';
 import path from 'path';
 import type { Plugin, ResolvedConfig } from 'vite';
 import { LEGAL_OPERATOR } from '../src/data/legalTexts';
-import { PLAY_STORE_URL } from '../src/config/site';
+import { APP_STORE_URL, PLAY_STORE_URL } from '../src/config/site';
 
 type Lang = 'kz' | 'ru';
 
 const esc = (text: string) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-// Keys the app reads from localStorage (src/App.tsx), so the landing page can hand over the
-// language and, for masters, the provider side of the app
+// Key the app reads from localStorage (src/App.tsx) for the language; the website keeps using it
 const APP_LANGUAGE_KEY = 'kerek_language_v1';
-const APP_MODE_KEY = 'kerek_app_mode_v1';
 
 const CATEGORIES: { photo: string; kz: string; ru: string }[] = [
   { photo: 'g_plumbing', kz: 'Сантехник', ru: 'Сантехник' },
@@ -47,9 +46,13 @@ interface Copy {
   otherLangLabel: string;
   h1: string;
   lead: string;
-  openWeb: string;
+  soon: string;
+  notify: string;
+  notifyText: string;
   playSoon: string;
   playGet: string;
+  appStoreSoon: string;
+  appStoreGet: string;
   exampleLabel: string;
   request: string;
   chips: string[];
@@ -65,12 +68,12 @@ interface Copy {
   mastersText: string;
   mastersPoints: string[];
   mastersCta: string;
+  mastersCtaText: string;
   faqTitle: string;
   faq: { q: string; a: string }[];
   contactsTitle: string;
   docsLabel: string;
   legal: { privacy: string; terms: string; deletion: string };
-  address: string;
 }
 
 const COPY: Record<Lang, Copy> = {
@@ -83,9 +86,13 @@ const COPY: Record<Lang, Copy> = {
     h1: 'Не істеу керегін жазыңыз. Шеберлер өздері ұсыныс жібереді.',
     lead:
       'Tapsyr Қызылордадағы шеберлерді табуға көмектеседі: сантехник, электрик, тазалау, техника жөндеу, сұлулық және басқа қызметтер. Қосымша тегін.',
-    openWeb: 'Сайтта ашу',
+    soon: 'Tapsyr қосымшасы жақында Google Play мен App Store-да шығады. Шыққан күні хабарлауымызды қаласаңыз, WhatsApp-қа жазыңыз.',
+    notify: 'Шыққанда хабарлау',
+    notifyText: 'Сәлеметсіз бе! Tapsyr қосымшасы шыққанда хабарлаңызшы.',
     playSoon: 'Google Play-де жақында',
     playGet: 'Google Play-ден жүктеу',
+    appStoreSoon: 'App Store-да жақында',
+    appStoreGet: 'App Store-дан жүктеу',
     exampleLabel: 'Өтінім мысалы',
     request: 'Ас үйдегі кран ағып тұр. Ертең таңертең келіп жөндей аласыз ба?',
     chips: ['Сантехник', 'Ертең таңертең', 'Қызылорда'],
@@ -118,7 +125,8 @@ const COPY: Record<Lang, Copy> = {
       'Жұмыстарыңыздың фотосын профильге қосасыз',
       'Әр жұмыстан кейін пікір жинап, рейтингіңізді көтересіз',
     ],
-    mastersCta: 'Шебер ретінде бастау',
+    mastersCta: 'Шебер ретінде алдын ала тіркелу',
+    mastersCtaText: 'Сәлеметсіз бе! Мен шебермін, Tapsyr-ға қосылғым келеді.',
     faqTitle: 'Жиі қойылатын сұрақтар',
     faq: [
       {
@@ -127,13 +135,15 @@ const COPY: Record<Lang, Copy> = {
       },
       { q: 'Қай қалада жұмыс істейді?', a: 'Қазір Қызылордада. Басқа қалаларға кейінірек шығамыз.' },
       { q: 'Қалай кіремін?', a: 'Телефон нөміріңіз арқылы: WhatsApp-қа келген кодты енгізесіз. Құпиясөз керек емес.' },
-      { q: 'iPhone-да қолдануға бола ма?', a: 'Иә, сайт арқылы: tapsyrapp.com/app. iPhone-ға арналған қосымша кейінірек шығады.' },
+      {
+        q: 'Қосымша қашан шығады?',
+        a: 'Жақында: Android үшін Google Play-де, iPhone үшін App Store-да. Шыққан күні хабарлауымызды қаласаңыз, WhatsApp-қа немесе поштаға жазыңыз.',
+      },
       { q: 'Аккаунтымды қалай жоямын?', a: 'Қосымшадағы «Профиль» бөлімінен немесе <a href="/delete-account/">осы бет</a> арқылы.' },
     ],
     contactsTitle: 'Байланыс',
     docsLabel: 'Құжаттар',
     legal: { privacy: 'Құпиялылық саясаты', terms: 'Пайдалану шарттары', deletion: 'Аккаунтты жою' },
-    address: LEGAL_OPERATOR.addressKz,
   },
   ru: {
     htmlLang: 'ru',
@@ -144,9 +154,13 @@ const COPY: Record<Lang, Copy> = {
     h1: 'Опишите, что нужно сделать. Мастера сами пришлют предложения.',
     lead:
       'Tapsyr помогает найти мастера в Кызылорде: сантехника, электрика, уборка, ремонт техники, красота и другие услуги. Приложение бесплатное.',
-    openWeb: 'Открыть на сайте',
+    soon: 'Приложение Tapsyr скоро выйдет в Google Play и App Store. Если хотите узнать о запуске первыми, напишите нам в WhatsApp.',
+    notify: 'Сообщить о запуске',
+    notifyText: 'Здравствуйте! Сообщите, пожалуйста, когда выйдет приложение Tapsyr.',
     playSoon: 'Скоро в Google Play',
     playGet: 'Скачать в Google Play',
+    appStoreSoon: 'Скоро в App Store',
+    appStoreGet: 'Скачать в App Store',
     exampleLabel: 'Пример заявки',
     request: 'На кухне течёт кран. Сможете прийти завтра утром и починить?',
     chips: ['Сантехник', 'Завтра утром', 'Кызылорда'],
@@ -179,7 +193,8 @@ const COPY: Record<Lang, Copy> = {
       'Добавляете фото своих работ в профиль',
       'Собираете отзывы после каждого заказа и поднимаете рейтинг',
     ],
-    mastersCta: 'Начать как мастер',
+    mastersCta: 'Записаться как мастер',
+    mastersCtaText: 'Здравствуйте! Я мастер, хочу подключиться к Tapsyr.',
     faqTitle: 'Частые вопросы',
     faq: [
       {
@@ -188,13 +203,15 @@ const COPY: Record<Lang, Copy> = {
       },
       { q: 'В каких городах работает?', a: 'Сейчас в Кызылорде. В другие города выйдем позже.' },
       { q: 'Как войти?', a: 'По номеру телефона: введите код, который придёт в WhatsApp. Пароль не нужен.' },
-      { q: 'Можно пользоваться на iPhone?', a: 'Да, через сайт: tapsyrapp.com/app. Приложение для iPhone появится позже.' },
+      {
+        q: 'Когда выйдет приложение?',
+        a: 'Скоро: в Google Play для Android и в App Store для iPhone. Если хотите узнать о запуске первыми, напишите нам в WhatsApp или на почту.',
+      },
       { q: 'Как удалить аккаунт?', a: 'В приложении в разделе «Профиль» или на <a href="/delete-account/">этой странице</a>.' },
     ],
     contactsTitle: 'Контакты',
     docsLabel: 'Документы',
     legal: { privacy: 'Политика конфиденциальности', terms: 'Условия использования', deletion: 'Удаление аккаунта' },
-    address: LEGAL_OPERATOR.addressRu,
   },
 };
 
@@ -236,6 +253,8 @@ a{color:var(--sky)}
 a.play{color:var(--ink)}
 a.play:hover{border-color:var(--sky)}
 .play svg{width:20px;height:20px;flex:none}
+.soon{max-width:46ch;margin:0 0 20px;padding:12px 16px;border-radius:14px;background:var(--gold-soft);color:var(--ink);font-size:16px}
+.stores{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px}
 
 .scene{position:relative;max-width:520px}
 .scene .photo{border-radius:28px;aspect-ratio:1/1;object-fit:cover;width:100%}
@@ -328,6 +347,14 @@ footer nav a{display:block;padding:3px 0}
 const PLAY_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4.6 2.3c-.3.3-.5.8-.5 1.4v16.6c0 .6.2 1.1.5 1.4l9.3-9.7-9.3-9.7Zm10.7 8.2 2.8-2.9-11-6.4c-.4-.2-.8-.3-1.1-.2l9.3 9.5Zm0 3-9.3 9.5c.3.1.7 0 1.1-.2l11-6.4-2.8-2.9Zm4.3-4.6-3 1.8 3.1 3.2 3-1.8c.9-.5.9-1.9 0-2.4l-3.1-.8Z"/></svg>';
 
+const APPLE_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.1 1-4 2.4-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.2-1.2 3-2.4.9-1.4 1.3-2.7 1.3-2.8 0 0-2.5-1-2.5-3.9ZM14 5.5c.7-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1.1.1 2.1-.6 2.8-1.4Z"/></svg>';
+
+const store = (url: string, icon: string, get: string, soon: string) =>
+  url
+    ? `<a class="play" href="${url}" rel="noopener">${icon}${esc(get)}</a>`
+    : `<span class="play" aria-disabled="true">${icon}${esc(soon)}</span>`;
+
 export function renderLandingPage(lang: Lang): string {
   const c = COPY[lang];
   const other: Lang = lang === 'kz' ? 'ru' : 'kz';
@@ -335,10 +362,9 @@ export function renderLandingPage(lang: Lang): string {
   const otherHref = other === 'kz' ? '/' : '/ru/';
   const [h1First, ...h1Rest] = c.h1.split('. ');
   const h1 = h1Rest.length ? `${esc(h1First)}.<span>${esc(h1Rest.join('. '))}</span>` : esc(c.h1);
-  const play = PLAY_STORE_URL
-    ? `<a class="play" href="${PLAY_STORE_URL}" rel="noopener">${PLAY_ICON}${esc(c.playGet)}</a>`
-    : `<span class="play" aria-disabled="true">${PLAY_ICON}${esc(c.playSoon)}</span>`;
+  const stores = `${store(PLAY_STORE_URL, PLAY_ICON, c.playGet, c.playSoon)}\n${store(APP_STORE_URL, APPLE_ICON, c.appStoreGet, c.appStoreSoon)}`;
   const wa = LEGAL_OPERATOR.whatsapp.replace(/\D/g, '');
+  const waText = (text: string) => `https://wa.me/${wa}?text=${encodeURIComponent(text)}`;
 
   return `<!doctype html>
 <html lang="${c.htmlLang}" data-page-lang="${lang}">
@@ -377,9 +403,12 @@ export function renderLandingPage(lang: Lang): string {
 <div>
 <h1>${h1}</h1>
 <p class="lead">${esc(c.lead)}</p>
+<p class="soon">${esc(c.soon)}</p>
 <div class="ctas">
-<a class="btn btn-main" href="/app/" data-app>${esc(c.openWeb)}</a>
-${play}
+<a class="btn btn-main" href="${waText(c.notifyText)}" rel="noopener">${esc(c.notify)}</a>
+</div>
+<div class="stores">
+${stores}
 </div>
 </div>
 <div class="scene">
@@ -426,7 +455,7 @@ ${play}
 <h2 class="title" id="masters">${esc(c.mastersTitle)}</h2>
 <p>${esc(c.mastersText)}</p>
 <ul>${c.mastersPoints.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
-<a class="btn btn-main" href="/app/" data-app data-mode="provider">${esc(c.mastersCta)}</a>
+<a class="btn btn-main" href="${waText(c.mastersCtaText)}" rel="noopener">${esc(c.mastersCta)}</a>
 </div>
 <img src="/img/photo/role_master.webp" alt="" width="768" height="768" loading="lazy" decoding="async">
 </div>
@@ -443,7 +472,9 @@ ${c.faq.map((f) => `<details><summary>${esc(f.q)}</summary><p>${f.a}</p></detail
 <div>
 <a class="brand" href="${home}"><img src="/icon.svg" alt="" width="38" height="38">Tapsyr</a>
 <p class="op">${esc(LEGAL_OPERATOR.shortName)}</p>
-<p>${esc(c.address)}</p>
+<div class="stores">
+${stores}
+</div>
 </div>
 <div>
 <h2>${esc(c.contactsTitle)}</h2>
@@ -465,29 +496,25 @@ ${c.faq.map((f) => `<details><summary>${esc(f.q)}</summary><p>${f.a}</p></detail
 
 /** Behaviour of the landing pages; a separate file because the site's policy forbids inline scripts */
 export const LANDING_SCRIPT = `(function () {
-  var search = new URLSearchParams(location.search);
-  // Master profile links shared before the app moved to /app/ (tapsyrapp.com/?master=…)
-  if (search.has('master')) { location.replace('/app/' + location.search + location.hash); return; }
   var page = document.documentElement.getAttribute('data-page-lang');
   try {
     // Someone who chose Russian in the app or here before sees the Russian page
     if (page === 'kz' && localStorage.getItem('${APP_LANGUAGE_KEY}') === 'ru') { location.replace('/ru/' + location.hash); return; }
   } catch (e) {}
   document.addEventListener('click', function (event) {
-    var link = event.target && event.target.closest ? event.target.closest('a[data-lang], a[data-app]') : null;
+    var link = event.target && event.target.closest ? event.target.closest('a[data-lang]') : null;
     if (!link) return;
     try {
-      if (link.hasAttribute('data-lang')) localStorage.setItem('${APP_LANGUAGE_KEY}', link.getAttribute('data-lang'));
-      if (link.hasAttribute('data-app')) {
-        localStorage.setItem('${APP_LANGUAGE_KEY}', page);
-        if (link.getAttribute('data-mode')) localStorage.setItem('${APP_MODE_KEY}', link.getAttribute('data-mode'));
-      }
+      localStorage.setItem('${APP_LANGUAGE_KEY}', link.getAttribute('data-lang'));
     } catch (e) {}
   });
 })();
 `;
 
-/** Vite plugin: for website builds, put the landing pages at / and /ru/ and the app at /app/ */
+/** Files of the web app that a website build leaves out, so the site holds no app at all */
+const APP_ONLY = ['index.html', 'assets', 'manifest.webmanifest', 'sounds'];
+
+/** Vite plugin: for website builds, put the information pages at / and /ru/ and leave the app out */
 export function sitePages(): Plugin {
   let config: ResolvedConfig;
   return {
@@ -499,10 +526,8 @@ export function sitePages(): Plugin {
     closeBundle() {
       if (process.env.TAPSYR_SITE !== '1') return;
       const out = path.resolve(config.root, config.build.outDir);
-      const appIndex = path.join(out, 'index.html');
-      if (!fs.existsSync(appIndex)) throw new Error('site pages: the app build has no index.html');
-      fs.mkdirSync(path.join(out, 'app'), { recursive: true });
-      fs.renameSync(appIndex, path.join(out, 'app', 'index.html'));
+      if (!fs.existsSync(path.join(out, 'index.html'))) throw new Error('site pages: the app build has no index.html');
+      for (const name of APP_ONLY) fs.rmSync(path.join(out, name), { recursive: true, force: true });
       fs.writeFileSync(path.join(out, 'index.html'), renderLandingPage('kz'));
       fs.mkdirSync(path.join(out, 'ru'), { recursive: true });
       fs.writeFileSync(path.join(out, 'ru', 'index.html'), renderLandingPage('ru'));

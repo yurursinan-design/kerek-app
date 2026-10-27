@@ -10,14 +10,6 @@
       ],
       "rewrites": [
         {
-          "source": "/app",
-          "destination": "/app/index.html"
-        },
-        {
-          "source": "/app/**",
-          "destination": "/app/index.html"
-        },
-        {
           "source": "**",
           "destination": "/index.html"
         }
@@ -74,6 +66,18 @@
               "value": "public, max-age=604800"
             }
           ]
+        }
+      ],
+      "redirects": [
+        {
+          "source": "/app",
+          "destination": "/",
+          "type": 302
+        },
+        {
+          "source": "/app/**",
+          "destination": "/",
+          "type": 302
         }
       ]
     },
@@ -87,14 +91,6 @@
       ],
       "rewrites": [
         {
-          "source": "/app",
-          "destination": "/app/index.html"
-        },
-        {
-          "source": "/app/**",
-          "destination": "/app/index.html"
-        },
-        {
           "source": "**",
           "destination": "/index.html"
         }
@@ -151,6 +147,18 @@
               "value": "public, max-age=604800"
             }
           ]
+        }
+      ],
+      "redirects": [
+        {
+          "source": "/app",
+          "destination": "/",
+          "type": 302
+        },
+        {
+          "source": "/app/**",
+          "destination": "/",
+          "type": 302
         }
       ]
     }

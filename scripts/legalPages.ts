@@ -73,7 +73,7 @@ ${nav}
 ${section(kz, 'kz')}
 ${section(ru, 'ru')}
 </main>
-<footer><a href="/">Tapsyr</a> · ${esc(LEGAL_OPERATOR.name)}, ${esc(LEGAL_OPERATOR.addressRu)} · <a href="mailto:${LEGAL_OPERATOR.email}">${esc(LEGAL_OPERATOR.email)}</a> · WhatsApp <a href="https://wa.me/${LEGAL_OPERATOR.whatsapp.replace(/\D/g, '')}">${esc(LEGAL_OPERATOR.whatsapp)}</a></footer>
+<footer><a href="/">Tapsyr</a> · ${esc(LEGAL_OPERATOR.name)} · <a href="mailto:${LEGAL_OPERATOR.email}">${esc(LEGAL_OPERATOR.email)}</a> · WhatsApp <a href="https://wa.me/${LEGAL_OPERATOR.whatsapp.replace(/\D/g, '')}">${esc(LEGAL_OPERATOR.whatsapp)}</a></footer>
 </body>
 </html>
 `;
