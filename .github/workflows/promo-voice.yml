@@ -1,0 +1,45 @@
+# Kazakh narration for the Tapsyr promo video (Microsoft Edge TTS, the voice family video.yml uses).
+# Runs only for a commit on a claude/** branch whose message starts with "[voice] ": it voices
+# promo/voice/lines.json with each voice listed there and commits the MP3s and word timings
+# (promo/voice/out/<voice>/) back to the same branch. It runs on GitHub because the voice service
+# needs a WebSocket connection, which the cloud session's network does not allow.
+name: Promo voice
+
+on:
+  push:
+    branches: ['claude/**']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: promo-voice
+  cancel-in-progress: false
+
+jobs:
+  voice:
+    if: startsWith(github.event.head_commit.message, '[voice] ')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+
+      - name: Seslendir
+        run: |
+          set -euo pipefail
+          python -m pip install -q edge_tts==7.3.1
+          python promo/voice/make_voice.py
+
+      - name: Kaydet
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add promo/voice/out
+          if git diff --cached --quiet; then echo "Yeni ses yok"; exit 0; fi
+          git commit -q -m "Add promo narration audio"
+          git push -q origin "HEAD:${GITHUB_REF_NAME}"
