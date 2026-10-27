@@ -329,3 +329,52 @@ export async function loadConversationEvidence(reportId: string): Promise<Conver
   const { data } = await httpsCallable<{ reportId: string }, ConversationEvidence>(getFunctions(app, 'asia-south1'), 'reportEvidence')({ reportId });
   return { reported: data.reported, messages: Array.isArray(data.messages) ? data.messages : [] };
 }
+
+// ------------------------------------------------------------ Masters' pre-registration (functions/src/masterSignup.ts)
+
+export interface MasterSignupEntry {
+  id: string;
+  name: string;
+  phone: string;
+  category: string;
+  district?: string;
+  email?: string;
+  lang?: 'kz' | 'ru';
+  status: 'new' | 'contacted';
+  createdAt: string;
+}
+
+const isoOf = (v: unknown): string => {
+  const t = v as { toDate?: () => Date } | null;
+  return t && typeof t.toDate === 'function' ? t.toDate().toISOString() : typeof v === 'string' ? v : '';
+};
+
+/** Masters who filled in the form on the website, newest first. */
+export async function loadMasterSignups(): Promise<MasterSignupEntry[]> {
+  const snap = await getDocs(query(collection(firestore(), 'masterSignups'), orderBy('createdAt', 'desc'), limit(500)));
+  return snap.docs.map((d) => {
+    const x = d.data();
+    return {
+      id: d.id,
+      name: String(x.name || ''),
+      phone: String(x.phone || ''),
+      category: String(x.category || ''),
+      district: x.district || undefined,
+      email: x.email || undefined,
+      lang: x.lang === 'ru' ? 'ru' : 'kz',
+      status: x.status === 'contacted' ? 'contacted' : 'new',
+      createdAt: isoOf(x.createdAt),
+    };
+  });
+}
+
+export async function setSignupContacted(id: string, contacted: boolean): Promise<void> {
+  await updateDoc(doc(firestore(), 'masterSignups', id), {
+    status: contacted ? 'contacted' : 'new',
+    contactedAt: contacted ? new Date().toISOString() : '',
+  });
+}
+
+export async function deleteMasterSignup(id: string): Promise<void> {
+  await deleteDoc(doc(firestore(), 'masterSignups', id));
+}

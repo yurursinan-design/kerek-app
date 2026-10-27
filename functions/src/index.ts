@@ -32,6 +32,8 @@ export { renewRequestFileLinks } from './fileLinks';
 export { checkUploadedFile } from './uploadCheck';
 // The operator's history and the evidence of a reported conversation; see adminLog.ts
 export { adminLogBans, adminLogMasterFlags, adminLogReports, adminLogConfig, reportEvidence } from './adminLog';
+// Masters' pre-registration form on the website; see masterSignup.ts
+export { masterSignup } from './masterSignup';
 // Copy of all personal data in Kazakhstan (Law 94-V art. 12 p. 2); see kzMirror.ts
 export {
   kzMirrorUsers,
@@ -53,6 +55,7 @@ export {
   kzMirrorConsents,
   kzMirrorConsentHistory,
   kzMirrorAdminLog,
+  kzMirrorMasterSignups,
   kzMirrorFileSaved,
   kzMirrorFileDeleted,
 } from './kzMirror';
