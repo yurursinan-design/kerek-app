@@ -13,8 +13,9 @@
 import fs from 'fs';
 import path from 'path';
 import type { Plugin, ResolvedConfig } from 'vite';
-import { LEGAL_OPERATOR } from '../src/data/legalTexts';
-import { APP_STORE_URL, PLAY_STORE_URL } from '../src/config/site';
+import { LEGAL_OPERATOR, LEGAL_VERSION } from '../src/data/legalTexts';
+import { APP_STORE_URL, MASTER_SIGNUP_URL, PLAY_STORE_URL } from '../src/config/site';
+import { SIGNUP_CATEGORIES } from '../functions/src/masterSignupFields';
 
 type Lang = 'kz' | 'ru';
 
@@ -69,6 +70,22 @@ interface Copy {
   mastersPoints: string[];
   mastersCta: string;
   mastersCtaText: string;
+  heroMasters: string;
+  form: {
+    name: string;
+    phone: string;
+    category: string;
+    choose: string;
+    district: string;
+    optional: string;
+    email: string;
+    emailHint: string;
+    consent: string;
+    sending: string;
+    done: string;
+    orWhatsapp: string;
+    errors: { name: string; phone: string; category: string; email: string; consent: string; limit: string; server: string };
+  };
   faqTitle: string;
   faq: { q: string; a: string }[];
   contactsTitle: string;
@@ -125,8 +142,32 @@ const COPY: Record<Lang, Copy> = {
       'Жұмыстарыңыздың фотосын профильге қосасыз',
       'Әр жұмыстан кейін пікір жинап, рейтингіңізді көтересіз',
     ],
-    mastersCta: 'Шебер ретінде алдын ала тіркелу',
+    mastersCta: 'Алдын ала тіркелу',
     mastersCtaText: 'Сәлеметсіз бе! Мен шебермін, Tapsyr-ға қосылғым келеді.',
+    heroMasters: 'Мен шебермін',
+    form: {
+      name: 'Атыңыз',
+      phone: 'Телефон (WhatsApp)',
+      category: 'Мамандығыңыз',
+      choose: 'Таңдаңыз',
+      district: 'Ауданыңыз',
+      optional: 'міндетті емес',
+      email: 'Gmail поштаңыз',
+      emailHint: 'Қосымшаны бәрінен бұрын сынап көргіңіз келсе жазыңыз: Google Play-дегі сынаққа шақырамыз.',
+      consent: 'Деректерімді <a href="/privacy/">құпиялылық саясатына</a> сәйкес өңдеуге келісемін',
+      sending: 'Жіберілуде…',
+      done: 'Рақмет, тіркелдіңіз! Қосымша шыққанда WhatsApp арқылы немесе қоңырау шалып хабарласамыз.',
+      orWhatsapp: 'Немесе WhatsApp-қа жазыңыз',
+      errors: {
+        name: 'Атыңызды жазыңыз.',
+        phone: 'Қазақстандық ұялы нөмір жазыңыз, мысалы +7 701 123 45 67.',
+        category: 'Мамандығыңызды таңдаңыз.',
+        email: 'Поштаны тексеріңіз немесе бос қалдырыңыз.',
+        consent: 'Тіркелу үшін келісім белгісін қойыңыз.',
+        limit: 'Әрекет тым көп. Біраздан кейін қайталаңыз немесе WhatsApp-қа жазыңыз.',
+        server: 'Жіберілмеді. Интернетті тексеріп, қайталаңыз немесе WhatsApp-қа жазыңыз.',
+      },
+    },
     faqTitle: 'Жиі қойылатын сұрақтар',
     faq: [
       {
@@ -193,8 +234,32 @@ const COPY: Record<Lang, Copy> = {
       'Добавляете фото своих работ в профиль',
       'Собираете отзывы после каждого заказа и поднимаете рейтинг',
     ],
-    mastersCta: 'Записаться как мастер',
+    mastersCta: 'Записаться',
     mastersCtaText: 'Здравствуйте! Я мастер, хочу подключиться к Tapsyr.',
+    heroMasters: 'Я мастер',
+    form: {
+      name: 'Ваше имя',
+      phone: 'Телефон (WhatsApp)',
+      category: 'Вид работ',
+      choose: 'Выберите',
+      district: 'Район',
+      optional: 'необязательно',
+      email: 'Ваш Gmail',
+      emailHint: 'Укажите, если хотите попробовать приложение раньше всех: пригласим в тест в Google Play.',
+      consent: 'Согласен на обработку моих данных в соответствии с <a href="/privacy/">политикой конфиденциальности</a>',
+      sending: 'Отправляем…',
+      done: 'Спасибо, вы записаны! Когда приложение выйдет, мы напишем вам в WhatsApp или позвоним.',
+      orWhatsapp: 'Или напишите нам в WhatsApp',
+      errors: {
+        name: 'Напишите ваше имя.',
+        phone: 'Укажите казахстанский мобильный номер, например +7 701 123 45 67.',
+        category: 'Выберите вид работ.',
+        email: 'Проверьте почту или оставьте поле пустым.',
+        consent: 'Чтобы записаться, отметьте согласие.',
+        limit: 'Слишком много попыток. Повторите позже или напишите в WhatsApp.',
+        server: 'Не отправилось. Проверьте интернет и повторите или напишите в WhatsApp.',
+      },
+    },
     faqTitle: 'Частые вопросы',
     faq: [
       {
@@ -304,6 +369,30 @@ h2.title{font:800 clamp(26px,4.8vw,42px)/1.1 var(--display);letter-spacing:-.03e
 .masters .btn-main{background:var(--gold);color:#1d2a12}
 .masters .btn-main:hover{background:#ffd23a}
 .masters img{width:100%;height:100%;object-fit:cover;min-height:280px}
+.btn-ghost{border:1.5px solid var(--line);color:var(--ink)}
+.btn-ghost:hover{border-color:var(--sky)}
+.join{display:grid;gap:14px;margin:0 0 18px}
+.join .row{display:grid;gap:14px}
+.join label{display:block;font-weight:600;font-size:15px;color:var(--band-text);margin:0 0 6px}
+.join label small{font-weight:400;color:var(--band-muted)}
+.join input[type=text],.join input[type=tel],.join input[type=email],.join select{width:100%;min-height:50px;padding:0 14px;border-radius:12px;border:1.5px solid var(--band-muted);background:rgba(255,255,255,.07);color:var(--band-text);font:16px/1.3 var(--body);appearance:none}
+.join select{background-image:linear-gradient(45deg,transparent 50%,var(--band-muted) 50%),linear-gradient(135deg,var(--band-muted) 50%,transparent 50%);background-position:calc(100% - 20px) 22px,calc(100% - 14px) 22px;background-size:6px 6px;background-repeat:no-repeat;padding-right:36px}
+.join select option{color:#0b2e44}
+.join input:focus,.join select:focus{outline:none;border-color:var(--gold)}
+.join [aria-invalid=true]{border-color:#ff9a8a}
+.join .hint{margin:6px 0 0;font-size:14px;color:var(--band-muted)}
+.join .check{display:flex;gap:10px;align-items:flex-start;font-weight:400;font-size:15px;margin:0}
+.join .check input{width:22px;height:22px;flex:none;margin:1px 0 0;accent-color:var(--gold)}
+.join .check a{color:var(--gold)}
+.join .trap{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.join button{border:0;cursor:pointer;justify-self:start}
+.join button:disabled{opacity:.6;cursor:progress}
+.join [hidden]{display:none}
+.join .status{margin:0;min-height:1.6em;font-size:15px}
+.join .status.err{color:#ffb3a7}
+.join .status.ok{color:var(--band-text);background:rgba(242,183,5,.16);border-radius:12px;padding:12px 14px}
+.masters .wa{color:var(--band-muted);font-size:15px}
+.masters .wa a{color:var(--band-text)}
 
 .faq{max-width:760px}
 .faq details{border-top:1px solid var(--line);padding:4px 0}
@@ -330,6 +419,7 @@ footer nav a{display:block;padding:3px 0}
   .why{grid-template-columns:1fr 1fr;column-gap:48px}
   .masters{grid-template-columns:1.1fr .9fr}
   .masters .text{padding:56px}
+  .join .row{grid-template-columns:1fr 1fr}
   footer .cols{grid-template-columns:1.4fr 1fr 1fr}
 }
 
@@ -354,6 +444,30 @@ const store = (url: string, icon: string, get: string, soon: string) =>
   url
     ? `<a class="play" href="${url}" rel="noopener">${icon}${esc(get)}</a>`
     : `<span class="play" aria-disabled="true">${icon}${esc(soon)}</span>`;
+
+/** Masters' pre-registration; landing.js sends it to the masterSignup function (functions/src/masterSignup.ts) */
+function joinForm(c: Copy, lang: Lang): string {
+  const f = c.form;
+  const opt = `<small>(${esc(f.optional)})</small>`;
+  const errors = Object.entries(f.errors)
+    .map(([k, v]) => ` data-err-${k}="${esc(v)}"`)
+    .join('');
+  return `<form class="join" id="join" novalidate data-endpoint="${esc(MASTER_SIGNUP_URL)}" data-lang="${lang}" data-consent-version="${esc(LEGAL_VERSION)}" data-sending="${esc(f.sending)}" data-done="${esc(f.done)}"${errors}>
+<div class="row">
+<div><label for="join-name">${esc(f.name)}</label><input id="join-name" name="name" type="text" autocomplete="name" maxlength="60" required></div>
+<div><label for="join-phone">${esc(f.phone)}</label><input id="join-phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="+7 7__ ___ __ __" maxlength="20" required></div>
+</div>
+<div class="row">
+<div><label for="join-category">${esc(f.category)}</label><select id="join-category" name="category" required><option value="">${esc(f.choose)}</option>${SIGNUP_CATEGORIES.map((g) => `<option value="${g.id}">${esc(g[lang])}</option>`).join('')}</select></div>
+<div><label for="join-district">${esc(f.district)} ${opt}</label><input id="join-district" name="district" type="text" maxlength="60" autocomplete="address-level3"></div>
+</div>
+<div><label for="join-email">${esc(f.email)} ${opt}</label><input id="join-email" name="email" type="email" inputmode="email" autocomplete="email" maxlength="100" placeholder="name@gmail.com" aria-describedby="join-email-hint"><p class="hint" id="join-email-hint">${esc(f.emailHint)}</p></div>
+<div class="trap" aria-hidden="true"><label for="join-website">Website</label><input id="join-website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+<label class="check"><input type="checkbox" name="consent" required><span>${f.consent}</span></label>
+<button class="btn btn-main" type="submit">${esc(c.mastersCta)}</button>
+<p class="status" role="status" aria-live="polite"></p>
+</form>`;
+}
 
 export function renderLandingPage(lang: Lang): string {
   const c = COPY[lang];
@@ -406,6 +520,7 @@ export function renderLandingPage(lang: Lang): string {
 <p class="soon">${esc(c.soon)}</p>
 <div class="ctas">
 <a class="btn btn-main" href="${waText(c.notifyText)}" rel="noopener">${esc(c.notify)}</a>
+<a class="btn btn-ghost" href="#join">${esc(c.heroMasters)}</a>
 </div>
 <div class="stores">
 ${stores}
@@ -455,7 +570,8 @@ ${stores}
 <h2 class="title" id="masters">${esc(c.mastersTitle)}</h2>
 <p>${esc(c.mastersText)}</p>
 <ul>${c.mastersPoints.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>
-<a class="btn btn-main" href="${waText(c.mastersCtaText)}" rel="noopener">${esc(c.mastersCta)}</a>
+${joinForm(c, lang)}
+<p class="wa"><a href="${waText(c.mastersCtaText)}" rel="noopener">${esc(c.form.orWhatsapp)}</a></p>
 </div>
 <img src="/img/photo/role_master.webp" alt="" width="768" height="768" loading="lazy" decoding="async">
 </div>
@@ -507,6 +623,62 @@ export const LANDING_SCRIPT = `(function () {
     try {
       localStorage.setItem('${APP_LANGUAGE_KEY}', link.getAttribute('data-lang'));
     } catch (e) {}
+  });
+
+  // Masters' pre-registration form
+  var form = document.getElementById('join');
+  if (!form || !window.fetch) return;
+  var status = form.querySelector('.status');
+  var button = form.querySelector('button[type=submit]');
+  var label = button.textContent;
+  var field = function (name) { return form.elements[name]; };
+  var show = function (text, kind) { status.textContent = text; status.className = 'status' + (kind ? ' ' + kind : ''); };
+  var mark = function (name) {
+    ['name', 'phone', 'category', 'email', 'consent'].forEach(function (n) { field(n).removeAttribute('aria-invalid'); });
+    if (name && field(name)) { field(name).setAttribute('aria-invalid', 'true'); field(name).focus(); }
+  };
+  var fail = function (name) { mark(name); show(form.getAttribute('data-err-' + name) || form.getAttribute('data-err-server'), 'err'); };
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    var digits = field('phone').value.replace(/\\D/g, '');
+    if (field('name').value.trim().length < 2) return fail('name');
+    if (digits.length < 10 || digits.length > 11) return fail('phone');
+    if (!field('category').value) return fail('category');
+    var email = field('email').value.trim();
+    if (email && !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)) return fail('email');
+    if (!field('consent').checked) return fail('consent');
+    mark(null);
+    button.disabled = true;
+    button.textContent = form.getAttribute('data-sending');
+    show('');
+    fetch(form.getAttribute('data-endpoint'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: field('name').value,
+        phone: field('phone').value,
+        category: field('category').value,
+        district: field('district').value,
+        email: email,
+        website: field('website').value,
+        lang: form.getAttribute('data-lang'),
+        consent: true,
+        consentVersion: form.getAttribute('data-consent-version')
+      })
+    })
+      .then(function (res) { return res.json().catch(function () { return { ok: false, error: 'server' }; }); })
+      .then(function (answer) {
+        if (answer && answer.ok) {
+          form.reset();
+          Array.prototype.forEach.call(form.querySelectorAll('.row, .row + div, .check, button'), function (el) { el.hidden = true; });
+          show(form.getAttribute('data-done'), 'ok');
+          return;
+        }
+        if (answer && answer.error === 'invalid' && answer.field) return fail(answer.field);
+        fail(answer && answer.error === 'limit' ? 'limit' : 'server');
+      })
+      .catch(function () { fail('server'); })
+      .then(function () { button.disabled = false; button.textContent = label; });
   });
 })();
 `;

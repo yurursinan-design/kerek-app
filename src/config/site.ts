@@ -13,6 +13,9 @@ export const PLAY_STORE_URL = '';
 /** The app's App Store page, likewise empty until the iPhone app is published */
 export const APP_STORE_URL = '';
 
+/** Where the website's pre-registration form for masters is sent (functions/src/masterSignup.ts) */
+export const MASTER_SIGNUP_URL = 'https://asia-south1-kerek-9d153.cloudfunctions.net/masterSignup';
+
 /**
  * The project's first addresses, from before the app was called Tapsyr. They still serve the
  * same app (old shared links, the privacy policy link in Google Play), but opening the app there

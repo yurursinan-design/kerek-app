@@ -50,6 +50,7 @@ export const MIRRORED_PATHS = [
   'consents/{id}',
   'consents/{uid}/history/{id}',
   'adminLog/{id}',
+  'masterSignups/{id}',
 ];
 
 export interface MirrorTarget {
@@ -289,6 +290,7 @@ export const kzMirrorAccountSignals = mirrorTrigger('accountSignals/{id}');
 export const kzMirrorConsents = mirrorTrigger('consents/{id}');
 export const kzMirrorConsentHistory = mirrorTrigger('consents/{uid}/history/{id}');
 export const kzMirrorAdminLog = mirrorTrigger('adminLog/{id}');
+export const kzMirrorMasterSignups = mirrorTrigger('masterSignups/{id}');
 
 export const kzMirrorFileSaved = onObjectFinalized({ ...OPTS, bucket: appBucket, memory: '512MiB' }, async (event) => {
   await mirrorFile(event.data.bucket, event.data.name);

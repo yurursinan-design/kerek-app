@@ -1,15 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Flag, Loader2, MessageSquareText, Phone, Search, ShieldCheck, Users, X } from 'lucide-react';
+import { BarChart3, Copy, Flag, Loader2, MessageCircle, MessageSquareText, Phone, Search, ShieldCheck, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { Language, Provider } from '../types';
 import { getFriendlyErrorMessage } from '../services';
 import { REPORT_REASONS } from '../services/reports';
-import { toTelHref } from '../services/phoneLinks';
+import { toTelHref, toWhatsAppHref } from '../services/phoneLinks';
+import { SIGNUP_CATEGORIES } from '../../functions/src/masterSignupFields';
 import { reviewsCountLabel } from '../services/publicStats';
 import {
   AdminReport,
   blockAccount,
   checkAdminRole,
   decideReviewCheck,
+  deleteMasterSignup,
   HealthNumbers,
   AdminLogEntry,
   ConversationEvidence,
@@ -17,10 +19,12 @@ import {
   loadAdminLog,
   loadConversationEvidence,
   loadHealthNumbers,
+  loadMasterSignups,
   loadMasters,
   loadReports,
   loadReviewChecks,
   MasterFlag,
+  MasterSignupEntry,
   reportedAccount,
   resolveReport,
   ReviewCheck,
@@ -28,10 +32,11 @@ import {
   reviewerPhone,
   reviewNeedsDecision,
   setMasterFlag,
+  setSignupContacted,
   unblockAccount,
 } from '../services/admin';
 
-type Tab = 'health' | 'reviews' | 'reports' | 'masters';
+type Tab = 'health' | 'reviews' | 'reports' | 'masters' | 'signups';
 
 const pct = (x: number) => `${Math.round(x * 100)}%`;
 
@@ -61,6 +66,8 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
   const [blocked, setBlocked] = useState<Record<string, boolean>>({});
   const [evidence, setEvidence] = useState<Record<string, ConversationEvidence>>({});
   const [adminLog, setAdminLog] = useState<AdminLogEntry[] | null>(null);
+  const [signups, setSignups] = useState<MasterSignupEntry[] | null>(null);
+  const [copied, setCopied] = useState(false);
   // Opening the panel asks the server again, which also refreshes the operator list the rules check
   const [ready, setReady] = useState(false);
 
@@ -79,13 +86,19 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
     if (tab === 'reports' && !reports) loadReports().then(setReports).catch(fail);
     if (tab === 'masters' && !masters) loadMasters().then(setMasters).catch(fail);
     if (tab === 'reviews' && !reviewChecks) loadReviewChecks().then(setReviewChecks).catch(fail);
-  }, [ready, tab, health, adminLog, reports, masters, reviewChecks, language]);
+    if (tab === 'signups' && !signups) loadMasterSignups().then(setSignups).catch(fail);
+  }, [ready, tab, health, adminLog, reports, masters, reviewChecks, signups, language]);
 
-  // Loaded at once so the tab shows how many reviews wait for a decision
+  // Loaded at once so the tabs show how many reviews wait for a decision and how many masters signed up
   useEffect(() => {
     if (!ready) return;
     loadReviewChecks()
       .then(setReviewChecks)
+      .catch(() => {
+        // shown when the tab is opened
+      });
+    loadMasterSignups()
+      .then(setSignups)
       .catch(() => {
         // shown when the tab is opened
       });
@@ -167,11 +180,39 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
       setMasters((list) => (list || []).map((x) => (x.id === m.id ? { ...x, blocked: next } : x)));
     });
 
+  const toggleContacted = (e: MasterSignupEntry) =>
+    run(`${e.id}_contacted`, async () => {
+      const contacted = e.status !== 'contacted';
+      await setSignupContacted(e.id, contacted);
+      setSignups((list) => (list || []).map((x) => (x.id === e.id ? { ...x, status: contacted ? 'contacted' : 'new' } : x)));
+    });
+
+  const removeSignup = (e: MasterSignupEntry) => {
+    if (!window.confirm(tx(`${e.name} жазбасын жою керек пе?`, `Удалить запись ${e.name}?`))) return;
+    run(`${e.id}_delete`, async () => {
+      await deleteMasterSignup(e.id);
+      setSignups((list) => (list || []).filter((x) => x.id !== e.id));
+    });
+  };
+
+  const signupEmails = (signups || []).map((e) => e.email).filter((m): m is string => Boolean(m));
+  const copyEmails = () =>
+    run('copy_emails', async () => {
+      await navigator.clipboard.writeText(signupEmails.join(', '));
+      setCopied(true);
+    });
+  const newSignups = (signups || []).filter((e) => e.status === 'new').length;
+  const categoryLabel = (id: string) => {
+    const c = SIGNUP_CATEGORIES.find((x) => x.id === id);
+    return c ? (kz ? c.kz : c.ru) : id;
+  };
+
   const tabs: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
     { id: 'health', label: tx('Шолу', 'Обзор'), icon: <BarChart3 className="w-4 h-4" /> },
     { id: 'reviews', label: tx('Пікірлер', 'Отзывы'), icon: <MessageSquareText className="w-4 h-4" />, badge: waitingReviews },
     { id: 'reports', label: tx('Шағымдар', 'Жалобы'), icon: <Flag className="w-4 h-4" /> },
     { id: 'masters', label: tx('Шеберлер', 'Мастера'), icon: <Users className="w-4 h-4" /> },
+    { id: 'signups', label: tx('Тіркелу', 'Запись'), icon: <UserPlus className="w-4 h-4" />, badge: newSignups },
   ];
 
   const reasonLabels: Record<string, [string, string]> = {
@@ -626,6 +667,99 @@ export const AdminScreen: React.FC<{ language: Language; onClose: () => void }> 
                   </div>
                 </div>
               ))}
+            </>
+          ))}
+
+        {tab === 'signups' &&
+          (!signups ? (
+            <Loader2 className="w-6 h-6 animate-spin text-sky-600 mx-auto mt-8" />
+          ) : (
+            <>
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                {tx(
+                  'Сайттағы формамен алдын ала тіркелген шеберлер. Хабарласқаннан кейін белгі қойыңыз. Жазба 1 жылдан кейін өзі жойылады.',
+                  'Мастера, записавшиеся через форму на сайте. Отмечайте, с кем уже связались. Запись удаляется сама через 1 год.'
+                )}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-3 bg-white rounded-2xl border border-slate-200">
+                  <div className="text-[11px] text-slate-500">{tx('Барлығы (жаңа)', 'Всего (новых)')}</div>
+                  <div className="text-xl font-extrabold text-slate-900 mt-1">
+                    {signups.length} ({newSignups})
+                  </div>
+                </div>
+                <div className="p-3 bg-white rounded-2xl border border-slate-200">
+                  <div className="text-[11px] text-slate-500">{tx('Gmail көрсеткендер', 'Указали Gmail')}</div>
+                  <div className="text-xl font-extrabold text-slate-900 mt-1">{signupEmails.length}</div>
+                </div>
+              </div>
+              {signupEmails.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={copyEmails}
+                    disabled={busy === 'copy_emails'}
+                    className="w-full h-10 rounded-xl bg-sky-600 text-white text-xs font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Copy className="w-4 h-4" />
+                    {copied ? tx('Көшірілді', 'Скопировано') : tx(`Барлық Gmail-ді көшіру (${signupEmails.length})`, `Скопировать все Gmail (${signupEmails.length})`)}
+                  </button>
+                  <p className="text-[10px] text-slate-500 leading-relaxed">
+                    {tx(
+                      'Google Play Console → Тестілеу → Жабық тестілеу → Сынаушылар: тізімге қойыңыз.',
+                      'Google Play Console → Тестирование → Закрытое тестирование → Тестировщики: вставьте в список.'
+                    )}
+                  </p>
+                </>
+              )}
+              {signups.length === 0 && <p className="text-sm text-slate-500 text-center py-6">{tx('Әзірге ешкім тіркелмеді', 'Пока никто не записался')}</p>}
+              {signups.map((e) => {
+                const tel = toTelHref(e.phone);
+                const wa = toWhatsAppHref(e.phone);
+                return (
+                  <div key={e.id} className="p-3 bg-white rounded-2xl border border-slate-200 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm font-bold text-slate-900 break-words">{e.name}</div>
+                        <div className="text-[11px] text-slate-500 break-words">
+                          {categoryLabel(e.category)}
+                          {e.district ? ` · ${e.district}` : ''}
+                          {e.lang === 'ru' ? ' · RU' : ' · KZ'}
+                        </div>
+                      </div>
+                      <span className="text-[10px] text-slate-400 shrink-0">{e.createdAt.slice(0, 10)}</span>
+                    </div>
+                    <div className="text-xs text-slate-700 font-mono">{e.phone}</div>
+                    {e.email && <div className="text-xs text-slate-700 break-all">{e.email}</div>}
+                    <div className="flex gap-2">
+                      {tel && (
+                        <a href={tel} className="flex-1 h-9 rounded-xl border border-sky-200 bg-sky-50 text-sky-800 text-xs font-bold flex items-center justify-center gap-1.5">
+                          <Phone className="w-4 h-4" />
+                          {tx('Қоңырау', 'Позвонить')}
+                        </a>
+                      )}
+                      {wa && (
+                        <a href={wa} target="_blank" rel="noopener noreferrer" className="flex-1 h-9 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5">
+                          <MessageCircle className="w-4 h-4" />
+                          WhatsApp
+                        </a>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                      {chip(e.status === 'contacted', tx('Хабарласылды', 'Связались'), () => toggleContacted(e), `${e.id}_contacted`)}
+                      <button
+                        type="button"
+                        onClick={() => removeSignup(e)}
+                        disabled={busy === `${e.id}_delete`}
+                        className="h-8 px-2.5 rounded-full border border-slate-200 bg-white text-[11px] font-bold text-rose-700 flex items-center gap-1 disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        {tx('Жою', 'Удалить')}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </>
           ))}
       </div>

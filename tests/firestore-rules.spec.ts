@@ -2562,6 +2562,23 @@ async function runTestSuite() {
       await assertSucceeds(getDoc(doc(adminDb(), 'consents', 'cons_u')));
     });
 
+    await test('Masters\' pre-registration: written by the server only; the operator reads, marks contacted and deletes', async () => {
+      const entry = { name: 'Ерлан', phone: '+77011234567', category: 'plumbing', status: 'new' };
+      await testEnv.withSecurityRulesDisabled(async (c) => setDoc(doc(c.firestore(), 'masterSignups', '77011234567'), entry));
+      const user = phoneUser('cust_ms').firestore();
+      await assertFails(setDoc(doc(user, 'masterSignups', '77019999999'), entry));
+      await assertFails(setDoc(doc(adminDb(), 'masterSignups', '77019999999'), entry));
+      await assertFails(getDoc(doc(user, 'masterSignups', '77011234567')));
+      await assertFails(getDocs(collection(user, 'masterSignups')));
+      await assertFails(updateDoc(doc(user, 'masterSignups', '77011234567'), { status: 'contacted' }));
+      await assertSucceeds(getDocs(collection(adminDb(), 'masterSignups')));
+      await assertFails(updateDoc(doc(adminDb(), 'masterSignups', '77011234567'), { name: 'Other' }));
+      await assertFails(updateDoc(doc(adminDb(), 'masterSignups', '77011234567'), { status: 'vip' }));
+      await assertSucceeds(updateDoc(doc(adminDb(), 'masterSignups', '77011234567'), { status: 'contacted', contactedAt: nowIso }));
+      await assertFails(deleteDoc(doc(user, 'masterSignups', '77011234567')));
+      await assertSucceeds(deleteDoc(doc(adminDb(), 'masterSignups', '77011234567')));
+    });
+
     await test('Contacts: the "confirmed number" flag is true only for the master\'s own login number', async () => {
       const prof = (phone: string, phoneVerified?: boolean) => ({
         id: 'prov_pv', userId: 'prov_pv', name: 'P', phone, city: 'Қызылорда', cityId: 'kyzylorda', category: 'x',

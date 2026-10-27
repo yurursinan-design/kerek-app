@@ -895,6 +895,18 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Masters' pre-registration from the website (document id = phone digits). Written only by the
+    // masterSignup function; the operator reads the list, marks who was contacted and can delete one
+    match /masterSignups/{id} {
+      allow get, list: if isAdmin();
+      allow update: if isAdmin()
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'contactedAt'])
+                    && incoming().status in ['new', 'contacted']
+                    && strMax(incoming(), 'contactedAt', 40);
+      allow delete: if isAdmin();
+      allow create: if false;
+    }
+
     // =================== Reports Collection ===================
     // "Report" button: a phone-verified user flags a provider, offer, request or chat. One report per
     // user and target (the id is bound to both), write-once; only operators (admin claim) read them.
