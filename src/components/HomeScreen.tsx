@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Capacitor } from '@capacitor/core';
 import {
   ExtractedNeed,
   Language,
@@ -10,8 +9,6 @@ import {
 } from '../types';
 import { translations } from '../i18n/translations';
 import { AlertCircle, Image as ImageIcon, Loader2, MapPin, Mic, MicOff, PenLine, Search, ShieldCheck, Square, Video as VideoIcon } from 'lucide-react';
-import { LegalLinks } from './LegalModal';
-import { LEGAL_OPERATOR } from '../data/legalTexts';
 import { ServiceDiscovery } from './ServiceDiscovery';
 import { RequestWizard } from './RequestWizard';
 import type { CatalogGroup, CatalogService } from '../data/serviceCatalog';
@@ -627,17 +624,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </div>
         </section>
       </ServiceDiscovery>
-
-      {/* Website only: legal links and the registered business (Meta business verification checks the
-          site for it). The phone app has the legal links in Profile and no footer. */}
-      {!Capacitor.isNativePlatform() && (
-        <footer className="text-center text-xs text-slate-400 py-3 border-t border-slate-100 space-y-1.5">
-          <LegalLinks language={language} className="block text-slate-500" />
-          <span className="block">
-            {LEGAL_OPERATOR.shortName} · {language === 'kz' ? LEGAL_OPERATOR.addressKz : LEGAL_OPERATOR.addressRu}
-          </span>
-        </footer>
-      )}
     </div>
   );
 };
