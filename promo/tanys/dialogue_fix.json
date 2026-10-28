@@ -1,0 +1,9 @@
+{
+ "model": "gemini-3.8-flash-tts",
+ "lines": [
+  {"id": "a1s_arman_Iapetus", "voice": "Iapetus", "style": "natural conversational Kazakh at a quick, natural pace, a tired helpless man asking his brother-in-law for help on the phone, slightly pleading, real and human, not theatrical", "kk": "Жезде, кір жуғыш бұзылды. Танысың бар ма?", "ru": "Жезде, стиралка сломалась. Есть знакомый?"},
+  {"id": "a1t_arman_Iapetus", "voice": "Iapetus", "style": "natural conversational Kazakh spoken fast, a tired man on the phone, pleading, real and human, short pauses", "kk": "Жезде, кір жуғыш бұзылды. Танысың бар ма?", "ru": "Жезде, стиралка сломалась. Есть знакомый?"},
+  {"id": "e1s_yerbolat_Fenrir", "voice": "Fenrir", "style": "natural Kazakh, a loud self-assured car mechanic, cheerful and very confident, fast and snappy", "kk": "Бар! Қазір хабарласайын.", "ru": "Есть! Сейчас позвоню."},
+  {"id": "e1t_yerbolat_Fenrir", "voice": "Fenrir", "style": "natural Kazakh, a confident mechanic answering quickly without any pause, snappy and cheerful", "kk": "Бар! Қазір хабарласайын.", "ru": "Есть! Сейчас позвоню."}
+ ]
+}
