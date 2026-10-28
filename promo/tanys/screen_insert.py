@@ -45,6 +45,7 @@ h3{font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-.02em}
 .nw{font-size:11px;color:#64748b;margin-top:2px}
 .tm2{display:flex;align-items:center;gap:4px;font-size:12px;color:#64748b;margin-top:4px}
 .pr{font-size:16px;font-weight:800;color:#0f172a;white-space:nowrap}
+.sub.on span{white-space:nowrap;font-size:14.5px}
 """
 
 
@@ -76,7 +77,7 @@ def card(text, focus=True, photo=False, submit="off"):
 
 
 OFFERS = [("Серік Жұмабаев", "СЖ", "Бүгін, 18:00–20:00", "8 000 ₸"),
-          ("Нұрлан Әбенов", "НӘ", "Ертең, 10:00", "9 000 ₸")]
+          ("Асқар Әбенов", "АӘ", "Ертең, 10:00", "9 000 ₸")]
 
 
 def offers(n):
