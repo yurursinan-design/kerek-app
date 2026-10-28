@@ -47,16 +47,16 @@ VOICE = HERE / "voice"
 # ------------------------------------------------------------------ the cut
 # (kind, source, in, out): kind "clip" = a Kling shot, "screen" = the phone insert, "end" = end card.
 SEGMENTS = [
-    ("clip", "S1", 0.0, 3.0),     # 0  hook: from inside the dead machine, he calls his brother-in-law
+    ("clip", "S1", 0.0, 4.0),     # 0  hook: from inside the dead machine, he calls his brother-in-law
     ("clip", "S2", 0.0, 3.0),     # 1  Yerbolat: "Бар! Қазір хабарласайын."
-    ("clip", "C1", 1.0, 2.05),    # 2  the chain: toastmaster
-    ("clip", "C2", 1.0, 2.0),     # 3  taxi driver
+    ("clip", "C1", 1.0, 2.15),    # 2  the chain: toastmaster
+    ("clip", "C2", 1.25, 2.4),    # 3  taxi driver
     ("clip", "S8", 0.6, 1.55),    # 4  day 1: laundry to his knees
-    ("clip", "C3", 1.0, 1.95),    # 5  bazaar apa
-    ("clip", "C4", 1.2, 2.05),    # 6  mangal, waving the smoke away
+    ("clip", "C3", 1.2, 2.4),     # 5  bazaar apa
+    ("clip", "C4", 1.5, 2.4),     # 6  mangal, waving the smoke away
     ("clip", "S9", 0.8, 1.7),     # 7  day 3: up to his chest, rubbing his forehead
-    ("clip", "C5", 1.0, 1.9),     # 8  fisherman
-    ("clip", "S10", 0.0, 4.9),    # 9  day 5: buried; a stranger calls HIM for the guy
+    ("clip", "C5", 0.85, 2.35),   # 8  fisherman
+    ("clip", "S10", 0.0, 4.5),    # 9  day 5: buried; a stranger calls HIM for the guy
     ("clip", "S11", 0.0, 1.6),    # 10 he writes it in Tapsyr
     ("screen", None, 0.0, 3.0),   # 11 the request and the first offers
     ("clip", "S12", 0.0, 2.4),    # 12 the master leaves, job done
@@ -83,17 +83,31 @@ def at(i, dt=0.0):
 
 
 # ------------------------------------------------------------------ words on screen
+# Each line sits where its own speaker's mouth moves in the Kling shot (measured on the speech in
+# Kling's discarded audio track): S1 0.6-3.4 s, S2 0.9-1.9, C1 1.25-2.0, C2 1.4-2.1, C3 1.25-2.0,
+# C4 1.6-2.25, C5 0.9-2.1, S13 0.5-1.5, S14 2.4-3.4. No line crosses a cut.
+LINES = [  # (segment, offset, voice file, gain dB, tempo)
+    (0, 0.55, "a1s_arman_Iapetus", 0, 1.1),
+    (1, 0.85, "e1t_yerbolat_Fenrir", 0, 1.0),
+    (2, 0.28, "c1_host", -1, 1.0),
+    (3, 0.1, "c2_taxi", -1, 1.0),
+    (5, 0.06, "c3_apa", -1, 1.0),
+    (6, 0.12, "c4_mangal", -1, 1.0),
+    (8, 0.06, "c5_fisher", -1, 1.0),
+    (13, 0.35, "e2_yerbolat_Fenrir", 0, 1.0),
+    (14, 2.45, "a2_arman_Iapetus", -2, 1.0),
+]
 SUBS = [  # (start, end, text) — Russian subtitles of the Kazakh lines
-    (at(0, 0.2), at(1, 1.3), "Жезде, стиральная машина сломалась. Есть знакомый?"),
-    (at(1, 1.5), at(2, 0.25), "Есть! Сейчас позвоню."),
-    (at(2, 0.1), at(2, 1.05), "Есть знакомый!"),
-    (at(3, 0.1), at(3, 1.0), "Есть знакомый!"),
-    (at(5, 0.1), at(5, 0.95), "Есть знакомый!"),
-    (at(6, 0.05), at(6, 0.85), "Есть знакомый!"),
-    (at(8, 0.05), at(8, 0.9), "Есть знакомый!"),
-    (at(9, 0.9), at(9, 4.9), "Здравствуйте, у вас нет знакомого мастера по стиральным машинам?"),
-    (at(13, 0.25), at(13, 1.5), "Нашёл!"),
-    (at(14, 2.45), at(14, 3.85), "Спасибо, жезде."),
+    (at(0, 0.5), at(0, 3.85), "Жезде, стиралка сломалась. Есть знакомый?"),
+    (at(1, 0.8), at(1, 2.6), "Есть! Сейчас позвоню."),
+    (at(2, 0.25), at(2, 1.05), "Есть знакомый!"),
+    (at(3, 0.08), at(3, 1.15), "Есть знакомый!"),
+    (at(5, 0.05), at(5, 1.15), "Есть знакомый!"),
+    (at(6, 0.1), at(6, 0.9), "Есть знакомый!"),
+    (at(8, 0.05), at(8, 1.45), "Есть знакомый!"),
+    (at(9, 0.7), at(9, 4.45), "Здравствуйте, у вас нет знакомого мастера по стиральным машинам?"),
+    (at(13, 0.3), at(13, 1.5), "Нашёл!"),
+    (at(14, 2.4), at(14, 3.85), "Спасибо, жезде."),
 ]
 DAYS = [(4, "1-күн", "День 1"), (7, "3-күн", "День 3"), (9, "5-күн", "День 5")]
 
@@ -238,8 +252,24 @@ def analyse(out):
 bp, lp, hp, norm = E7.bp, E7.lp, E7.hp, E7.norm
 
 
-def voice(name, gain_db=0.0):
-    return AK.load(VOICE / f"{name}.wav", gain_db)
+def tight(x, lead=0.03, tail=0.12):
+    """Cut a line to its speech: from the first to the last 20 ms window above 6 % of the loudest."""
+    win = int(0.02 * SR)
+    e = np.array([np.sqrt((x[i:i + win] ** 2).mean()) for i in range(0, len(x) - win, win)])
+    on = np.where(e > e.max() * 0.06)[0]
+    a, b = max(0, on[0] * win - int(lead * SR)), min(len(x), (on[-1] + 1) * win + int(tail * SR))
+    y = x[a:b].copy()
+    f = int(0.06 * SR)
+    y[-f:] *= np.linspace(1, 0, f)
+    return y
+
+
+def voice(name, gain_db=0.0, tempo=1.0):
+    af = ["-af", f"atempo={tempo}"] if tempo != 1.0 else []
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(VOICE / f"{name}.wav"), *af, "-f", "f32le", "-ac", "1",
+                          "-ar", str(SR), "-"], check=True, capture_output=True).stdout
+    x = tight(np.frombuffer(raw, dtype=np.float32).astype(np.float64))
+    return x / (np.abs(x).max() + 1e-9) * 0.9 * 10 ** (gain_db / 20)
 
 
 def phone_eq(x):
@@ -356,13 +386,12 @@ def mix():
         return TIMES[i][1] - TIMES[i][0]
 
     # voices (Arman = Iapetus, Yerbolat = Fenrir)
-    put(vo, voice("a1_arman_Iapetus"), at(0, 0.15))
-    put(vo, voice("e1_yerbolat_Fenrir"), at(1, 1.45))
-    for i, name in ((2, "c1_host"), (3, "c2_taxi"), (5, "c3_apa"), (6, "c4_mangal"), (8, "c5_fisher")):
-        put(vo, voice(name, -1), at(i, 0.08))
-    put(vo, phone_eq(voice("x1_stranger")), at(9, 0.85), 0.9)
-    put(vo, voice("e2_yerbolat_Fenrir"), at(13, 0.2))
-    put(vo, voice("a2_arman_Iapetus", -2), at(14, 2.45))
+    for i, dt, name, gain, tempo in LINES:
+        x = voice(name, gain, tempo)
+        end = at(i, dt) + len(x) / SR
+        assert end <= TIMES[i][1] + 0.12, f"{name} runs {end - TIMES[i][1]:.2f}s past its shot"
+        put(vo, x, at(i, dt))
+    put(vo, phone_eq(voice("x1_stranger", 0, 1.1)), at(9, 0.7), 0.9)   # off screen, through his phone
 
     # places
     room = E7.room(TOTAL) * 0.05
@@ -403,7 +432,7 @@ def mix():
     put(sfx, motor(span(14) - 2.2), at(14, 2.2), 0.3)
 
     # music: the dombra drives the chain; nothing on day five or in the app; warm plucks after
-    m0, m1 = at(1, 1.0), at(9, 0.0)
+    m0, m1 = at(1, 2.1), at(9, 0.0)
     put(mus, dombra_drive(m1 - m0), m0, 1.0)
     w0 = at(12, 0.3)
     warm = AU.music(TOTAL - w0)
