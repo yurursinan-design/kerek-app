@@ -13,6 +13,10 @@ export const PLAY_STORE_URL = '';
 /** The app's App Store page, likewise empty until the iPhone app is published */
 export const APP_STORE_URL = '';
 
+/** The website's social accounts, shown as icons in its footer */
+export const INSTAGRAM_URL = 'https://www.instagram.com/tapsyrapp/';
+export const TIKTOK_URL = 'https://www.tiktok.com/@tapsyrapp';
+
 /** Where the website's pre-registration form for masters is sent (functions/src/masterSignup.ts) */
 export const MASTER_SIGNUP_URL = 'https://asia-south1-kerek-9d153.cloudfunctions.net/masterSignup';
 

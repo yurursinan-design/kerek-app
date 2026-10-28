@@ -14,7 +14,7 @@ import fs from 'fs';
 import path from 'path';
 import type { Plugin, ResolvedConfig } from 'vite';
 import { LEGAL_OPERATOR, LEGAL_VERSION } from '../src/data/legalTexts';
-import { APP_STORE_URL, MASTER_SIGNUP_URL, PLAY_STORE_URL } from '../src/config/site';
+import { APP_STORE_URL, INSTAGRAM_URL, MASTER_SIGNUP_URL, PLAY_STORE_URL, TIKTOK_URL } from '../src/config/site';
 import { SIGNUP_CATEGORIES } from '../functions/src/masterSignupFields';
 
 type Lang = 'kz' | 'ru';
@@ -407,6 +407,10 @@ footer{border-top:1px solid var(--line);margin-top:40px;padding:36px 0 48px;colo
 footer .cols{display:grid;gap:24px}
 footer h2{font:700 15px/1.3 var(--body);color:var(--ink);margin:0 0 8px}
 footer p{margin:0 0 6px}
+.social{display:flex;gap:10px;margin-top:12px}
+.social a{display:grid;place-items:center;width:44px;height:44px;border-radius:12px;border:1.5px solid var(--line);color:var(--ink)}
+.social a:hover{border-color:var(--sky);color:var(--sky)}
+.social svg{width:22px;height:22px}
 footer .op{margin-top:14px;color:var(--ink);font-weight:600}
 footer nav a{display:block;padding:3px 0}
 
@@ -439,6 +443,15 @@ const PLAY_ICON =
 
 const APPLE_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.1 1-4 2.4-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.2-1.2 3-2.4.9-1.4 1.3-2.7 1.3-2.8 0 0-2.5-1-2.5-3.9ZM14 5.5c.7-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1.1.1 2.1-.6 2.8-1.4Z"/></svg>';
+
+const INSTAGRAM_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>';
+
+const TIKTOK_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.6 2h-3.3v13.2a2.9 2.9 0 1 1-2.9-2.9c.3 0 .6 0 .9.1V9a6.3 6.3 0 1 0 5.3 6.2V8.6a7.9 7.9 0 0 0 4.4 1.4V6.7a4.5 4.5 0 0 1-4.4-4.7Z"/></svg>';
+
+const MAIL_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg>';
 
 const store = (url: string, icon: string, get: string, soon: string) =>
   url
@@ -595,7 +608,11 @@ ${stores}
 <div>
 <h2>${esc(c.contactsTitle)}</h2>
 <p>WhatsApp: <a href="https://wa.me/${wa}">${esc(LEGAL_OPERATOR.whatsapp)}</a></p>
-<p><a href="mailto:${LEGAL_OPERATOR.email}">${esc(LEGAL_OPERATOR.email)}</a></p>
+<div class="social">
+<a href="${INSTAGRAM_URL}" rel="noopener" target="_blank" aria-label="Instagram @tapsyrapp" title="Instagram">${INSTAGRAM_ICON}</a>
+<a href="${TIKTOK_URL}" rel="noopener" target="_blank" aria-label="TikTok @tapsyrapp" title="TikTok">${TIKTOK_ICON}</a>
+<a href="mailto:${LEGAL_OPERATOR.email}" aria-label="${esc(LEGAL_OPERATOR.email)}" title="${esc(LEGAL_OPERATOR.email)}">${MAIL_ICON}</a>
+</div>
 </div>
 <nav aria-label="${esc(c.docsLabel)}">
 <a href="/privacy/">${esc(c.legal.privacy)}</a>
