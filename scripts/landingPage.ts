@@ -450,6 +450,9 @@ const INSTAGRAM_ICON =
 const TIKTOK_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.6 2h-3.3v13.2a2.9 2.9 0 1 1-2.9-2.9c.3 0 .6 0 .9.1V9a6.3 6.3 0 1 0 5.3 6.2V8.6a7.9 7.9 0 0 0 4.4 1.4V6.7a4.5 4.5 0 0 1-4.4-4.7Z"/></svg>';
 
+const WHATSAPP_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a9.9 9.9 0 0 0-8.5 15l-1.4 5 5.2-1.4A9.9 9.9 0 1 0 12 2Zm0 18.1a8.1 8.1 0 0 1-4.2-1.2l-.3-.2-3.1.8.8-3-.2-.3A8.1 8.1 0 1 1 12 20.1Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.3.8 3.2.6.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.2-.2-.4-.3Z"/></svg>';
+
 const MAIL_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg>';
 
@@ -607,8 +610,8 @@ ${stores}
 </div>
 <div>
 <h2>${esc(c.contactsTitle)}</h2>
-<p>WhatsApp: <a href="https://wa.me/${wa}">${esc(LEGAL_OPERATOR.whatsapp)}</a></p>
 <div class="social">
+<a href="https://wa.me/${wa}" rel="noopener" target="_blank" aria-label="WhatsApp ${esc(LEGAL_OPERATOR.whatsapp)}" title="WhatsApp">${WHATSAPP_ICON}</a>
 <a href="${INSTAGRAM_URL}" rel="noopener" target="_blank" aria-label="Instagram @tapsyrapp" title="Instagram">${INSTAGRAM_ICON}</a>
 <a href="${TIKTOK_URL}" rel="noopener" target="_blank" aria-label="TikTok @tapsyrapp" title="TikTok">${TIKTOK_ICON}</a>
 <a href="mailto:${LEGAL_OPERATOR.email}" aria-label="${esc(LEGAL_OPERATOR.email)}" title="${esc(LEGAL_OPERATOR.email)}">${MAIL_ICON}</a>
