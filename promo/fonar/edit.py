@@ -49,19 +49,20 @@ VOICE = HERE / "voice"
 
 # ------------------------------------------------------------------ the cut
 SEGMENTS = [
-    ("clip", "M1", 0.0, 3.4),        # 0  memory: the boy holds the flashlight for his father
-    ("clip", "T1", 0.0, 3.2),        # 1  today: the tools, the silent phone. «Әкем — 38 жыл ұста.»
-    ("clip", "P1", 0.0, 2.0),        # 2  the son fills in his father's profile
-    ("screen", "profile", 0.0, 2.8), # 3  "38" -> the preview card "38 жыл тәжірибе" -> publish
-    ("clip", "P2", 0.0, 4.2),        # 4  «Қой, балам, мақтану ұят.»
-    ("screen", "lock", 0.0, 1.6),    # 5  next morning: a job, with the dombra
-    ("clip", "N2", 0.0, 2.8),        # 6  he reads it; his eyes light up
-    ("clip", "N3", 0.4, 1.9),        # 7  the son nods
-    ("clip", "N4", 0.0, 2.4),        # 8  he lifts the old green toolbox, back straight
-    ("clip", "F1", 0.0, 4.4),        # 9  «Фонарьды ұста, балам.» — the young man takes the flashlight
-    ("clip", "F2", 0.0, 3.4),        # 10 the same frame as the memory
-    ("clip", "F3", 0.0, 2.4),        # 11 he smiles to himself
-    ("end", None, 0.0, 3.8),         # 12 end card
+    ("clip", "M1", 0.0, 3.0),        # 0  memory: the boy holds the flashlight for his father
+    ("clip", "T1", 0.0, 3.0),        # 1  today: the tools, the silent phone. «Әкем — 38 жыл ұста.»
+    ("clip", "P1", 0.0, 1.4),        # 2  the son fills in his father's profile
+    ("screen", "profile", 0.0, 2.6), # 3  "38" -> the preview card "38 жыл тәжірибе" -> publish
+    ("clip", "P1", 1.7, 2.6),        # 4  he looks up at his father, pleased with himself
+    ("clip", "P2", 0.0, 4.0),        # 5  «Қой, балам, мақтану ұят.»
+    ("screen", "lock", 0.0, 1.6),    # 6  next morning: a job, with the dombra
+    ("clip", "N2", 0.3, 2.7),        # 7  he reads it; his eyes light up
+    ("clip", "N3", 0.4, 1.8),        # 8  the son nods
+    ("clip", "N4", 0.0, 2.0),        # 9  he lifts the old green toolbox, back straight
+    ("clip", "F1", 0.0, 4.4),        # 10 «Фонарьды ұста, балам.» — the young man takes the flashlight
+    ("clip", "F2", 0.0, 2.8),        # 11 the same frame as the memory
+    ("clip", "F3", 0.0, 2.4),        # 12 he smiles to himself
+    ("end", None, 0.0, 3.5),         # 13 end card
 ]
 
 
@@ -81,17 +82,22 @@ def at(i, dt=0.0):
     return TIMES[i][0] + dt
 
 
-# Lines: (segment, offset, voice file, gain dB, tempo, treatment). Saken is off screen in M1 (only
-# his hands) and under the sink in F1 (face hidden); in P2 the line sits on his mouth movement.
+# Lines: (segment, offset, voice file, gain dB, tempo, treatment, cut). cut=None: the whole line trimmed
+# to its speech; cut=(a, b): that slice of the raw file (seconds), so one line can be laid on two
+# separate mouth movements. Saken is off screen in M1 (only his hands) and under the sink in F1 (face
+# hidden). In P2 Kling's mouth moves at 1.2-2.1 s (laughing, hand on his head) and 2.38-3.38 s (the
+# waving hand): «Қой, балам,» (speech at 0.25-1.6 s of the file) goes on the first, «мақтану ұят.»
+# (2.35-3.45 s) on the second; his lips close from 3.6 s.
 LINES = [
-    (0, 1.0, "m1_saken_Algenib", -1, 1.0, "memory"),
-    (4, 0.5, "p2_saken_Algenib", 0, 1.0, "dry"),
-    (9, 0.5, "f1_saken_Algenib", 0, 1.0, "cabinet"),
+    (0, 0.6, "m1_saken_Algenib", -1, 1.0, "memory", None),
+    (5, 0.55, "p2_saken_Algenib", 0, 1.0, "dry", (0.0, 1.75)),
+    (5, 2.23, "p2_saken_Algenib", 0, 1.0, "dry", (2.2, 3.55)),
+    (10, 0.25, "f1_saken_Algenib", 0, 1.0, "cabinet", None),
 ]
 SUBS = [
-    (at(0, 0.95), at(0, 2.4), "Держи фонарик, сынок."),
-    (at(4, 0.45), at(4, 4.0), "Брось, сынок, хвастаться стыдно."),
-    (at(9, 0.45), at(9, 2.2), "Держи фонарик, сынок."),
+    (at(0, 0.57), at(0, 2.15), "Держи фонарик, сынок."),
+    (at(5, 0.75), at(5, 3.6), "Брось, сынок, хвастаться стыдно."),
+    (at(10, 0.22), at(10, 1.95), "Держи фонарик, сынок."),
 ]
 
 _cache = {}
@@ -161,13 +167,16 @@ def memory_look(img):
     return Image.fromarray(np.clip(f, 0, 255).astype(np.uint8))
 
 
+PROFILE_STEPS = ((0.25, "exp_0"), (0.5, "exp_1"), (0.9, "exp_2"), (1.1, "exp_done"), (2.25, "preview"))
+
+
 class Screens:
     def __init__(self, folder):
         f = pathlib.Path(folder)
         self.s = {p.stem: Image.open(p).convert("RGB").resize((W, H), Image.BICUBIC) for p in f.glob("*.png")}
 
     def profile(self, dt):
-        for until, name in ((0.3, "exp_0"), (0.55, "exp_1"), (1.0, "exp_2"), (1.2, "exp_done"), (2.4, "preview")):
+        for until, name in PROFILE_STEPS:
             if dt < until:
                 return self.push(self.s[name], dt)
         return self.push(self.s["preview_press"], dt)
@@ -223,12 +232,19 @@ def frames(screens, end):
 bp, lp, hp, norm = E7.bp, E7.lp, E7.hp, E7.norm
 
 
-def voice(name, gain_db=0.0, tempo=1.0):
+def voice(name, gain_db=0.0, tempo=1.0, cut=None):
     af = ["-af", f"atempo={tempo}"] if tempo != 1.0 else []
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(VOICE / f"{name}.wav"), *af, "-f", "f32le", "-ac", "1",
                           "-ar", str(SR), "-"], check=True, capture_output=True).stdout
-    x = TN.tight(np.frombuffer(raw, dtype=np.float32).astype(np.float64))
-    return x / (np.abs(x).max() + 1e-9) * 0.9 * 10 ** (gain_db / 20)
+    x = np.frombuffer(raw, dtype=np.float32).astype(np.float64)
+    x = x / (np.abs(x).max() + 1e-9) * 0.9 * 10 ** (gain_db / 20)   # level of the whole line
+    if cut is None:
+        return TN.tight(x)
+    y = x[int(cut[0] * SR): int(cut[1] * SR)].copy()
+    fi, fo = int(0.02 * SR), int(0.06 * SR)
+    y[:fi] *= np.linspace(0, 1, fi)
+    y[-fo:] *= np.linspace(1, 0, fo)
+    return y
 
 
 def room_verb(x, size=0.25, wet=0.25, seed=5):
@@ -318,60 +334,61 @@ def mix():
     def span(i):
         return TIMES[i][1] - TIMES[i][0]
 
-    for i, dt, name, gain, tempo, kind in LINES:
-        x = treat(voice(name, gain, tempo), kind)
+    for i, dt, name, gain, tempo, kind, cut in LINES:
+        x = treat(voice(name, gain, tempo, cut), kind)
         assert at(i, dt) + len(x) / SR <= TIMES[i][1] + 0.3, f"{name} runs past its shot"
         put(vo, x, at(i, dt))
 
     # 0 memory: a night kitchen, the wrench, a television far away
     put(amb, E7.room(span(0)) * 0.05, at(0))
     put(amb, old_tv(span(0)) * 0.08, at(0))
-    for k, dt in enumerate((0.5, 1.7, 2.6)):
+    for k, dt in enumerate((0.55, 1.3, 2.25)):                 # the wrench turns
         put(sfx, clink(k), at(0, dt), 0.22)
 
-    # 1-4 today: only the wall clock, the cloth, the phone
-    a, b = at(1), at(5)
+    # 1-5 today: only the wall clock, the cloth, the phone
+    a, b = at(1), at(6)
     put(amb, clock(b - a) * 0.12, a)
     put(amb, E7.room(b - a, 21) * 0.04, a)
     for dt in (0.3, 1.1, 1.9):                                                          # the cloth
         swish = lp(np.random.default_rng(int(dt * 10)).normal(0, 1, int(0.35 * SR)), 1800)
         put(sfx, norm(swish) * np.sin(np.pi * np.linspace(0, 1, len(swish))), at(1, dt), 0.05)
-    t, k = at(2, 0.3), 0
+    t, k = at(2, 0.25), 0
     rng = np.random.default_rng(4)
-    while t < at(2, 1.9):
+    while t < at(2, 1.3):                                      # typing
         put(sfx, E7.tap(k), t, 0.16 * rng.uniform(0.6, 1.0))
         t += rng.uniform(0.1, 0.17)
         k += 1
-    put(sfx, E7.tap(60), at(3, 0.3), 0.2)                     # "3"
-    put(sfx, E7.tap(61), at(3, 0.55), 0.2)                    # "8"
-    put(sfx, AU.pop(900, 700, 0.08), at(3, 1.25), 0.15)       # the preview card: 38 жыл тәжірибе
-    put(sfx, E7.tap(62), at(3, 2.4), 0.22)                    # Профильді жариялау
-    put(sfx, AU.whoosh(0.22), at(3, 2.45), 0.14)
+    put(sfx, E7.tap(60), at(3, 0.25), 0.2)                    # "3"
+    put(sfx, E7.tap(61), at(3, 0.5), 0.2)                     # "8"
+    put(sfx, E7.tap(63), at(3, 1.05), 0.2)                    # Келесі қадам
+    put(sfx, AU.pop(900, 700, 0.08), at(3, 1.12), 0.15)       # the preview card: 38 жыл тәжірибе
+    put(sfx, E7.tap(62), at(3, 2.25), 0.22)                   # Профильді жариялау
+    put(sfx, AU.whoosh(0.22), at(3, 2.3), 0.14)
 
-    # 5 morning: the phone buzzes, the dombra: a job
-    put(sfx, buzz(2), at(5, 0.1), 0.25)
+    # 6 morning: the phone buzzes, the dombra: a job
+    put(sfx, buzz(2), at(6, 0.1), 0.25)
     dombra = AK.load(REPO / "public/sounds/dombra.wav")
-    put(sfx, dombra, at(5, 0.15), 0.75)
-    a, b = at(5), at(9)
+    put(sfx, dombra, at(6, 0.15), 0.75)
+    a, b = at(6), at(10)
     put(amb, E7.room(b - a, 31) * 0.05, a)
     birds = TN.river(b - a)  # soft outdoor air with a bird through the window
     put(amb, lp(birds, 4000) * 0.03, a)
 
-    # 8 the toolbox; one dombra string as he straightens up
-    put(sfx, AK.clank() * 0.6, at(8, 0.7), 0.18)
-    put(mus, AU.pluck(146.83, 2.5, bright=0.6, seed=7), at(8, 1.3), 0.5)
+    # 9 the toolbox leaves the floor; one dombra string as he straightens up
+    put(sfx, AK.clank() * 0.6, at(9, 0.45), 0.18)
+    put(mus, AU.pluck(146.83, 2.5, bright=0.6, seed=7), at(9, 1.1), 0.5)
 
-    # 9-11 the young man's flat: under the sink, the flashlight, the theme
-    a, b = at(9), at(12)
+    # 10-12 the young man's flat: under the sink, the flashlight, the theme
+    a, b = at(10), at(13)
     put(amb, E7.room(b - a, 41) * 0.05, a)
-    for k, dt in enumerate((0.2, 1.6, 2.4)):
-        put(sfx, lp(clink(10 + k), 3000), at(9, dt), 0.18)
-    put(sfx, E7.tap(70), at(9, 3.2), 0.3)                     # the flashlight switches on
-    for k, dt in enumerate((0.8, 2.1)):
-        put(sfx, clink(20 + k), at(10, dt), 0.2)
-    th0 = at(10, 0.0)
+    for k, dt in enumerate((0.05, 2.0, 2.9)):                 # the wrench under the sink
+        put(sfx, lp(clink(10 + k), 3000), at(10, dt), 0.18)
+    put(sfx, E7.tap(70), at(10, 4.2), 0.3)                    # the flashlight switches on
+    for k, dt in enumerate((0.9, 2.0)):
+        put(sfx, clink(20 + k), at(11, dt), 0.2)
+    th0 = at(10, 4.2)                                          # the theme starts with the light
     put(mus, warm_theme(TOTAL - th0), th0, 1.0)
-    put(sfx, dombra, at(12, 0.15), 0.8)
+    put(sfx, dombra, at(13, 0.15), 0.8)
 
     env = AU.duck_envelope(vo, floor=0.5)
     out = vo * 1.0 + sfx * 0.75 + amb * 0.85 + mus * 0.3 * env
