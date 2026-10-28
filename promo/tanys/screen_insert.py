@@ -24,7 +24,7 @@ MACHINE = OV.data_uri(HERE / "frames/machine_photo.jpg", "image/jpeg")
 CLOCK = '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'
 
 CSS = OV.CSS + """
-html,body{width:360px;height:640px;background:#f8fafc;overflow:hidden}
+html,body{width:320px;height:569px;background:#f8fafc;overflow:hidden}
 .status{height:26px;padding:0 16px;display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:600;color:#0f172a;background:#fff}
 .top{height:52px;padding:0 16px;display:flex;align-items:center;gap:10px;background:#fff;border-bottom:1px solid #e2e8f0}
 .top img{width:30px;height:30px;border-radius:9px}
@@ -108,7 +108,7 @@ def main():
         jobs[f"offers_{n}"] = offers(n)
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width": 360, "height": 640}, device_scale_factor=3)
+        page = browser.new_page(viewport={"width": 320, "height": 569}, device_scale_factor=3.375)
         for name, html in jobs.items():
             page.set_content(html)
             page.wait_for_load_state("networkidle")

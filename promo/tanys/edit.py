@@ -47,21 +47,21 @@ VOICE = HERE / "voice"
 # ------------------------------------------------------------------ the cut
 # (kind, source, in, out): kind "clip" = a Kling shot, "screen" = the phone insert, "end" = end card.
 SEGMENTS = [
-    ("clip", "S1", 0.0, 2.9),     # 0  hook: from inside the dead machine, he calls his brother-in-law
+    ("clip", "S1", 0.0, 3.0),     # 0  hook: from inside the dead machine, he calls his brother-in-law
     ("clip", "S2", 0.0, 3.0),     # 1  Yerbolat: "Бар! Қазір хабарласайын."
     ("clip", "C1", 1.0, 2.05),    # 2  the chain: toastmaster
     ("clip", "C2", 1.0, 2.0),     # 3  taxi driver
     ("clip", "S8", 0.6, 1.55),    # 4  day 1: laundry to his knees
     ("clip", "C3", 1.0, 1.95),    # 5  bazaar apa
-    ("clip", "C4", 1.0, 1.85),    # 6  mangal
-    ("clip", "S9", 0.8, 1.7),     # 7  day 3: up to his chest
+    ("clip", "C4", 1.2, 2.05),    # 6  mangal, waving the smoke away
+    ("clip", "S9", 0.8, 1.7),     # 7  day 3: up to his chest, rubbing his forehead
     ("clip", "C5", 1.0, 1.9),     # 8  fisherman
     ("clip", "S10", 0.0, 4.9),    # 9  day 5: buried; a stranger calls HIM for the guy
     ("clip", "S11", 0.0, 1.6),    # 10 he writes it in Tapsyr
     ("screen", None, 0.0, 3.0),   # 11 the request and the first offers
-    ("clip", "S12", 0.0, 3.0),    # 12 the master leaves, job done
+    ("clip", "S12", 0.0, 2.4),    # 12 the master leaves, job done
     ("clip", "S13", 0.2, 1.7),    # 13 Yerbolat, proud: "Таптым!"
-    ("clip", "S14", 0.0, 3.6),    # 14 he starts the machine: "Рақмет, жезде."
+    ("clip", "S14", 0.0, 3.9),    # 14 he shuts the door, starts the machine: "Рақмет, жезде."
     ("end", None, 0.0, 3.8),      # 15 end card
 ]
 
@@ -93,7 +93,7 @@ SUBS = [  # (start, end, text) — Russian subtitles of the Kazakh lines
     (at(8, 0.05), at(8, 0.9), "Есть знакомый!"),
     (at(9, 0.9), at(9, 4.9), "Здравствуйте, у вас нет знакомого мастера по стиральным машинам?"),
     (at(13, 0.25), at(13, 1.5), "Нашёл!"),
-    (at(14, 1.4), at(14, 3.0), "Спасибо, жезде."),
+    (at(14, 2.45), at(14, 3.85), "Спасибо, жезде."),
 ]
 DAYS = [(4, "1-күн", "День 1"), (7, "3-күн", "День 3"), (9, "5-күн", "День 5")]
 
@@ -164,6 +164,7 @@ class Screen:
 
     @staticmethod
     def zoom(img, z):
+        img = img.resize((W, H), Image.BICUBIC) if img.size != (W, H) else img
         w, h = int(W / z), int(H / z)
         return img.crop(((W - w) // 2, 0, (W - w) // 2 + w, h)).resize((W, H), Image.BICUBIC)
 
@@ -182,7 +183,7 @@ class Screen:
             img = self.st["offers_1"]
         else:
             img = self.st["offers_2"]
-        return self.zoom(img, 1.22 + 0.03 * dt / 3.0)
+        return self.zoom(img, 1.0 + 0.03 * dt / 3.0)
 
 
 class EndCard(AK.EndCard):
@@ -196,8 +197,8 @@ class EndCard(AK.EndCard):
     def frame(self, dt):
         cv = super().frame(dt + 0.0)
         q = R.prog(dt, 0.05, 0.4)
-        self.head.draw(cv, W / 2, 150, q, dy=18 * (1 - R.e_out(q)))
-        self.head_ru.draw(cv, W / 2, 252, R.prog(dt, 0.3, 0.6))
+        self.head.draw(cv, W / 2, 215, q, dy=18 * (1 - R.e_out(q)))
+        self.head_ru.draw(cv, W / 2, 312, R.prog(dt, 0.3, 0.6))
         return cv
 
 
@@ -361,17 +362,17 @@ def mix():
         put(vo, voice(name, -1), at(i, 0.08))
     put(vo, phone_eq(voice("x1_stranger")), at(9, 0.85), 0.9)
     put(vo, voice("e2_yerbolat_Fenrir"), at(13, 0.2))
-    put(vo, voice("a2_arman_Iapetus", -2), at(14, 1.35))
+    put(vo, voice("a2_arman_Iapetus", -2), at(14, 2.45))
 
     # places
     room = E7.room(TOTAL) * 0.05
-    for i in (0, 4, 7, 9, 10, 12, 14):
+    for i in (0, 4, 7, 9, 10, 11, 12, 14):
         a, b = int(TIMES[i][0] * SR), int(TIMES[i][1] * SR)
         amb[a:b] += room[a:b]
     put(sfx, error_beeps(span(0)), at(0), 0.35)
     put(amb, AK.hum(span(1)) * 0.8, at(1))
     put(sfx, AK.clank(), at(1, 0.4), 0.15)
-    put(amb, crowd(span(2), 1) * 0.12 + lp(AU.music(span(2) + 0.5), 700)[: int(span(2) * SR)] * 0.12, at(2))
+    put(amb, crowd(span(2), 1) * 0.12 + lp(AU.music(4.0), 700)[: len(crowd(span(2), 1))] * 0.12, at(2))
     put(amb, car(span(3)) * 0.12, at(3))
     put(amb, crowd(span(5), 2, 300, 3000, 5.0) * 0.14, at(5))
     put(amb, sizzle(span(6)) * 0.12, at(6))
@@ -385,21 +386,21 @@ def mix():
     t, k = at(10, 0.1), 0
     rng = np.random.default_rng(3)
     while t < at(11, 1.0):
-        put(sfx, E7.tap(k), t, 0.14 * rng.uniform(0.6, 1.0))
+        put(sfx, E7.tap(k), t, 0.2 * rng.uniform(0.6, 1.0))
         t += rng.uniform(0.08, 0.14)
         k += 1
     put(sfx, E7.tap(90), at(11, 1.0), 0.18)            # photo
     put(sfx, E7.tap(91), at(11, 1.3), 0.2)             # "Шешім табу"
     put(sfx, AU.whoosh(0.22), at(11, 1.35), 0.15)
-    put(sfx, AU.blip(), at(11, 2.0), 0.5)               # first offer: the only sound in the silence
-    put(sfx, AU.blip(), at(11, 2.45), 0.35)
+    put(sfx, AU.blip(), at(11, 2.0), 1.0)               # first offer: the only sound in the silence
+    put(sfx, AU.blip(), at(11, 2.45), 0.6)
     # the master leaves; the front door shuts; Arman's phone rings: the brother-in-law
-    put(sfx, E7.clack(5) * 0.8, at(12, 2.3), 0.3)
-    put(sfx, ring(1), at(12, 2.55), 0.25)
+    put(sfx, E7.clack(5) * 0.8, at(12, 1.9), 0.25)
+    put(sfx, ring(1)[: int(0.75 * SR)], at(12, 1.65), 0.25)
     # he shuts the machine and starts it
-    put(sfx, E7.clack(6), at(14, 0.55), 0.25)
-    put(sfx, AU.pop(1600, 1500, 0.06), at(14, 1.0), 0.15)
-    put(sfx, motor(span(14) - 1.0), at(14, 1.05), 0.3)
+    put(sfx, E7.clack(6), at(14, 1.45), 0.25)               # the door latches
+    put(sfx, AU.pop(1600, 1500, 0.06), at(14, 2.15), 0.15)  # start button
+    put(sfx, motor(span(14) - 2.2), at(14, 2.2), 0.3)
 
     # music: the dombra drives the chain; nothing on day five or in the app; warm plucks after
     m0, m1 = at(1, 1.0), at(9, 0.0)
@@ -407,11 +408,11 @@ def mix():
     w0 = at(12, 0.3)
     warm = AU.music(TOTAL - w0)
     warm[: int(0.6 * SR)] *= np.linspace(0, 1, int(0.6 * SR))
-    put(mus, warm, w0, 0.6)
+    put(mus, warm, w0, 1.0)
     put(sfx, AK.load(REPO / "public/sounds/dombra.wav"), at(15, 0.15), 0.8)
 
-    env = AU.duck_envelope(vo, floor=0.35)
-    out = vo * 1.0 + sfx * 0.7 + amb * 0.8 + mus * 0.22 * env
+    env = AU.duck_envelope(vo, floor=0.45)
+    out = vo * 1.0 + sfx * 0.7 + amb * 0.8 + mus * 0.32 * env
     return norm(out[: int(TOTAL * SR)], 0.95)
 
 
