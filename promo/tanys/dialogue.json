@@ -1,0 +1,19 @@
+{
+ "model": "gemini-3.8-flash-tts",
+ "lines": [
+  {"id": "a1_arman_Enceladus", "voice": "Enceladus", "style": "natural conversational Kazakh, a tired helpless man in his thirties asking his brother-in-law for help on the phone, slightly pleading, real and human, not theatrical", "kk": "Жезде, кір жуғыш машина бұзылды. Танысың бар ма?", "ru": "Жезде, стиральная машина сломалась. Есть знакомый?"},
+  {"id": "a1_arman_Iapetus", "voice": "Iapetus", "style": "natural conversational Kazakh, a tired helpless man in his thirties asking his brother-in-law for help on the phone, slightly pleading, real and human, not theatrical", "kk": "Жезде, кір жуғыш машина бұзылды. Танысың бар ма?", "ru": "Жезде, стиральная машина сломалась. Есть знакомый?"},
+  {"id": "e1_yerbolat_Fenrir", "voice": "Fenrir", "style": "natural Kazakh, a loud self-assured car mechanic, cheerful and very confident, quick, real and human", "kk": "Бар! Қазір хабарласайын.", "ru": "Есть! Сейчас позвоню."},
+  {"id": "e1_yerbolat_Orus", "voice": "Orus", "style": "natural Kazakh, a loud self-assured car mechanic, cheerful and very confident, quick, real and human", "kk": "Бар! Қазір хабарласайын.", "ru": "Есть! Сейчас позвоню."},
+  {"id": "c1_host", "voice": "Sadachbia", "style": "natural Kazakh, an excited wedding toastmaster answering the phone in a noisy hall, proud and quick, real and human", "kk": "Танысым бар!", "ru": "Есть знакомый!"},
+  {"id": "c2_taxi", "voice": "Alnilam", "style": "natural Kazakh, a taxi driver in his fifties answering the phone while driving, confident and quick, real and human", "kk": "Танысым бар!", "ru": "Есть знакомый!"},
+  {"id": "c3_apa", "voice": "Gacrux", "style": "natural Kazakh, an elderly grandmother at a bazaar stall answering the phone, lively and sure of herself, real and human", "kk": "Танысым бар!", "ru": "Есть знакомый!"},
+  {"id": "c4_mangal", "voice": "Zubenelgenubi", "style": "natural Kazakh, a shashlik cook at the grill answering the phone, casual and quick, real and human", "kk": "Танысым бар!", "ru": "Есть знакомый!"},
+  {"id": "c5_fisher", "voice": "Algenib", "style": "natural Kazakh, an old fisherman by the river answering the phone, gravelly and pleased, real and human", "kk": "Танысым бар!", "ru": "Есть знакомый!"},
+  {"id": "x1_stranger", "voice": "Sulafat", "style": "natural Kazakh, a polite stranger calling an unknown number, hopeful and a little formal, real and human", "kk": "Сәлеметсіз бе, кір жуғыш машина жөндейтін танысыңыз жоқ па?", "ru": "Здравствуйте, у вас нет знакомого мастера по стиральным машинам?"},
+  {"id": "e2_yerbolat_Fenrir", "voice": "Fenrir", "style": "natural Kazakh, triumphant and proud, as if he solved a big problem, short shout into the phone", "kk": "Таптым!", "ru": "Нашёл!"},
+  {"id": "e2_yerbolat_Orus", "voice": "Orus", "style": "natural Kazakh, triumphant and proud, as if he solved a big problem, short shout into the phone", "kk": "Таптым!", "ru": "Нашёл!"},
+  {"id": "a2_arman_Enceladus", "voice": "Enceladus", "style": "natural Kazakh, deadpan and tired with a little irony, quiet, real and human", "kk": "Рақмет, жезде.", "ru": "Спасибо, жезде."},
+  {"id": "a2_arman_Iapetus", "voice": "Iapetus", "style": "natural Kazakh, deadpan and tired with a little irony, quiet, real and human", "kk": "Рақмет, жезде.", "ru": "Спасибо, жезде."}
+ ]
+}
