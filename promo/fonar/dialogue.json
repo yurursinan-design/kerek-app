@@ -1,0 +1,11 @@
+{
+ "model": "gemini-3.8-flash-tts",
+ "lines": [
+  {"id": "m1_saken_Algenib", "voice": "Algenib", "style": "natural Kazakh, a father in his thirties at night, calm and warm, quietly asking his little son to hold the flashlight while he works under the sink, not looking up, real and human", "kk": "Фонарьды ұста, балам.", "ru": "Держи фонарик, сынок."},
+  {"id": "m1_saken_Charon", "voice": "Charon", "style": "natural Kazakh, a father in his thirties at night, calm and warm, quietly asking his little son to hold the flashlight while he works under the sink, not looking up, real and human", "kk": "Фонарьды ұста, балам.", "ru": "Держи фонарик, сынок."},
+  {"id": "p2_saken_Algenib", "voice": "Algenib", "style": "natural Kazakh, an elderly modest craftsman, embarrassed by praise, waving it off with a shy little laugh, soft and human", "kk": "Қой, балам, мақтану ұят.", "ru": "Брось, сынок, хвастаться стыдно."},
+  {"id": "p2_saken_Charon", "voice": "Charon", "style": "natural Kazakh, an elderly modest craftsman, embarrassed by praise, waving it off with a shy little laugh, soft and human", "kk": "Қой, балам, мақтану ұят.", "ru": "Брось, сынок, хвастаться стыдно."},
+  {"id": "f1_saken_Algenib", "voice": "Algenib", "style": "natural Kazakh, an elderly plumber lying under a sink, talking casually and warmly without looking, as if to his own son, a little muffled, real and human", "kk": "Фонарьды ұста, балам.", "ru": "Держи фонарик, сынок."},
+  {"id": "f1_saken_Charon", "voice": "Charon", "style": "natural Kazakh, an elderly plumber lying under a sink, talking casually and warmly without looking, as if to his own son, a little muffled, real and human", "kk": "Фонарьды ұста, балам.", "ru": "Держи фонарик, сынок."}
+ ]
+}
