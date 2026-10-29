@@ -8,6 +8,8 @@
 #   kzmirror is the Kazakhstan copy of personal data live: the mirror functions and their secrets,
 #            their runs and errors in the last 14 days, and how many documents and files Firestore,
 #            Cloud Storage and the Kazakhstan bucket each hold (counts and dates only, no data)
+#   whatsapp can the login-code number send: Meta's view of the number, the WhatsApp account and the
+#            login template (status fields only; the token is never printed)
 # Nothing is deployed or changed.
 name: Kontrol
 
@@ -35,7 +37,7 @@ jobs:
           MSG: ${{ github.event.head_commit.message }}
         run: |
           mode=$(printf '%s\n' "$MSG" | head -n1 | awk '{print $2}' | tr -cd 'a-z')
-          case "$mode" in gemini|keys|kzmirror) ;; *) echo "Bilinmeyen kontrol: $mode (gemini, keys, kzmirror)"; exit 1 ;; esac
+          case "$mode" in gemini|keys|kzmirror|whatsapp) ;; *) echo "Bilinmeyen kontrol: $mode (gemini, keys, kzmirror, whatsapp)"; exit 1 ;; esac
           echo "Kontrol: $mode"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
 
@@ -46,6 +48,22 @@ jobs:
           service_account: github-deploy@kerek-9d153.iam.gserviceaccount.com
 
       - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+      - name: WhatsApp numarası, hesabı ve şablon
+        if: steps.mode.outputs.mode == 'whatsapp'
+        run: |
+          K=$(gcloud secrets versions access latest --secret WHATSAPP_TOKEN --project "$FIREBASE_PROJECT_ID")
+          echo "::add-mask::$K"
+          G=https://graph.facebook.com/v23.0
+          get() { curl -sS -H "Authorization: Bearer $K" "$G/$1"; echo; }
+          echo "--- Numara (+7 707 249 2752)"
+          get "1362374956962825?fields=display_phone_number,verified_name,status,name_status,quality_rating,code_verification_status,account_mode,messaging_limit_tier,health_status"
+          echo "--- WhatsApp hesabı"
+          get "1793583535311086?fields=name,account_review_status,business_verification_status,health_status,currency,timezone_id"
+          echo "--- Giriş kodu şablonu"
+          get "1793583535311086/message_templates?name=tapsyr_login_code&fields=name,language,status,category,rejected_reason"
+          echo "--- Anahtarın izinleri"
+          get "me?fields=id,name"
+
       - name: Anahtar Secret Manager'da mı
         if: steps.mode.outputs.mode == 'gemini'
         run: |
