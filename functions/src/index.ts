@@ -34,6 +34,8 @@ export { checkUploadedFile } from './uploadCheck';
 export { adminLogBans, adminLogMasterFlags, adminLogReports, adminLogConfig, reportEvidence } from './adminLog';
 // Masters' pre-registration form on the website; see masterSignup.ts
 export { masterSignup } from './masterSignup';
+// AI answers on the WhatsApp support line; see supportBot.ts
+export { supportWebhook } from './supportBot';
 // Copy of all personal data in Kazakhstan (Law 94-V art. 12 p. 2); see kzMirror.ts
 export {
   kzMirrorUsers,
@@ -56,6 +58,8 @@ export {
   kzMirrorConsentHistory,
   kzMirrorAdminLog,
   kzMirrorMasterSignups,
+  kzMirrorSupportChats,
+  kzMirrorSupportMessages,
   kzMirrorFileSaved,
   kzMirrorFileDeleted,
 } from './kzMirror';

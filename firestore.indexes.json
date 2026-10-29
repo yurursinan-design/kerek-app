@@ -84,6 +84,18 @@
       "indexes": []
     },
     {
+      "collectionGroup": "supportChats",
+      "fieldPath": "expireAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
+      "collectionGroup": "supportMessages",
+      "fieldPath": "expireAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
       "collectionGroup": "masterSignups",
       "fieldPath": "expireAt",
       "ttl": true,
